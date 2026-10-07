@@ -58,6 +58,7 @@ live_image = (
         "flash-linear-attention",
     )
     .pip_install("torch==2.11.0", index_url="https://download.pytorch.org/whl/cu128")
+    .pip_install("torchvision==0.26.0", index_url="https://download.pytorch.org/whl/cu128")
     .pip_install(
         "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.4/flash_attn-2.8.3+cu128torch2.11-cp312-cp312-linux_x86_64.whl"
     )
