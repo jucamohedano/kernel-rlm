@@ -176,4 +176,46 @@ on Modal CPU using temporary fixtures, not the real dashboard database.
 
 The scripted CPU regression now verifies submission on the final allowed turn:
 two replies, two REPL executions, one verifier call. Reward is mocked. A real
-model CUDA submission and Verifiers V1 integration remain gates before GRPO.
+model CUDA submission and training-mode V1 integration remain gates before GRPO.
+
+### Verifiers V1 adapter (CPU lifecycle verified)
+
+`kernel_rlm_v1` exports a taskset and a harness without replacing the local fork
+or its legacy environment. The boundary follows the pinned Verifiers revision
+`b2e4e8157783b2c0dffc7821044c87f29f1c3ccf` from prime-rl v0.9.0.
+
+```text
+prime / V1 SingleAgentEnv
+  -> KernelTaskset.load(): manifest -> typed KernelData / KernelTask
+  -> KernelHarness.launch(): runtime starts kernel_rlm_v1.program
+     -> OpenAI-compatible requests through V1 interception
+     -> SubprocessReplBackend -> existing rlm_train.worker
+     -> submission.json (source + complete REPL transcript)
+  -> KernelTask.kernel_reward(): trusted verifier scores submitted source
+  -> Episode / Trace: intercepted messages, rewards, verification, submission
+```
+
+The bounded program is root-only: no sub-LLM endpoint is connected. It uses the
+fork's prompts, code-block parser, answer protocol, and persistent worker.
+The harness runtime must already contain `rlm`, `rlm_train`, `kernel_rlm_v1`, and
+their dependencies. The Modal check uses subprocesses **inside the Modal CPU
+container**, not the laptop. Subprocesses are not a security sandbox; production
+generated-code execution must remain separated from trainer credentials and
+trusted scoring. `NEEDS_CONTAINER=False` permits this explicit test runtime,
+not a claim that host execution is safe for arbitrary generated code.
+
+Run `modal run -m modal_app.v1_check` from this directory. The passing CPU test
+uses two scripted responses and a mocked verifier, checks final-turn submission,
+and saves `episode.json` and `requests.json` on `kernel-rlm-traces` under
+`v1-check/20261007T121404Z`. Its reward 0.8 is a fixture, not a model result.
+The first test failed only on the fixture's trailing-newline comparison; the
+corrected test matches the scorer's source stripping.
+
+This verifies V1 **evaluation** lifecycle compatibility. Training-client token
+IDs/logprobs, native prime batch construction, adapter synchronization, and the
+separate GPU verifier route still need verification before a GRPO launch. The
+current V1 scorer calls the local verifier function; the CPU test patches that
+boundary deliberately. Do not deploy this as an already-complete RL setup.
+The legacy package remains on its existing lock; the dedicated Modal V1 image
+pins the newer dependency. Lazy `rlm_train` exports let the standalone worker
+load without importing the removed legacy Verifiers environment API.
