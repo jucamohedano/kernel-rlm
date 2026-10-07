@@ -37,15 +37,17 @@ async def run(task: dict) -> None:
         await backend.start(proxy_url="http://127.0.0.1:1", rollout_id="bounded-v1")
         await backend.load_context(task["context"])
         for turn in range(limits["max_turns"]):
-            messages.append(
-                build_user_prompt(
-                    root_prompt=task["prompt"],
-                    iteration=turn,
-                    context_count=1,
-                    history_count=0,
-                    max_iterations=limits["max_turns"],
-                )
+            turn_prompt = build_user_prompt(
+                root_prompt=task["prompt"],
+                iteration=turn,
+                context_count=1,
+                history_count=0,
+                max_iterations=limits["max_turns"],
             )
+            if messages[-1]["role"] == "user":
+                messages[-1]["content"] += "\n\n" + turn_prompt["content"]
+            else:
+                messages.append(turn_prompt)
             response = await client.chat.completions.create(
                 model=os.environ["KERNEL_MODEL"],
                 messages=messages,
@@ -57,12 +59,11 @@ async def run(task: dict) -> None:
             for code in find_code_blocks(content):
                 result = await backend.execute(code)
                 record["repl_calls"] += 1
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": "REPL output:\n" + (result.stdout + result.stderr)[:20000],
-                    }
-                )
+                observation = "REPL output:\n" + (result.stdout + result.stderr)[:20000]
+                if messages[-1]["role"] == "user":
+                    messages[-1]["content"] += "\n\n" + observation
+                else:
+                    messages.append({"role": "user", "content": observation})
                 if result.final_answer is not None:
                     record["submission"] = result.final_answer
                     break
