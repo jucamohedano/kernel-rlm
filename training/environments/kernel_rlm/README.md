@@ -31,6 +31,36 @@ values, not tuned RL hyperparameters. A GPU update check is still required.
 
 ## Monitoring the first GRPO run
 
+### Current choice: Trackio, local viewer
+
+Prime-hosted logging is paused. Trackio is pinned to 0.40.0. The private live
+Hugging Face Space attempt returned 402: this account requires PRO for Gradio/Docker
+cpu-basic hosting. No subscription was purchased. Trackio's static Space export
+requires public data, so we do not use it for this private project.
+
+Run `modal run -m modal_app.trackio_smoke` for a CPU-only persistence test. It logs
+only `preflight/connectivity`, with `training=False`, under
+`kernel-rlm-traces:trackio-local`. The report is saved separately under
+`trackio-smoke/<run-id>/report.json`. No real training curves exist yet.
+The optional `--hosted` path attempts private Space setup and requires `HF_TOKEN`
+in the caller environment; the module currently passes that token via an ephemeral
+Modal Secret, not a command-line argument or tracked file.
+
+To download a snapshot and view it locally, from this directory:
+
+```bash
+mkdir -p logs/trackio-viewer
+modal volume get kernel-rlm-traces trackio-local/laguna-kernel-rlm.db logs/trackio-viewer/laguna-kernel-rlm.db
+TRACKIO_DIR="$PWD/logs/trackio-viewer" uv run --no-project --python 3.12 --with trackio==0.40.0 python -c 'import trackio; trackio.show(project="laguna-kernel-rlm", host="127.0.0.1", server_port=7860, share=False, open_browser=False, block_thread=True)'
+```
+
+Open http://127.0.0.1:7860. This is only a CPU metrics viewer, not a local model
+experiment. Stop the viewer before replacing an existing snapshot; use
+`modal volume get --force` for an intentional refresh. The snapshot does not update
+automatically. Preserve Modal logs as the source of truth. Integration with prime's
+trainer/orchestrator metrics is still pending; the W&B backend is not assumed to be
+drop-in compatible with Trackio.
+
 ### Hosted Prime access check
 
 Store `PRIME_API_KEY` in the Modal Secret `prime-intellect-secret` and
