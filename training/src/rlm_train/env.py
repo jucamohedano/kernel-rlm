@@ -9,8 +9,6 @@ from collections.abc import Callable
 from typing import Any
 
 import verifiers as vf
-from verifiers.types import Messages, State
-
 from rlm.utils.parsing import find_code_blocks
 from rlm.utils.prompts import (
     RLM_SYSTEM_PROMPT,
@@ -18,6 +16,8 @@ from rlm.utils.prompts import (
     build_rlm_system_prompt,
     build_user_prompt,
 )
+from verifiers.types import Messages, State, TrajectoryStep
+
 from rlm_train.proxy import ClientHandle, SubLLMProxy
 from rlm_train.repl.base import ExecResult, ReplBackend
 from rlm_train.repl.subprocess import SubprocessReplBackend
@@ -160,9 +160,13 @@ class RLMTrainEnv(vf.MultiTurnEnv):
         state["rlm_history"].append(user_iter0)
         state["prompt"] = list(state["rlm_history"])
 
-    async def get_prompt_messages(self, state: State) -> Messages:
+    async def add_trajectory_step(self, state: State, trajectory_step: TrajectoryStep) -> None:
+        await super().add_trajectory_step(state, trajectory_step)
+        await self.process_pending_repl(state)
+
+    async def process_pending_repl(self, state: State) -> None:
         if not state["trajectory"]:
-            return list(state["prompt"])
+            return
 
         history: list = state["rlm_history"]
         backend: ReplBackend = state["rlm_backend"]
@@ -207,8 +211,16 @@ class RLMTrainEnv(vf.MultiTurnEnv):
                 state["final_answer"] = final_from_answer
                 state["final_env_response"] = repl_msgs
                 state["rlm_final_repl_outputs"] = repl_msgs
-                return _normalize_for_api(history)
+                return
 
+    async def get_prompt_messages(self, state: State) -> Messages:
+        if not state["trajectory"]:
+            return list(state["prompt"])
+        await self.process_pending_repl(state)
+        history = state["rlm_history"]
+        if state.get("rlm_final_answer") is not None:
+            return _normalize_for_api(history)
+        n_processed = int(state.get("rlm_n_processed") or 0)
         user_iter = self._build_user_iter(
             root_prompt=state.get("rlm_root_prompt"),
             iteration=n_processed,

@@ -60,7 +60,7 @@ async def run_scripted_rollout(*, cuda: bool, trace_path: Path) -> dict[str, Any
     port = runner.addresses[0][1]
     os.environ["KERNEL_SMOKE_KEY"] = "scripted-no-external-api"
     environment = kernel_env.load_environment(
-        manifest_path="/opt/kernel_rlm/vector_add.jsonl", max_iterations=4
+        manifest_path="/opt/kernel_rlm/vector_add.jsonl", max_iterations=2
     )
     environment.timeout_seconds = 60
     fixture = {
