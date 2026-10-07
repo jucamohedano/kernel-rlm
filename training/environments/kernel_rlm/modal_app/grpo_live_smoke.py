@@ -57,7 +57,9 @@ live_image = (
         "ring-flash-attn>=0.1.8",
         "flash-linear-attention",
     )
-    .run_commands("python -m pip install --no-deps prime==0.6.19 modelexpress==0.3.0")
+    .run_commands(
+        "python -m pip install --no-deps prime==0.6.19 prime-sandboxes==0.4.2 modelexpress==0.3.0"
+    )
     .pip_install("torch==2.11.0", index_url="https://download.pytorch.org/whl/cu128")
     .pip_install("torchvision==0.26.0", index_url="https://download.pytorch.org/whl/cu128")
     .pip_install(
