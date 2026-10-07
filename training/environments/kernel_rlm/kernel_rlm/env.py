@@ -25,13 +25,18 @@ _TASK_INSTRUCTION = (
     "submission.\n\n"
     "The verifier runs the submitted source in a fresh process, checks it on "
     "new inputs, and benchmarks it only after correctness passes.\n\n"
-    "Submit the complete Python source code as your final answer."
+    "The REPL is CPU-only: use it to inspect context and construct a Python source "
+    "string, not to compile or run CUDA. A separate GPU verifier compiles and "
+    "executes your submitted source after submission. Lack of CUDA in this REPL "
+    "does not prevent submission. Do not call sub-LLMs for this bounded task. "
+    "After inspecting context, set answer['content'] to the complete standalone "
+    "Python source string and answer['ready'] = True inside a ```repl``` block. "
+    "Defining cuda_forward in REPL globals alone is not a submission. "
+    "Submit before the final allowed turn ends."
 )
 
 
-def _build_dataset(
-    *, manifest_path: str, max_tasks: int | None = None, **kwargs: Any
-) -> Dataset:
+def _build_dataset(*, manifest_path: str, max_tasks: int | None = None, **kwargs: Any) -> Dataset:
     """Turn a JSONL manifest into rows consumed by RLMTrainEnv."""
     rows = {"example_id": [], "prompt": [], "answer": [], "info": []}
     with open(manifest_path, encoding="utf-8") as manifest_file:
@@ -98,11 +103,7 @@ async def score(info: Any, state: Any, **_kwargs: Any) -> float:
     if trace_dir:
         output_dir = pathlib.Path(trace_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        rollout_id = (
-            state.get("rlm_rollout_id")
-            or state.get("trajectory_id")
-            or uuid.uuid4().hex
-        )
+        rollout_id = state.get("rlm_rollout_id") or state.get("trajectory_id") or uuid.uuid4().hex
         record = {
             "rollout_id": rollout_id,
             "example_id": state.get("example_id"),
@@ -150,9 +151,7 @@ async def verify_max_diff(state: Any) -> float:
     return round(float(max_diff), 6) if max_diff is not None else -1.0
 
 
-def load_environment(
-    *, manifest_path: str, max_iterations: int = 8, **kwargs: Any
-) -> Any:
+def load_environment(*, manifest_path: str, max_iterations: int = 8, **kwargs: Any) -> Any:
     """Wire the CUDA task dataset and scorer into the local RLM environment."""
     dataset = _build_dataset(manifest_path=manifest_path, **kwargs)
     rubric = rlm_train.RLMTrainRubric(correctness=score, weight=1.0)
@@ -166,4 +165,5 @@ def load_environment(
         max_iterations=max_iterations,
         rubric=rubric,
         sub_sampling_args={"max_tokens": 512},
+        orchestrator=False,
     )
