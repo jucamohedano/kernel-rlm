@@ -3,7 +3,7 @@
 
 max_steps = 1
 seq_len = 8192
-output_dir = "outputs"
+output_dir = "/traces/outputs"
 
 [deployment]
 num_train_gpus = 1
