@@ -16,7 +16,10 @@ reports = modal.Volume.from_name("kernel-rlm-traces")
 
 @app.function(
     image=modal.Image.debian_slim(python_version="3.12"),
-    secrets=[modal.Secret.from_name("prime-intellect-secret")],
+    secrets=[
+        modal.Secret.from_name("prime-intellect-secret"),
+        modal.Secret.from_name("prime-intellect-team-id-secret"),
+    ],
     volumes={"/reports": reports},
     cpu=0.25,
     memory=256,

@@ -33,8 +33,8 @@ values, not tuned RL hyperparameters. A GPU update check is still required.
 
 ### Hosted Prime access check
 
-Store credentials in the Modal Secret `prime-intellect-secret`, with
-`PRIME_API_KEY` and, when applicable, `PRIME_TEAM_ID`. Run
+Store `PRIME_API_KEY` in the Modal Secret `prime-intellect-secret` and
+`PRIME_TEAM_ID` in `prime-intellect-team-id-secret`. Both are attached to the check. Run
 `modal run -m modal_app.prime_monitoring` from this directory before any paid
 training launch. It uses CPU only and follows the external-run endpoints used by
 our pinned prime monitor. If authorized, it creates a clearly labeled connectivity
@@ -50,6 +50,11 @@ field alone is not established as the cause of the 401. Sample upload is not cov
 by this connectivity check and will need validation with the first saved episode.
 
 ### Curves and traces
+
+The subsequent two-secret check loaded both fields and authenticated successfully
+(200), but registration returned 403, `You are not a member of this team`.
+Check that the supplied team ID belongs to the account owning the API key before
+investigating external-run allowlisting. No platform run was created.
 
 Latest retry (2026-10-07) supersedes the initial authentication diagnosis:
 Bearer-only `GET /api/v1/user/whoami` succeeded (200); external-run registration
