@@ -11,10 +11,18 @@ from uuid import uuid4
 import modal
 
 from .attention_lora import MODEL_ID, PRIME_REVISION, REVISION, models
-from .kernel_smoke import APP_ROOT
 from .native_lora_smoke import PRIME_SOURCE
 from .rollout_smoke import traces
 
+_module_dir = Path(__file__).resolve().parent
+APP_ROOT = _module_dir.parent if (_module_dir.parent / "configs").exists() else Path("/root")
+REPO_ROOT = APP_ROOT.parents[2] if (APP_ROOT.parents[2] / "rlm").exists() else Path("/root")
+RLM_SOURCE = REPO_ROOT / "rlm" if (REPO_ROOT / "rlm").exists() else Path("/root/rlm")
+RLM_TRAIN_SOURCE = (
+    REPO_ROOT / "training" / "src" / "rlm_train"
+    if (REPO_ROOT / "training" / "src" / "rlm_train").exists()
+    else Path("/root/rlm_train")
+)
 CONFIG = APP_ROOT / "configs" / "grpo_smoke.toml"
 live_image = (
     modal.Image.from_registry(
@@ -46,13 +54,13 @@ live_image = (
         "flash-linear-attention",
     )
     .add_local_dir(
-        APP_ROOT.parents[2] / "rlm",
+        RLM_SOURCE,
         "/root/rlm",
         copy=True,
         ignore=["**/__pycache__/**"],
     )
     .add_local_dir(
-        APP_ROOT.parents[2] / "training" / "src" / "rlm_train",
+        RLM_TRAIN_SOURCE,
         "/root/rlm_train",
         copy=True,
         ignore=["**/__pycache__/**"],
