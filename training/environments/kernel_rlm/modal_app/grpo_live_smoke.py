@@ -51,6 +51,7 @@ live_image = (
         "uvloop>=0.21.0",
         "https://github.com/PrimeIntellect-ai/router/releases/download/v0.2.0/vllm_router-0.2.0-cp38-abi3-manylinux_2_28_x86_64.whl",
         "wandb>=0.21.0",
+        "wandb-workspaces>=0.4.3",
         "https://github.com/PrimeIntellect-ai/prime-rl/releases/download/v0.6.0/torchao-0.17.0+git02105d46c-cp312-cp312-linux_x86_64.whl",
         "https://github.com/pytorch/torchtitan/archive/23e4dfc.tar.gz",
         "https://github.com/samsja/dion/archive/d891eeb.tar.gz",
