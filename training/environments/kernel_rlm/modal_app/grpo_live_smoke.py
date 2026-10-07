@@ -16,7 +16,7 @@ from .rollout_smoke import traces
 
 _module_dir = Path(__file__).resolve().parent
 APP_ROOT = _module_dir.parent if (_module_dir.parent / "configs").exists() else Path("/root")
-REPO_ROOT = APP_ROOT.parents[2] if (APP_ROOT.parents[2] / "rlm").exists() else Path("/root")
+REPO_ROOT = next((parent for parent in APP_ROOT.parents if (parent / "rlm").exists()), Path("/root"))
 RLM_SOURCE = REPO_ROOT / "rlm" if (REPO_ROOT / "rlm").exists() else Path("/root/rlm")
 RLM_TRAIN_SOURCE = (
     REPO_ROOT / "training" / "src" / "rlm_train"
