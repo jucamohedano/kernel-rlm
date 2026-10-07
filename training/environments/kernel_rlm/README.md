@@ -139,5 +139,41 @@ Watch these panels:
   cost labeled separately from Modal's billed usage.
 
 Prime supplies standard training metrics; CUDA outcome metrics and group diagnostics
-must be checked in our eventual V1 integration. None of these training curves exists
-yet: optimizer checks and rollout-only runs are not training runs.
+must be checked in our eventual V1 integration. GRPO curves do not exist yet:
+optimizer checks and rollout-only runs are not GRPO training runs.
+
+### Actual metrics in Trackio
+
+Trackio 0.40.0 is the selected local viewer; Prime hosted logging is paused.
+`modal_app.native_gpu_smoke` saves measured `metrics.jsonl` alongside its report.
+The 2026-10-07 Muon check passed one update on a 32-random-token cross-entropy
+fixture: loss 4.0625, pre-clipping gradient norm 17.625, 160 adapter tensors
+changed, and 67.56 GB peak reserved GPU memory. This validates optimizer
+execution, not kernel quality or GRPO learning.
+
+From this directory, export a completed snapshot on Modal CPU:
+
+```bash
+modal run -m modal_app.trackio_export \
+  --relative-path native-gpu/20261007T114150Z-bb860d098b55/metrics.jsonl \
+  --run-name muon-update-20261007T114150Z \
+  --scope "One real Muon update on random-token CE fixture; not GRPO"
+modal volume get --force kernel-rlm-traces \
+  trackio-local/laguna-kernel-rlm.db logs/trackio-viewer/laguna-kernel-rlm.db
+```
+
+Stop the local viewer before replacing its database. Restart with `TRACKIO_DIR`
+set to the absolute `logs/trackio-viewer` directory and
+`trackio.show(project="laguna-kernel-rlm", host="127.0.0.1",
+server_port=7860, share=False)` in the pinned Trackio environment.
+
+The importer separates trainer/orchestrator producers into different runs. Its
+x-axis is log-row sequence; `source/training_step` retains the original step,
+preserving multiple records at the same optimizer step. This is a snapshot
+bridge, not live logging or an integrated GRPO launcher. Export each completed
+snapshot once with a distinct name. `modal_app.trackio_bridge_check` tests it
+on Modal CPU using temporary fixtures, not the real dashboard database.
+
+The scripted CPU regression now verifies submission on the final allowed turn:
+two replies, two REPL executions, one verifier call. Reward is mocked. A real
+model CUDA submission and Verifiers V1 integration remain gates before GRPO.
