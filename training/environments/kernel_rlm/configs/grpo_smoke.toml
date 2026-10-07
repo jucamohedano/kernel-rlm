@@ -15,6 +15,9 @@ name = "poolside/Laguna-XS.2"
 [monitors.file]
 path = "metrics.jsonl"
 
+[monitors.wandb]
+project = "laguna-kernel-rlm"
+
 [trainer.model.lora]
 rank = 8
 alpha = 16

@@ -50,7 +50,7 @@ live_image = (
         "tenacity>=8.2.0",
         "uvloop>=0.21.0",
         "https://github.com/PrimeIntellect-ai/router/releases/download/v0.2.0/vllm_router-0.2.0-cp38-abi3-manylinux_2_28_x86_64.whl",
-        "wandb>=0.21.0",
+        "wandb>=0.21.0,<0.27.1",
         "wandb-workspaces>=0.4.3",
         "https://github.com/PrimeIntellect-ai/prime-rl/releases/download/v0.6.0/torchao-0.17.0+git02105d46c-cp312-cp312-linux_x86_64.whl",
         "https://github.com/pytorch/torchtitan/archive/23e4dfc.tar.gz",
@@ -106,7 +106,6 @@ live_image = (
             "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
             "MAX_JOBS": "2",
             "RLM_TRAIN_EXEC_TIMEOUT_S": "30",
-            "WANDB_MODE": "disabled",
         }
     )
 )
@@ -115,6 +114,7 @@ app = modal.App("kernel-rlm-grpo-live-smoke")
 
 @app.function(
     image=live_image,
+    secrets=[modal.Secret.from_name("wandb-secret")],
     volumes={"/models": models, "/traces": traces},
     gpu="A100-80GB:2",
     cpu=16,
