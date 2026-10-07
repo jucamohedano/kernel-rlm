@@ -40,6 +40,7 @@ live_image = (
         "beartype>=0.21.0",
         "jaxtyping>=0.3.2",
         "msgspec>=0.18",
+        "nvidia-ml-py>=12.575.51",
         "openai>=1.106.1",
         "orjson>=3.11.0",
         "psutil>=7.0.0",
