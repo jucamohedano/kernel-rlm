@@ -48,6 +48,7 @@ live_image = (
         "setproctitle>=1.3.0",
         "tenacity>=8.2.0",
         "uvloop>=0.21.0",
+        "wandb>=0.21.0",
         "https://github.com/PrimeIntellect-ai/prime-rl/releases/download/v0.6.0/torchao-0.17.0+git02105d46c-cp312-cp312-linux_x86_64.whl",
         "https://github.com/pytorch/torchtitan/archive/23e4dfc.tar.gz",
         "https://github.com/samsja/dion/archive/d891eeb.tar.gz",
@@ -87,6 +88,7 @@ live_image = (
             "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
             "MAX_JOBS": "2",
             "RLM_TRAIN_EXEC_TIMEOUT_S": "30",
+            "WANDB_MODE": "disabled",
         }
     )
 )
