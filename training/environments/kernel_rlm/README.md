@@ -31,6 +31,26 @@ values, not tuned RL hyperparameters. A GPU update check is still required.
 
 ## Monitoring the first GRPO run
 
+### Hosted Prime access check
+
+Store credentials in the Modal Secret `prime-intellect-secret`, with
+`PRIME_API_KEY` and, when applicable, `PRIME_TEAM_ID`. Run
+`modal run -m modal_app.prime_monitoring` from this directory before any paid
+training launch. It uses CPU only and follows the external-run endpoints used by
+our pinned prime monitor. If authorized, it creates a clearly labeled connectivity
+record, logs one preflight metric (not a training loss/reward), and closes the record.
+It saves a sanitized result to `kernel-rlm-traces:prime-monitoring/<run-id>/report.json`
+and downloads a copy to `logs/prime-monitoring/<run-id>/report.json`.
+
+The 2026-10-07 check found the API key in the Secret, but external-run registration
+returned HTTP 401, `Invalid token`. There was no surrounding whitespace and no
+`PRIME_TEAM_ID`. No platform run was created and no GPU was allocated. Correcting
+authentication is necessary before testing team authorization; the missing team
+field alone is not established as the cause of the 401. Sample upload is not covered
+by this connectivity check and will need validation with the first saved episode.
+
+### Curves and traces
+
 The training launcher is not ready yet: this package still returns the legacy
 `RLMTrainEnv`, while pinned prime-rl consumes Verifiers V1 tasksets and harnesses.
 The previous model rollout also failed to submit a final answer. Resolve these
