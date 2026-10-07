@@ -1,1 +1,0 @@
-"""Prime CLI compatibility subpackage."""
