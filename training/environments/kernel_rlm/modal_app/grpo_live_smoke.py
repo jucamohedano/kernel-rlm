@@ -78,6 +78,8 @@ live_image = (
         "/root/prime_rl",
         copy=True,
     )
+    .add_local_dir(PRIME_SOURCE, "/root/prime_source", copy=True)
+    .run_commands("python -m pip install --no-deps -e /root/prime_source")
     .add_local_dir(APP_ROOT / "kernel_rlm_v1", "/root/kernel_rlm_v1", copy=True)
     .add_local_dir(APP_ROOT / "kernel_rlm", "/root/kernel_rlm", copy=True)
     .add_local_dir(CONFIG.parent, "/root/configs", copy=True)
