@@ -51,6 +51,13 @@ by this connectivity check and will need validation with the first saved episode
 
 ### Curves and traces
 
+Latest retry (2026-10-07) supersedes the initial authentication diagnosis:
+Bearer-only `GET /api/v1/user/whoami` succeeded (200); external-run registration
+returned 403, `External training runs are only enabled for allowlisted teams`.
+The secret still has no team ID. The key is valid; an intended, enabled team must
+be selected before hosted logging can work. The probe now checks identity before
+registration and does not expose identity response data. No platform run was created.
+
 The training launcher is not ready yet: this package still returns the legacy
 `RLMTrainEnv`, while pinned prime-rl consumes Verifiers V1 tasksets and harnesses.
 The previous model rollout also failed to submit a final answer. Resolve these

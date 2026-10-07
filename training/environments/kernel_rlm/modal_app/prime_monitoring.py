@@ -42,16 +42,17 @@ def verify(run_id: str) -> dict[str, Any]:
     destination = Path("/reports/prime-monitoring") / run_id / "report.json"
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    def request(method: str, path: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    def request(
+        method: str, path: str, payload: dict[str, Any] | None = None
+    ) -> tuple[int, dict[str, Any]]:
         connection = http.client.HTTPSConnection("api.primeintellect.ai", timeout=20)
         try:
             connection.request(
                 method,
-                "/api/v1/rft" + path,
-                body=json.dumps(payload),
+                path,
+                body=json.dumps(payload) if payload is not None else None,
                 headers={
                     "Authorization": f"Bearer {api_key}",
-                    "x-api-key": api_key,
                     "Content-Type": "application/json",
                 },
             )
@@ -65,6 +66,11 @@ def verify(run_id: str) -> dict[str, Any]:
         if not api_key:
             report["reason"] = "PRIME_API_KEY missing from Modal Secret"
             return report
+        status, _identity = request("GET", "/api/v1/user/whoami")
+        report["identity_http_status"] = status
+        if status != 200:
+            report["reason"] = "Read-only identity authentication failed; registration skipped"
+            return report
         payload = {
             "name": f"kernel-rlm-monitoring-preflight-{run_id}",
             "base_model": "poolside/Laguna-XS.2",
@@ -73,7 +79,7 @@ def verify(run_id: str) -> dict[str, Any]:
         }
         if team_id:
             payload["team_id"] = team_id
-        status, body = request("POST", "/external-runs", payload)
+        status, body = request("POST", "/api/v1/rft/external-runs", payload)
         report["registration_http_status"] = status
         if status != 201:
             report["reason"] = "Platform rejected external-run registration"
@@ -94,7 +100,7 @@ def verify(run_id: str) -> dict[str, Any]:
         try:
             status, _body = request(
                 "POST",
-                "/metrics",
+                "/api/v1/rft/metrics",
                 {"run_id": platform_id, "metrics": {"preflight/connectivity": 1}},
             )
             report["metrics_http_status"] = status
@@ -102,7 +108,7 @@ def verify(run_id: str) -> dict[str, Any]:
         finally:
             status, _body = request(
                 "PUT",
-                f"/external-runs/{platform_id}/status",
+                f"/api/v1/rft/external-runs/{platform_id}/status",
                 {"status": "completed" if metric_ok else "failed"},
             )
             report["finalization_http_status"] = status
