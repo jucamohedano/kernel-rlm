@@ -219,3 +219,27 @@ boundary deliberately. Do not deploy this as an already-complete RL setup.
 The legacy package remains on its existing lock; the dedicated Modal V1 image
 pins the newer dependency. Lazy `rlm_train` exports let the standalone worker
 load without importing the removed legacy Verifiers environment API.
+
+### Real-model submission and verifier ordering
+
+The frozen-model episode `20261007T121226Z-7f429dc77f13` reached submission on
+turn 3 after repairing a Python quoting error. Its saved result is **failed**:
+reward 0.1 (submission credit), no compilation/correctness, one verifier call,
+231.4 seconds episode time, and zero training updates. Full prompts, replies,
+and submitted source live in `model-rollout/<run-id>/trace.json` on the traces
+volume and in local logs.
+
+The verifier incorrectly required a build during import, before lazy compilation
+inside `cuda_forward` could happen. It now checks after the first invocation,
+while still requiring an extension call for every trial. Run
+`modal run -m modal_app.verifier_contract` for the Modal CPU regression: mocked
+CUDA tests eager/lazy ordering and rejects a pure-PyTorch bypass. This is not a
+security guarantee or real CUDA correctness test. The generated submission
+also uses unsupported `keep_debug_handles=True`; no further GPU run was spent
+on this known-invalid source. The original failed measurement stays unchanged.
+
+Export completed frozen-model trace metrics with `modal_app.trackio_export`
+using `--rollout-trace --relative-path model-rollout/<run-id>/trace.json
+--run-name <unique-name>`. These use a separate `--evaluation` run suffix and
+an explicit no-training scope. Keep raw reward separate from correctness:
+submission credit does not mean the CUDA task passed.
