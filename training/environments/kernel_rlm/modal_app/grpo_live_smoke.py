@@ -20,7 +20,6 @@ live_image = (
     modal.Image.from_registry(
         "vllm/vllm-openai:v0.26.0",
         add_python="3.12",
-        setup_dockerfile_commands=["RUN ln -s /usr/bin/python3 /usr/local/bin/python"],
     )
     .entrypoint([])
     .pip_install(
