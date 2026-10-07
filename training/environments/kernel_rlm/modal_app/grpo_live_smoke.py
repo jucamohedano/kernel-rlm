@@ -65,7 +65,10 @@ live_image = (
     .pip_install(
         "vllm @ https://github.com/vllm-project/vllm/releases/download/v0.26.0/vllm-0.26.0+cu129-cp38-abi3-manylinux_2_28_x86_64.whl"
     )
-    .pip_install("torchaudio==2.11.0", index_url="https://download.pytorch.org/whl/cu128")
+    .run_commands(
+        "python -m pip install --force-reinstall --no-deps torchaudio==2.11.0 "
+        "--index-url https://download.pytorch.org/whl/cu128"
+    )
     .pip_install("nvidia-cutlass-dsl==4.5.2")
     .add_local_dir(
         RLM_SOURCE,
