@@ -32,7 +32,6 @@ live_image = (
     .entrypoint([])
     .pip_install(
         "prime-pydantic-config>=0.4.3",
-        "prime==0.6.19",
         "verifiers==0.3.1",
         "renderers==0.1.11",
         "datasets>=4.0.0",
@@ -42,7 +41,6 @@ live_image = (
         "jaxtyping>=0.3.2",
         "msgspec>=0.18",
         "nvidia-ml-py>=12.575.51",
-        "modelexpress==0.3.0",
         "openai>=1.106.1",
         "orjson>=3.11.0",
         "psutil>=7.0.0",
@@ -59,6 +57,7 @@ live_image = (
         "ring-flash-attn>=0.1.8",
         "flash-linear-attention",
     )
+    .run_commands("python -m pip install --no-deps prime==0.6.19 modelexpress==0.3.0")
     .pip_install("torch==2.11.0", index_url="https://download.pytorch.org/whl/cu128")
     .pip_install("torchvision==0.26.0", index_url="https://download.pytorch.org/whl/cu128")
     .pip_install(
