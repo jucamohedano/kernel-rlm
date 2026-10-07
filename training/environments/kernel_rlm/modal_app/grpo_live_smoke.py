@@ -54,6 +54,10 @@ live_image = (
         "ring-flash-attn>=0.1.8",
         "flash-linear-attention",
     )
+    .pip_install("torch==2.11.0", index_url="https://download.pytorch.org/whl/cu128")
+    .pip_install(
+        "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.4/flash_attn-2.8.3+cu128torch2.11-cp312-cp312-linux_x86_64.whl"
+    )
     .add_local_dir(
         RLM_SOURCE,
         "/root/rlm",
