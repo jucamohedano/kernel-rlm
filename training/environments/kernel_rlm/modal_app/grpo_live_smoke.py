@@ -57,9 +57,7 @@ live_image = (
         "ring-flash-attn>=0.1.8",
         "flash-linear-attention",
     )
-    .run_commands(
-        "python -m pip install --no-deps prime==0.6.19 prime-sandboxes==0.4.2 modelexpress==0.3.0"
-    )
+    .run_commands("python -m pip install --no-deps modelexpress==0.3.0")
     .pip_install("torch==2.11.0", index_url="https://download.pytorch.org/whl/cu128")
     .pip_install("torchvision==0.26.0", index_url="https://download.pytorch.org/whl/cu128")
     .pip_install(
@@ -96,6 +94,7 @@ live_image = (
     .add_local_dir(APP_ROOT / "kernel_rlm_v1", "/root/kernel_rlm_v1", copy=True)
     .add_local_dir(APP_ROOT / "kernel_rlm", "/root/kernel_rlm", copy=True)
     .add_local_dir(CONFIG.parent, "/root/configs", copy=True)
+    .add_local_dir(_module_dir / "prime_cli_shim", "/root/prime_cli", copy=True)
     .env(
         {
             "PYTHONPATH": "/root",
