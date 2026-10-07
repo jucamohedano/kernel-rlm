@@ -105,10 +105,6 @@ _RUNNER = textwrap.dedent(
         model_class = reference.Model
         get_inputs = reference.get_inputs
         get_init_inputs = getattr(reference, "get_init_inputs", lambda: [])
-        if not extension_builds:
-            raise ValueError(
-                "submission must build a CUDA extension with torch.utils.cpp_extension.load_inline"
-            )
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
         print(json.dumps(result))
@@ -126,6 +122,10 @@ _RUNNER = textwrap.dedent(
             with torch.no_grad():
                 reference_output = model(*inputs)
                 candidate_output = cuda_forward(*inputs)
+            if not extension_builds:
+                raise ValueError(
+                    "submission must build a CUDA extension with torch.utils.cpp_extension.load_inline"
+                )
             if len(extension_calls) == calls_before:
                 raise ValueError("cuda_forward did not invoke the compiled CUDA extension")
             if tuple(reference_output.shape) != tuple(candidate_output.shape):
