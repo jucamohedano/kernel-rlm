@@ -1,0 +1,55 @@
+# Bounded first live GRPO gate: one inference GPU + one trainer GPU.
+# This is a wiring run, not a learning run.
+
+max_steps = 1
+seq_len = 8192
+output_dir = "outputs"
+
+[deployment]
+num_train_gpus = 1
+num_infer_gpus = 1
+
+[model]
+name = "poolside/Laguna-XS.2"
+
+[monitors.file]
+path = "metrics.jsonl"
+
+[trainer.model.lora]
+rank = 8
+alpha = 16
+target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
+
+[trainer.optim]
+type = "muon"
+lr = 1e-5
+weight_decay = 0.01
+mu = 0.95
+
+[orchestrator]
+batch_size = 2
+group_size = 2
+
+[orchestrator.train.sampling]
+max_completion_tokens = 256
+
+[[orchestrator.train.source]]
+name = "kernel-rlm"
+env.taskset.id = "kernel_rlm_v1"
+env.taskset.manifest_path = "/root/kernel_rlm/tasks/vector_add.jsonl"
+env.agent.harness.id = "kernel_rlm_v1"
+env.agent.harness.max_turns = 3
+env.agent.harness.max_tokens = 256
+env.agent.runtime.type = "subprocess"
+
+[orchestrator.model.lora]
+rank = 8
+alpha = 16
+
+[orchestrator.renderer]
+name = "laguna-xs.2"
+
+[inference.vllm]
+enable_lora = true
+gpu_memory_utilization = 0.80
+max_model_len = 8192

@@ -282,3 +282,19 @@ in this tested configuration). Its existing zero-advantage pruning removes RL
 credit, not the raw reward or saved trajectory. The remaining gate is a bounded
 live sampling / trainer integration check with real logprobs and adapter state;
 we do not require every frozen-model CUDA submission to be correct first.
+
+### First live GRPO gate configuration
+
+`configs/grpo_smoke.toml` is the intentionally small first live configuration:
+one inference A100, one trainer A100, two rollouts in one GRPO group, one trainer
+step, rank-8 attention-only LoRA, and Muon. It keeps the file monitor enabled so
+Prime writes `metrics.jsonl`, resolved configs, and rollout traces under the run
+directory. It is a wiring check: a successful step proves that the real model,
+V1 taskset, vLLM logprobs, adapter synchronization, Muon optimizer, and local
+trace storage connect end to end; it is not enough data to judge learning.
+
+The first run must be launched only after a Prime `--dry-run` confirms that the
+custom `kernel_rlm_v1` taskset resolves inside the Modal image. The taskset
+manifest path resolves to `/root/kernel_rlm/tasks/vector_add.jsonl` in that
+image. The renderer ID is the registered `laguna-xs.2` variant, not the
+human-readable checkpoint spelling.
