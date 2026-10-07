@@ -19,6 +19,7 @@ _RUNNER = textwrap.dedent(
     import sys
 
     import torch
+    import torch.utils.cpp_extension
 
     def load_module(path, name):
         spec = importlib.util.spec_from_file_location(name, path)
@@ -50,6 +51,7 @@ _RUNNER = textwrap.dedent(
     rtol = float(sys.argv[5])
     result = {
         "compiled": False,
+        "extension_used": False,
         "correct": False,
         "max_diff": None,
         "speedup": None,
@@ -65,6 +67,33 @@ _RUNNER = textwrap.dedent(
         print(json.dumps(result))
         raise SystemExit(0)
 
+    extension_builds = []
+    extension_calls = []
+
+    class TrackedExtension:
+        def __init__(self, module):
+            self._module = module
+
+        def __getattr__(self, name):
+            attribute = getattr(self._module, name)
+            if not callable(attribute):
+                return attribute
+
+            def call(*args, **kwargs):
+                extension_calls.append(name)
+                return attribute(*args, **kwargs)
+
+            return call
+
+    original_load_inline = torch.utils.cpp_extension.load_inline
+
+    def tracked_load_inline(*args, **kwargs):
+        module = original_load_inline(*args, **kwargs)
+        extension_builds.append(getattr(module, "__name__", "anonymous"))
+        return TrackedExtension(module)
+
+    torch.utils.cpp_extension.load_inline = tracked_load_inline
+
     try:
         reference = load_module(reference_path, "kernel_rlm_reference")
         submission = load_module(submission_path, "kernel_rlm_submission")
@@ -76,6 +105,10 @@ _RUNNER = textwrap.dedent(
         model_class = reference.Model
         get_inputs = reference.get_inputs
         get_init_inputs = getattr(reference, "get_init_inputs", lambda: [])
+        if not extension_builds:
+            raise ValueError(
+                "submission must build a CUDA extension with torch.utils.cpp_extension.load_inline"
+            )
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
         print(json.dumps(result))
@@ -89,9 +122,12 @@ _RUNNER = textwrap.dedent(
             model = model_class(*get_init_inputs()).to(device)
             model.eval()
             inputs = [move_to_device(value, device) for value in get_inputs()]
+            calls_before = len(extension_calls)
             with torch.no_grad():
                 reference_output = model(*inputs)
                 candidate_output = cuda_forward(*inputs)
+            if len(extension_calls) == calls_before:
+                raise ValueError("cuda_forward did not invoke the compiled CUDA extension")
             if tuple(reference_output.shape) != tuple(candidate_output.shape):
                 result["error"] = (
                     f"shape mismatch: reference {tuple(reference_output.shape)} "
@@ -108,7 +144,8 @@ _RUNNER = textwrap.dedent(
         result["error"] = f"{type(error).__name__}: {error}"
         correct = False
 
-    result["compiled"] = True
+    result["compiled"] = bool(extension_builds)
+    result["extension_used"] = bool(correct and extension_calls)
     result["correct"] = correct
     result["max_diff"] = max_diff
 
@@ -144,6 +181,7 @@ def verify_cuda(
     python = python or os.environ.get("KERNEL_VERIFY_PYTHON") or sys.executable
     failure = {
         "compiled": False,
+        "extension_used": False,
         "correct": False,
         "max_diff": None,
         "speedup": None,

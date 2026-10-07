@@ -63,6 +63,7 @@ class RLMTrainRubric(vf.Rubric):
         async def main(**kwargs: Any) -> float:
             state = kwargs.get("state") or {}
             value = await self._call_correctness(correctness, kwargs)
+            state["rlm_correctness_reward"] = value
             if not gated_mode:
                 return value
             if not self._passes_gates(state):
@@ -81,7 +82,7 @@ class RLMTrainRubric(vf.Rubric):
             state = kwargs.get("state") or {}
             if not self._passes_gates(state):
                 return 0.0
-            value = await self._call_correctness(correctness, kwargs)
+            value = state["rlm_correctness_reward"]
             if value < min_rew:
                 return 0.0
             return value

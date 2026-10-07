@@ -74,7 +74,7 @@ async def score(info: Any, state: Any, **_kwargs: Any) -> float:
     )
 
     reward = 0.10
-    if result.get("compiled"):
+    if result.get("compiled") and result.get("extension_used"):
         reward += 0.20
     if result.get("correct"):
         reward += 0.40
@@ -84,6 +84,7 @@ async def score(info: Any, state: Any, **_kwargs: Any) -> float:
 
     state["kernel_verify"] = {
         "compiled": bool(result.get("compiled")),
+        "extension_used": bool(result.get("extension_used")),
         "correct": bool(result.get("correct")),
         "max_diff": result.get("max_diff"),
         "speedup": result.get("speedup"),
@@ -127,7 +128,12 @@ async def score(info: Any, state: Any, **_kwargs: Any) -> float:
 
 
 async def verify_compiled(state: Any) -> int:
-    return int(bool((state.get("kernel_verify") or {}).get("compiled")))
+    verification = state.get("kernel_verify") or {}
+    return int(bool(verification.get("compiled") and verification.get("extension_used")))
+
+
+async def verify_extension_used(state: Any) -> int:
+    return int(bool((state.get("kernel_verify") or {}).get("extension_used")))
 
 
 async def verify_correct(state: Any) -> int:
@@ -151,6 +157,7 @@ def load_environment(
     dataset = _build_dataset(manifest_path=manifest_path, **kwargs)
     rubric = rlm_train.RLMTrainRubric(correctness=score, weight=1.0)
     rubric.add_metric(verify_compiled)
+    rubric.add_metric(verify_extension_used)
     rubric.add_metric(verify_correct)
     rubric.add_metric(verify_speedup)
     rubric.add_metric(verify_max_diff)
