@@ -243,3 +243,42 @@ using `--rollout-trace --relative-path model-rollout/<run-id>/trace.json
 --run-name <unique-name>`. These use a separate `--evaluation` run suffix and
 an explicit no-training scope. Keep raw reward separate from correctness:
 submission credit does not mean the CUDA task passed.
+
+### Training-data contract (verified on Modal CPU)
+
+Run `modal run -m modal_app.training_contract`. This uses the cached, pinned
+Laguna tokenizer and the actual Verifiers training client, renderer, interception
+server, our REPL harness, and prime-rl trajectory conversion / GRPO / batch packer.
+The generation endpoint and CUDA verifier are explicitly synthetic fixtures.
+No model weights, GPU, optimizer step, or real sampling probabilities are used.
+
+The passing run `20261007T131557Z-042cb5fd` verifies:
+
+- All 498 supplied completion token IDs and logprobs survive exactly, once.
+- Prompt and observation tokens remain masked out of the policy loss.
+- The initial rendered prompt matches the checkpoint chat template; four text/code
+  probes match the checkpoint's raw `tokenizer.json`. Existing Transformers
+  tokenizer/config warnings remain; these probes do not establish universal parity.
+- Equal-reward groups `[0, 0]` and `[1, 1]` have zero advantages and no retained
+  RL-only samples. Raw rewards remain unchanged. Auxiliary CE loss is not discarded.
+- Mixed rewards `[0.1, 0.8]` yield approximately `[-0.35, +0.35]`, retain two
+  training samples, and pack into trainer microbatches without losing sampled tokens.
+- Missing, count-mismatched, wrong-token, nonfinite, and sentinel logprobs are rejected.
+- Prime's MessagePack transport round-trips the training samples.
+
+Consecutive user messages (REPL observation followed by a separate turn reminder)
+prevented incremental rendering and produced two branches. The harness now merges
+adjacent user messages, preserving the same sampled tokens in one branch. This
+avoids redundant context branches; it is not a measured GPU-cost reduction.
+
+Evidence on `kernel-rlm-traces`: `training-contract/<run-id>/report.json`,
+`episode.json`, `engine-fixtures.json`, and `microbatches.msgpack`. Local summary:
+`logs/training-contract/<run-id>/report.json`. Do not import these synthetic rewards
+or logprobs into real training/evaluation curves. The test imports W&B because
+prime utilities require it, but sets `WANDB_MODE=disabled`; Trackio stays selected.
+
+Prime's baseline GRPO uses reward minus group mean (no standard-deviation division
+in this tested configuration). Its existing zero-advantage pruning removes RL
+credit, not the raw reward or saved trajectory. The remaining gate is a bounded
+live sampling / trainer integration check with real logprobs and adapter state;
+we do not require every frozen-model CUDA submission to be correct first.
