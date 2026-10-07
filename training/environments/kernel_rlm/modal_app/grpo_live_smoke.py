@@ -64,6 +64,7 @@ live_image = (
     .pip_install(
         "vllm @ https://github.com/vllm-project/vllm/releases/download/v0.26.0/vllm-0.26.0+cu129-cp38-abi3-manylinux_2_28_x86_64.whl"
     )
+    .pip_install("nvidia-cutlass-dsl==4.5.2")
     .add_local_dir(
         RLM_SOURCE,
         "/root/rlm",
