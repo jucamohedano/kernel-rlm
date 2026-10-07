@@ -61,6 +61,9 @@ live_image = (
     .pip_install(
         "flash-attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.4/flash_attn-2.8.3+cu128torch2.11-cp312-cp312-linux_x86_64.whl"
     )
+    .pip_install(
+        "vllm @ https://github.com/vllm-project/vllm/releases/download/v0.26.0/vllm-0.26.0+cu129-cp38-abi3-manylinux_2_28_x86_64.whl"
+    )
     .add_local_dir(
         RLM_SOURCE,
         "/root/rlm",
