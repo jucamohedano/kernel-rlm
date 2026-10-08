@@ -103,6 +103,8 @@ async def probe(run_id: str) -> dict:
                 "8192",
                 "--max-num-seqs",
                 "2",
+                "--max-num-batched-tokens",
+                "1024",
                 "--gpu-memory-utilization",
                 "0.95",
                 "--enforce-eager",
@@ -120,7 +122,7 @@ async def probe(run_id: str) -> dict:
             os.environ["CUDA_VISIBLE_DEVICES"] = "1"
             os.environ["PROBE_API_KEY"] = "unused-local-endpoint"
             os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0"
-            for _attempt in range(150):
+            for _attempt in range(225):
                 if server.poll() is not None:
                     raise RuntimeError("Inference server exited; inspect inference.log")
                 try:
@@ -131,7 +133,7 @@ async def probe(run_id: str) -> dict:
                 except OSError:
                     await asyncio.sleep(2)
             else:
-                raise TimeoutError("Inference startup exceeded 300 seconds")
+                raise TimeoutError("Inference startup exceeded 450 seconds")
             rows = [
                 json.loads(line)
                 for line in Path("/root/kernel_rlm/tasks/lvl1_seed42.jsonl")
@@ -217,7 +219,7 @@ async def probe(run_id: str) -> dict:
 
 @app.local_entrypoint()
 def main() -> None:
-    print(json.dumps(preflight.remote(), indent=2))
+    print(json.dumps(preflight.remote(), indent=2), flush=True)
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
     report = probe.remote(run_id)
     destination = Path("logs/frozen-probe") / run_id
