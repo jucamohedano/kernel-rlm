@@ -110,26 +110,24 @@ def chart_svg(metrics: list[dict], key_names: tuple[str, ...], color: str) -> st
     return (
         f'<svg viewBox="0 0 400 120" role="img" aria-label="metric chart">'
         f'<polyline points="{" ".join(coords)}" fill="none" stroke="{color}" stroke-width="3" />'
-        f'<text x="8" y="118">{low:.3g}</text><text x="350" y="118">{high:.3g}</text></svg>'
+        f'<text x="8" y="12">max {high:.3g}</text><text x="8" y="118">min {low:.3g}</text></svg>'
+        '<div class="muted">X: saved sample order · Y: metric value</div>'
     )
 
 
 def layout(title: str, body: str) -> str:
+    assets = Path(__file__).parent
+    styles = (assets / "viewer.css").read_text()
+    script = (assets / "viewer.js").read_text()
     return f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{text(title)}</title><style>
-:root {{ color-scheme: dark; --bg:#101512; --card:#18221b; --line:#2d4433; --muted:#9cad9e; --green:#71e39a; --amber:#f3c969; --red:#ff8b8b; }}
-* {{ box-sizing:border-box; }} body {{ margin:0; background:var(--bg); color:#eaf2eb; font:14px/1.5 system-ui,sans-serif; }}
-main {{ max-width:1280px; margin:0 auto; padding:28px; }} h1,h2,h3 {{ margin:0 0 10px; }} h1 {{ font-size:28px; }} h2 {{ font-size:18px; margin-top:26px; }}
-a {{ color:var(--green); }} .muted,.empty {{ color:var(--muted); }} .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }}
-.card {{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }} .value {{ font-size:24px; font-weight:700; color:var(--green); }}
-.run {{ display:flex; justify-content:space-between; gap:16px; align-items:center; }} .run + .run {{ margin-top:10px; }}
-table {{ width:100%; border-collapse:collapse; }} td,th {{ text-align:left; padding:8px; border-bottom:1px solid var(--line); vertical-align:top; }} th {{ color:var(--muted); font-weight:500; }}
-svg {{ width:100%; height:180px; background:#0c110d; border-radius:8px; }} svg text {{ fill:var(--muted); font-size:10px; }} pre {{ white-space:pre-wrap; overflow:auto; max-height:520px; background:#0c110d; padding:14px; border-radius:8px; }}
-details {{ border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:8px 0; }} summary {{ cursor:pointer; color:var(--green); }} .pill {{ border:1px solid var(--line); border-radius:999px; padding:3px 8px; color:var(--muted); }}
-header {{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin-bottom:22px; }}
-@media(max-width:650px) {{ main {{ padding:16px; }} .run {{ display:block; }} }}
-</style></head><body><main>{body}</main></body></html>"""
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{text(title)}</title><style>{styles}</style></head>
+<body><nav><strong>Kernel<span style="color:var(--accent)">RLM</span> / experiments</strong>
+<a href="/">All runs</a></nav><main>{body}
+<footer>Local saved artifacts · No GPU jobs · Layout inspired by
+<a href="https://posttrainbench.com/traces/">PostTrainBench</a></footer>
+</main><script>{script}</script></body></html>"""
 
 
 def render_index(root: Path) -> str:
@@ -147,8 +145,11 @@ def render_index(root: Path) -> str:
     body = (
         '<header><div><h1>Kernel-RLM Experiments</h1><div class="muted">Saved Modal artifacts · CPU-only viewer</div></div>'
         f'<span class="pill">{len(runs)} runs</span></header>'
-        '<h2>Runs</h2>'
-        + ("".join(cards) or '<div class="card empty">No reports found. Download a Modal run directory into this root.</div>')
+        "<h2>Runs</h2>"
+        + (
+            "".join(cards)
+            or '<div class="card empty">No reports found. Download a Modal run directory into this root.</div>'
+        )
     )
     return layout("Kernel-RLM Experiments", body)
 
@@ -159,61 +160,190 @@ def render_trace(path: Path) -> str:
     verification = value.get("verification", {}) if isinstance(value, dict) else {}
     feedback = value.get("feedback_results", []) if isinstance(value, dict) else []
     transcript = output.get("rlm_history", []) if isinstance(output, dict) else []
-    items = [f"<div class=\"card\"><b>{text(path.name)}</b>"]
-    items.append(f"<div class=\"muted\">reward={text(output.get('reward', value.get('reward', '—')))} · turns={text(output.get('num_turns', '—'))}</div>")
+    items = [f'<div class="card"><b>{text(path.name)}</b>']
+    items.append(
+        f'<div class="muted">reward={text(output.get("reward", value.get("reward", "—")))} · turns={text(output.get("num_turns", "—"))}</div>'
+    )
     if verification:
-        items.append(f"<p>compiled={text(verification.get('compiled'))} · correct={text(verification.get('correct'))} · max_diff={text(verification.get('max_diff'))} · speedup={text(verification.get('speedup'))}</p>")
+        items.append(
+            f"<p>compiled={text(verification.get('compiled'))} · correct={text(verification.get('correct'))} · max_diff={text(verification.get('max_diff'))} · speedup={text(verification.get('speedup'))}</p>"
+        )
     if feedback:
-        items.append("<h3>CUDA feedback</h3><pre>" + text(json.dumps(feedback, indent=2)) + "</pre>")
+        items.append(
+            "<h3>CUDA feedback</h3><pre>" + text(json.dumps(feedback, indent=2)) + "</pre>"
+        )
     if transcript:
         items.append("<h3>Trajectory</h3>")
         for index, item in enumerate(transcript, 1):
-            items.append(f"<details><summary>Step {index}</summary><pre>{text(json.dumps(item, indent=2))}</pre></details>")
-    items.append("<details><summary>Raw trace</summary><pre>" + text(json.dumps(value, indent=2)) + "</pre></details></div>")
+            items.append(
+                f"<details><summary>Step {index}</summary><pre>{text(json.dumps(item, indent=2))}</pre></details>"
+            )
+    items.append(
+        "<details><summary>Raw trace</summary><pre>"
+        + text(json.dumps(value, indent=2))
+        + "</pre></details></div>"
+    )
     return "".join(items)
 
 
-def render_rollouts(path: Path) -> str:
-    rows = read_jsonl(path)
-    items = [f'<div class="card"><h3>{text(path.name)}</h3><div class="muted">{len(rows)} saved rollout records</div>']
-    for index, row in enumerate(rows[:12], 1):
-        reward = row.get("reward", row.get("score", "—"))
-        task = row.get("task_id", row.get("task", row.get("env", "—")))
-        items.append(
-            f'<details><summary>Rollout {index} · task={text(task)} · reward={text(reward)}</summary>'
-            f'<pre>{text(json.dumps(row, indent=2))}</pre></details>'
+def rollout_traces(run: dict) -> list[dict]:
+    return [
+        trace
+        for path in sorted(run.get("rollouts", []))
+        for row in read_jsonl(path)
+        for trace in row.get("traces", [])
+    ]
+
+
+def folded(label: str, value: object) -> str:
+    content = value if isinstance(value, str) else json.dumps(value, indent=2)
+    return f"<details><summary>{text(label)}</summary><pre>{text(content)}</pre></details>"
+
+
+def render_timeline(trace: dict) -> str:
+    info = trace.get("info", {})
+    calls = iter(trace.get("calls", []))
+    events = []
+    for index, message in enumerate(info.get("repl_transcript", []), 1):
+        role = message.get("role", "unknown")
+        content = message.get("content", "")
+        label = f"{index:02d} · {role.upper()}"
+        if role == "assistant":
+            call = next(calls, {})
+            node_index = call.get("node")
+            original = trace["nodes"][node_index]["message"] if node_index is not None else {}
+            usage = call.get("usage", {})
+            label += f" · {call.get('finish_reason', 'unknown')} · {usage.get('completion_tokens', '—')} output tokens"
+            body = ""
+            if original.get("reasoning_content"):
+                body += folded("Reasoning", original["reasoning_content"])
+            preview = content.split("```")[0].strip()[:240]
+            if preview:
+                body += f'<div class="card message">{text(preview)}</div>'
+            body += folded("Assistant response · full text and code", content)
+            if original.get("tool_calls"):
+                body += folded(
+                    "Structured tool calls · emitted, not proof of execution",
+                    original["tool_calls"],
+                )
+        else:
+            label_name = "System instructions" if role == "system" else "Prompt / REPL observation"
+            body = folded(label_name, content)
+        events.append(
+            f'<article class="event"><div class="event-label">{text(label)}</div>{body}</article>'
         )
-    if len(rows) > 12:
-        items.append(f'<div class="muted">Showing the first 12 records; the source file contains {len(rows)}.</div>')
-    items.append("</div>")
-    return "".join(items)
+    return '<div class="timeline">' + "".join(events) + "</div>"
 
 
-def render_run(root: Path, run_id: str) -> str:
+def render_run(root: Path, run_id: str, trajectory: int = 0) -> str:
     run = next((candidate for candidate in discover_runs(root) if candidate["id"] == run_id), None)
     if run is None:
         return layout("Not found", '<h1>Run not found</h1><a href="/">Back</a>')
     report = run["report"]
     metrics = run.get("metrics", [])
-    trace_cards = [render_trace(path) for path in run.get("traces", [])]
-    episode_cards = [f'<details class="card"><summary>{text(path.name)}</summary><pre>{text(json.dumps(read_json(path), indent=2))}</pre></details>' for path in run.get("episodes", [])]
-    body = (
-        f'<header><div><h1>{text(run_id)}</h1><div class="muted">{text(report.get("model_id", "Kernel-RLM"))}</div></div><a href="/">← all runs</a></header>'
-        '<div class="grid">'
-        f'<div class="card"><div class="muted">status</div><div class="value">{text(report.get("status", "artifacts"))}</div></div>'
-        f'<div class="card"><div class="muted">latest reward</div><div class="value">{text(metric_value(metrics, ("reward/mean", "reward", "train/reward")))}</div></div>'
-        f'<div class="card"><div class="muted">metric rows</div><div class="value">{len(metrics)}</div></div>'
-        f'<div class="card"><div class="muted">traces / episodes / batches</div><div class="value">{len(trace_cards)} / {len(episode_cards)} / {len(run.get("rollouts", []))}</div></div></div>'
-        '<h2>Learning curves</h2><div class="grid">'
-        '<div class="card"><h3>Reward</h3>' + chart_svg(metrics, ("reward/mean", "reward", "train/reward"), "#71e39a") + '</div>'
-        '<div class="card"><h3>Loss</h3>' + chart_svg(metrics, ("loss", "train/loss", "policy_loss"), "#f3c969") + '</div>'
-        '<div class="card"><h3>Entropy</h3>' + chart_svg(metrics, ("entropy", "train/entropy"), "#8ecbff") + '</div></div>'
-        '<h2>Run metadata</h2><div class="card"><pre>' + text(json.dumps(report, indent=2)) + '</pre></div>'
-        '<h2>Traces</h2>' + ("".join(trace_cards) or '<div class="card empty">No rollout traces downloaded yet.</div>')
-        + '<h2>Prime rollout batches</h2>' + ("".join(render_rollouts(path) for path in run.get("rollouts", [])) or '<div class="card empty">No Prime JSONL batches downloaded yet.</div>')
-        + '<h2>Episodes</h2>' + ("".join(episode_cards) or '<div class="card empty">No episode records downloaded yet.</div>')
+    traces = rollout_traces(run)
+    submitted = sum(bool(trace.get("info", {}).get("kernel_submission")) for trace in traces)
+    rewards = [trace.get("rewards", {}).get("kernel_reward", {}).get("score") for trace in traces]
+    numeric_rewards = [reward for reward in rewards if isinstance(reward, int | float)]
+    mean_reward = f"{sum(numeric_rewards) / len(numeric_rewards):.3f}" if numeric_rewards else "—"
+    trajectory = max(0, min(trajectory, len(traces) - 1))
+    selected = traces[trajectory] if traces else {}
+    tokens = {
+        key: sum(
+            call.get("usage", {}).get(key, 0) for trace in traces for call in trace.get("calls", [])
+        )
+        for key in ("prompt_tokens", "completion_tokens")
+    }
+    summary = (
+        '<aside class="sidebar"><a href="/">← Back to all runs</a><div class="card">'
+        f"<h2>{text(report.get('model_id', 'Kernel-RLM'))}</h2>"
+        f'<span class="badge">{text(report.get("status", "saved artifacts"))}</span>'
+        '<hr><div class="eyebrow">Mean saved kernel reward</div>'
+        f'<div class="value">{mean_reward}</div><dl>'
+        f"<dt>TRAJECTORIES</dt><dd>{len(traces)}</dd>"
+        f"<dt>NONEMPTY SUBMISSIONS</dt><dd>{submitted} / {len(traces)}</dd>"
+        f"<dt>INPUT / OUTPUT TOKENS</dt><dd>{tokens['prompt_tokens']:,} / {tokens['completion_tokens']:,}</dd>"
+        f"<dt>HARDWARE</dt><dd>{text(report.get('gpu_topology', 'Not recorded'))}</dd>"
+        f"<dt>RUN ID</dt><dd>{text(run_id)}</dd></dl>"
+        '<p class="muted">Counts describe downloaded artifacts, not necessarily the whole remote run.</p></div></aside>'
     )
-    return layout(f"Kernel-RLM · {run_id}", body)
+    options = "".join(
+        f'<option value="{index}" {"selected" if index == trajectory else ""}>'
+        f"{index + 1} / {len(traces)} · {text(trace.get('task', {}).get('data', {}).get('name', 'unknown'))}"
+        f" · reward {text(rewards[index])}</option>"
+        for index, trace in enumerate(traces)
+    )
+    controls = (
+        (
+            '<div class="toolbar"><label for="trajectory">Trajectory</label>'
+            f'<select id="trajectory">{options}</select>'
+            '<label><input id="expand" type="checkbox"> Expand messages</label></div>'
+        )
+        if traces
+        else ""
+    )
+    info = selected.get("info", {})
+    has_submission = bool(info.get("kernel_submission"))
+    length_calls = sum(call.get("finish_reason") == "length" for call in selected.get("calls", []))
+    evidence = (
+        (
+            f'<p><span class="badge">{"Submitted" if has_submission else "No final submission"}</span> '
+            f'<span class="badge">{length_calls} length-limited calls</span></p>'
+            '<p class="muted">A completed agent process does not imply a submitted or correct kernel.</p>'
+        )
+        if traces
+        else ""
+    )
+    timeline = (
+        render_timeline(selected)
+        if traces
+        else "".join(render_trace(path) for path in run.get("traces", []))
+        or '<p class="empty">No trajectory messages downloaded.</p>'
+    )
+    verification = (
+        (
+            folded("Recorded reward", selected.get("rewards", {}))
+            + folded("Final kernel submission", info.get("kernel_submission", ""))
+            + folded("Recorded errors", selected.get("errors", []))
+            + folded("Task and reference", selected.get("task", {}))
+            + '<p class="muted">Compilation feedback appears in the REPL observations. An empty submission never reached final kernel scoring.</p>'
+        )
+        if traces
+        else '<p class="empty">No Prime verification record downloaded. Inspect the saved eval trace.</p>'
+    )
+    artifacts = folded("Run report and configuration", report)
+    artifacts += folded("Selected raw Prime trace", selected) if selected else ""
+    for path in run.get("episodes", []):
+        artifacts += folded(path.name, read_json(path))
+    artifacts += folded(
+        "Downloaded trace files", [str(path.relative_to(root)) for path in run.get("rollouts", [])]
+    )
+    center = (
+        '<section><div class="tabs" role="tablist" aria-label="Run views">'
+        '<button role="tab" data-tab="trace" aria-selected="true">Run trace</button>'
+        '<button role="tab" data-tab="verification" aria-selected="false">Verification</button>'
+        '<button role="tab" data-tab="artifacts" aria-selected="false">Artifacts</button></div>'
+        + controls
+        + evidence
+        + f'<div class="panel" id="trace">{timeline}</div>'
+        + f'<div class="panel" id="verification" hidden>{verification}</div>'
+        + f'<div class="panel" id="artifacts" hidden>{artifacts}</div></section>'
+    )
+    curves = '<aside class="metrics"><h2 class="eyebrow">Saved metrics</h2>'
+    for label, keys, color in (
+        ("Reward", ("reward/mean", "reward", "train/reward"), "#ab694c"),
+        ("Loss", ("loss", "train/loss", "policy_loss"), "#8c803d"),
+        ("Entropy", ("entropy", "train/entropy"), "#6e8150"),
+    ):
+        curves += f'<div class="card"><h3>{label}</h3>' + chart_svg(metrics, keys, color) + "</div>"
+    curves += (
+        '<div class="card"><h3>GPU telemetry</h3><p class="muted">'
+        "Not connected in this viewer. No utilization or memory values are inferred from missing data."
+        "</p></div></aside>"
+    )
+    return layout(
+        f"Kernel-RLM · {run_id}", '<div class="workspace">' + summary + center + curves + "</div>"
+    )
 
 
 def make_handler(root: Path):
@@ -221,7 +351,13 @@ def make_handler(root: Path):
         def do_GET(self) -> None:
             query = parse_qs(urlparse(self.path).query)
             run_id = unquote(query.get("run", [""])[0])
-            document = render_run(root, run_id) if run_id else render_index(root)
+            raw_trajectory = query.get("trajectory", ["0"])[0]
+            trajectory = (
+                int(raw_trajectory)
+                if raw_trajectory.isdecimal() and len(raw_trajectory) < 10
+                else 0
+            )
+            document = render_run(root, run_id, trajectory) if run_id else render_index(root)
             payload = document.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
