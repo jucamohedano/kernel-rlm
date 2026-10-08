@@ -47,7 +47,7 @@ async def check() -> dict:
     requests = []
     submission = Path("/opt/kernel_rlm/submission.py").read_text()
     replies = [
-        f"```repl\ncandidate = {submission!r}\nfeedback = cuda_feedback(candidate)\n```",
+        f"```repl\nprint(context)\ncandidate = {submission!r}\nfeedback = cuda_feedback(candidate)\n```",
         f"```repl\nanswer['content'] = {submission!r}\nanswer['ready'] = True\n```",
     ]
 
