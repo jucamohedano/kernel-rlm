@@ -23,7 +23,7 @@ correctness-plus-performance verification. The durable trace stores both
 feedback results and the final verification result.
 
 The CPU coordinator owns the REPL and records full requests and responses. A
-single inference A100 serves at most three calls, each capped at 2,048 output
+single inference A100 serves at most five calls, each capped at 2,048 output
 tokens. The inference function has a 600-second timeout and is cancelled before
 the one final verification call. Verification uses a separate A100 with a
 180-second timeout, blocked network access, and no model/trace volumes mounted.

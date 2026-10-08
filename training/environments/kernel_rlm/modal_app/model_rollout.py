@@ -18,7 +18,7 @@ from .kernel_smoke import image as verifier_image
 from .rollout_smoke import rollout_image, traces
 
 app = modal.App("kernel-rlm-model-rollout")
-MAX_TURNS = 3
+MAX_TURNS = 5
 MAX_TOKENS = 2048
 MAX_FEEDBACK_CALLS = 2
 INFERENCE_SECONDS = 1200
@@ -255,7 +255,7 @@ async def episode(run_id: str, snapshot: str) -> dict[str, Any]:
                 body = await request.json()
                 source = str(body.get("source") or "")
                 trace["feedback_verifier_calls"] += 1
-                result = verify.remote(reference, source, False)
+                result = await verify.remote.aio(reference, source, False)
                 trace["feedback_results"].append(result)
                 await save()
                 return web.json_response(result)
