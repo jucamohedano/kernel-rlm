@@ -52,7 +52,14 @@ async def check(run_id: str) -> dict:
     from huggingface_hub import snapshot_download
     from kernel_rlm_v1 import taskset as scoring
     from prime_rl.configs.algorithm import GRPOAlgoConfig
+    from prime_rl.configs.orchestrator import (
+        AdvRangeGateConfig,
+        CurriculumConfig,
+        DifficultyPoolConfig,
+        DifficultyPoolSamplerConfig,
+    )
     from prime_rl.orchestrator.algo.grpo import GRPOAlgorithm
+    from prime_rl.orchestrator.curriculum import Curriculum
     from prime_rl.orchestrator.train_sink import _prune_zero_advantages
     from prime_rl.orchestrator.trajectories import trace_to_samples
     from prime_rl.trainer.batch import prepare_batch
@@ -238,6 +245,16 @@ async def check(run_id: str) -> dict:
 
         algorithm = GRPOAlgorithm(GRPOAlgoConfig(), clients=None)
         groups = {}
+        curriculum = Curriculum(
+            CurriculumConfig(
+                sampler=DifficultyPoolSamplerConfig(
+                    pools={"all": DifficultyPoolConfig(threshold=1.0, weight=1.0)},
+                    seed=42,
+                ),
+                gates={"zero_variance": AdvRangeGateConfig()},
+            ),
+            [task],
+        )
         for name, rewards in {
             "all_failed": [0.0, 0.0],
             "all_correct": [1.0, 1.0],
@@ -249,6 +266,11 @@ async def check(run_id: str) -> dict:
                 sibling.traces[0].record_reward("fixture", reward, 1.0)
             await algorithm.score_group(episodes)
             assert [sibling.traces[0].reward for sibling in episodes] == rewards
+            admitted = curriculum.on_result(episodes)
+            if name in {"all_failed", "all_correct"}:
+                assert admitted is False
+            else:
+                assert admitted is True
             advantages = []
             kept = []
             for sibling in episodes:
@@ -288,6 +310,9 @@ async def check(run_id: str) -> dict:
                 assert _prune_zero_advantages(auxiliary), "CE loss must survive zero RL credit"
             groups[name] = {"rewards": rewards, "advantages": advantages, "kept_samples": len(kept)}
 
+        assert curriculum.metrics() == {"sampler/pool/unseen": 0.0, "sampler/pool/all": 1.0}
+        assert next(curriculum.sampler).key == task.key
+
         choice = responses[0]["choices"][0]
         rejected = []
         for defect in ["missing", "length", "token_id", "nonfinite", "sentinel"]:
@@ -320,6 +345,8 @@ async def check(run_id: str) -> dict:
             transport_roundtrip=True,
             trainer_microbatch_packing=True,
             raw_rewards_preserved=True,
+            zero_variance_gate_rejects_equal_groups=True,
+            rejected_groups_request_replacement=True,
             initial_template_parity=True,
             checkpoint_tokenizer_probe_parity=True,
             trace_directory=str(directory),

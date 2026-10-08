@@ -17,13 +17,15 @@ from .rollout_smoke import traces
 _module_dir = Path(__file__).resolve().parent
 APP_ROOT = _module_dir.parent if (_module_dir.parent / "configs").exists() else Path("/root")
 REPO_ROOT = next((parent for parent in APP_ROOT.parents if (parent / "rlm").exists()), Path("/root"))
+PROJECT_ROOT = REPO_ROOT if (REPO_ROOT / "notes").exists() else REPO_ROOT.parent
 RLM_SOURCE = REPO_ROOT / "rlm" if (REPO_ROOT / "rlm").exists() else Path("/root/rlm")
 RLM_TRAIN_SOURCE = (
     REPO_ROOT / "training" / "src" / "rlm_train"
     if (REPO_ROOT / "training" / "src" / "rlm_train").exists()
     else Path("/root/rlm_train")
 )
-CONFIG = APP_ROOT / "configs" / "grpo_smoke.toml"
+CONFIG = APP_ROOT / "configs" / "grpo_level1.toml"
+CURRICULUM_LEVEL1 = PROJECT_ROOT / "notes" / "curriculum" / "lvl1_seed42.jsonl"
 
 
 def patch_prime_laguna_config() -> None:
@@ -115,6 +117,7 @@ live_image = (
     .run_commands("python -m pip install --no-deps -e /root/prime_source")
     .add_local_dir(APP_ROOT / "kernel_rlm_v1", "/root/kernel_rlm_v1", copy=True)
     .add_local_dir(APP_ROOT / "kernel_rlm", "/root/kernel_rlm", copy=True)
+    .add_local_file(CURRICULUM_LEVEL1, "/root/kernel_rlm/tasks/lvl1_seed42.jsonl", copy=True)
     .add_local_dir(CONFIG.parent, "/root/configs", copy=True)
     .env(
         {
@@ -152,7 +155,7 @@ def train(run_id: str) -> dict[str, object]:
         "-m",
         "prime_rl.entrypoints.rl",
         "@",
-        "/root/configs/grpo_smoke.toml",
+        "/root/configs/grpo_level1.toml",
         "--run.name",
         run_id,
         "--output-dir",
@@ -195,7 +198,53 @@ def train(run_id: str) -> dict[str, object]:
     return report
 
 
+@app.function(
+    image=live_image,
+    volumes={"/traces": traces},
+    cpu=8,
+    memory=32768,
+    timeout=900,
+    startup_timeout=300,
+    retries=0,
+    max_containers=1,
+)
+def dry_run(run_id: str) -> dict[str, object]:
+    output_dir = Path("/traces/live-grpo") / run_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    patch_prime_laguna_config()
+    command = [
+        "python",
+        "-m",
+        "prime_rl.entrypoints.rl",
+        "@",
+        "/root/configs/grpo_level1.toml",
+        "--run.name",
+        run_id,
+        "--output-dir",
+        "/traces/outputs",
+        "--clean",
+        "--no-dashboard",
+        "--dry-run",
+    ]
+    result = subprocess.run(command, cwd="/root", text=True, capture_output=True, check=False)
+    report = {
+        "status": "passed" if result.returncode == 0 else "failed",
+        "run_id": run_id,
+        "config": str(CONFIG),
+        "command": command,
+        "returncode": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }
+    (output_dir / "dry-run-report.json").write_text(json.dumps(report, indent=2))
+    traces.commit()
+    if result.returncode:
+        raise RuntimeError(json.dumps(report, indent=2))
+    return report
+
+
 @app.local_entrypoint()
-def main() -> None:
+def main(dry: bool = False) -> None:
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
-    print(json.dumps(train.remote(run_id), indent=2))
+    result = dry_run.remote(run_id) if dry else train.remote(run_id)
+    print(json.dumps(result, indent=2))

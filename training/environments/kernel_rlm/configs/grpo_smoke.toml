@@ -53,6 +53,27 @@ env.agent.harness.max_turns = 5
 env.agent.harness.max_tokens = 1024
 env.agent.runtime.type = "subprocess"
 
+[orchestrator.train.source.curriculum.sampler]
+type = "difficulty_pool"
+seed = 42
+
+[orchestrator.train.source.curriculum.sampler.pools.hard]
+threshold = 0.25
+weight = 1.0
+
+[orchestrator.train.source.curriculum.sampler.pools.normal]
+threshold = 0.75
+weight = 1.0
+
+[orchestrator.train.source.curriculum.sampler.pools.easy]
+threshold = 1.0
+weight = 0.25
+
+[orchestrator.train.source.curriculum.gates.zero_variance]
+type = "advantage_range"
+reject_min = 0.0
+reject_max = 0.0
+
 [orchestrator.model.lora]
 rank = 8
 alpha = 16
