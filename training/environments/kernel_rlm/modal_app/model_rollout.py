@@ -21,7 +21,9 @@ app = modal.App("kernel-rlm-model-rollout")
 MAX_TURNS = 3
 MAX_TOKENS = 2048
 MAX_FEEDBACK_CALLS = 2
-INFERENCE_SECONDS = 600
+INFERENCE_SECONDS = 1200
+EPISODE_SECONDS = 1500
+READY_TIMEOUT = 900
 VERIFY_SECONDS = 180
 VLLM_VERSION = "0.26.0"
 inference_image = (
@@ -160,7 +162,7 @@ def verify(reference: str, submission: str, benchmark: bool = True) -> dict[str,
     volumes={"/traces": traces},
     cpu=1,
     memory=2048,
-    timeout=900,
+    timeout=EPISODE_SECONDS,
     retries=0,
     max_containers=1,
     scaledown_window=2,
@@ -203,7 +205,7 @@ async def episode(run_id: str, snapshot: str) -> dict[str, Any]:
         environment = None
         runner = None
         try:
-            ready = await responses.get.aio(timeout=420)
+            ready = await responses.get.aio(timeout=READY_TIMEOUT)
             if "error" in ready:
                 raise RuntimeError(ready["error"])
             trace["inference_startup"] = ready
