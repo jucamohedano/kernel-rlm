@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 
+from kernel_rlm.feedback import build_local_feedback_bootstrap
 from openai import AsyncOpenAI
 from rlm.utils.parsing import find_code_blocks
 from rlm.utils.prompts import (
@@ -32,10 +33,19 @@ async def run(task: dict) -> None:
         root_prompt=task["prompt"],
         orchestrator=False,
     )
-    record = {"submission": "", "repl_calls": 0, "turns": 0, "messages": messages}
+    record = {
+        "submission": "",
+        "repl_calls": 0,
+        "feedback_calls": 0,
+        "turns": 0,
+        "messages": messages,
+    }
     try:
         await backend.start(proxy_url="http://127.0.0.1:1", rollout_id="bounded-v1")
         await backend.load_context(task["context"])
+        await backend.bootstrap(
+            build_local_feedback_bootstrap(task["context"], max_calls=2)
+        )
         for turn in range(limits["max_turns"]):
             turn_prompt = build_user_prompt(
                 root_prompt=task["prompt"],
@@ -60,6 +70,8 @@ async def run(task: dict) -> None:
                 result = await backend.execute(code)
                 record["repl_calls"] += 1
                 observation = "REPL output:\n" + (result.stdout + result.stderr)[:20000]
+                if "CUDA feedback:" in observation:
+                    record["feedback_calls"] += 1
                 if messages[-1]["role"] == "user":
                     messages[-1]["content"] += "\n\n" + observation
                 else:

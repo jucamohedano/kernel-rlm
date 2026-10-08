@@ -20,6 +20,7 @@ from .rollout_smoke import rollout_image, traces
 app = modal.App("kernel-rlm-model-rollout")
 MAX_TURNS = 3
 MAX_TOKENS = 2048
+MAX_FEEDBACK_CALLS = 2
 INFERENCE_SECONDS = 600
 VERIFY_SECONDS = 180
 VLLM_VERSION = "0.26.0"
@@ -145,11 +146,11 @@ def infer(requests: modal.Queue, responses: modal.Queue, snapshot: str) -> None:
     block_network=True,
     restrict_modal_access=True,
 )
-def verify(reference: str, submission: str) -> dict[str, Any]:
+def verify(reference: str, submission: str, benchmark: bool = True) -> dict[str, Any]:
     from kernel_rlm.verifier import verify_cuda
 
     started = time.monotonic()
-    result = verify_cuda(reference, submission, timeout_s=150)
+    result = verify_cuda(reference, submission, timeout_s=150, benchmark=benchmark)
     result["elapsed_seconds"] = time.monotonic() - started
     return result
 
@@ -183,6 +184,8 @@ async def episode(run_id: str, snapshot: str) -> dict[str, Any]:
         "max_tokens_per_call": MAX_TOKENS,
         "model_requests": [],
         "model_responses": [],
+        "feedback_verifier_calls": 0,
+        "feedback_results": [],
         "verifier_calls": 0,
         "training_updates": 0,
         "trace_path": str(trace_path),
@@ -241,6 +244,24 @@ async def episode(run_id: str, snapshot: str) -> dict[str, Any]:
 
             bridge = web.Application()
             bridge.router.add_post("/v1/chat/completions", respond)
+
+            async def feedback(request: web.Request) -> web.Response:
+                if trace["feedback_verifier_calls"] >= MAX_FEEDBACK_CALLS:
+                    return web.json_response(
+                        {"error": "CUDA feedback call budget exhausted"}, status=429
+                    )
+                body = await request.json()
+                source = str(body.get("source") or "")
+                trace["feedback_verifier_calls"] += 1
+                result = verify.remote(reference, source, False)
+                trace["feedback_results"].append(result)
+                await save()
+                return web.json_response(result)
+
+            bridge.router.add_post("/kernel-feedback", feedback)
+            reference = json.loads(
+                Path("/opt/kernel_rlm/vector_add.jsonl").read_text(encoding="utf-8").splitlines()[0]
+            )["code"]
             runner = web.AppRunner(bridge)
             await runner.setup()
             site = web.TCPSite(runner, "127.0.0.1", 0)
@@ -249,6 +270,8 @@ async def episode(run_id: str, snapshot: str) -> dict[str, Any]:
             environment = kernel_env.load_environment(
                 manifest_path="/opt/kernel_rlm/vector_add.jsonl",
                 max_iterations=MAX_TURNS,
+                feedback_url=f"http://127.0.0.1:{runner.addresses[0][1]}/kernel-feedback",
+                feedback_max_calls=MAX_FEEDBACK_CALLS,
             )
             environment.timeout_seconds = 500
 

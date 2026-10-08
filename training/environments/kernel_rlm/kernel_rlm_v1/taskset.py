@@ -22,6 +22,7 @@ class KernelTask(vf.Task[KernelData]):
         source = record["submission"].strip()
         trace.info["kernel_submission"] = source
         trace.info["repl_calls"] = record["repl_calls"]
+        trace.info["feedback_calls"] = record.get("feedback_calls", 0)
         trace.info["repl_transcript"] = record["messages"]
         if not source:
             return 0.0

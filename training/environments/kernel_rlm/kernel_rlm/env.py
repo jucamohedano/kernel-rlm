@@ -12,6 +12,7 @@ from typing import Any
 import rlm_train
 from datasets import Dataset
 
+from kernel_rlm.feedback import build_http_feedback_bootstrap
 from kernel_rlm.submission_contract import KERNEL_TASK_INSTRUCTION, validate_submission_source
 from kernel_rlm.verifier import verify_cuda
 
@@ -145,7 +146,15 @@ async def verify_max_diff(state: Any) -> float:
     return round(float(max_diff), 6) if max_diff is not None else -1.0
 
 
-def load_environment(*, manifest_path: str, max_iterations: int = 8, **kwargs: Any) -> Any:
+def load_environment(
+    *,
+    manifest_path: str,
+    max_iterations: int = 8,
+    feedback_url: str | None = None,
+    feedback_max_calls: int = 2,
+    bootstrap_code: str | None = None,
+    **kwargs: Any,
+) -> Any:
     """Wire the CUDA task dataset and scorer into the local RLM environment."""
     dataset = _build_dataset(manifest_path=manifest_path, **kwargs)
     rubric = rlm_train.RLMTrainRubric(correctness=score, weight=1.0)
@@ -154,10 +163,19 @@ def load_environment(*, manifest_path: str, max_iterations: int = 8, **kwargs: A
     rubric.add_metric(verify_correct)
     rubric.add_metric(verify_speedup)
     rubric.add_metric(verify_max_diff)
+    feedback_code = (
+        build_http_feedback_bootstrap(feedback_url, max_calls=feedback_max_calls)
+        if feedback_url
+        else ""
+    )
+    combined_bootstrap = "\n\n".join(
+        code for code in (bootstrap_code or "", feedback_code) if code
+    )
     return rlm_train.RLMTrainEnv(
         dataset=dataset,
         max_iterations=max_iterations,
         rubric=rubric,
         sub_sampling_args={"max_tokens": 512},
         orchestrator=False,
+        bootstrap_code=combined_bootstrap,
     )

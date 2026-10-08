@@ -49,6 +49,7 @@ _RUNNER = textwrap.dedent(
     trials = int(sys.argv[3])
     atol = float(sys.argv[4])
     rtol = float(sys.argv[5])
+    benchmark_enabled = sys.argv[6] == "1"
     result = {
         "compiled": False,
         "extension_used": False,
@@ -149,7 +150,7 @@ _RUNNER = textwrap.dedent(
     result["correct"] = correct
     result["max_diff"] = max_diff
 
-    if correct:
+    if correct and benchmark_enabled:
         try:
             inputs = [move_to_device(value, device) for value in get_inputs()]
             model = model_class(*get_init_inputs()).to(device).eval()
@@ -176,6 +177,7 @@ def verify_cuda(
     timeout_s: float = 240.0,
     python: str | None = None,
     cwd: str | None = None,
+    benchmark: bool = True,
 ) -> dict[str, Any]:
     """Compile, run, and benchmark a CUDA submission in a subprocess."""
     python = python or os.environ.get("KERNEL_VERIFY_PYTHON") or sys.executable
@@ -208,6 +210,7 @@ def verify_cuda(
             str(n_trials),
             repr(float(atol)),
             repr(float(rtol)),
+            "1" if benchmark else "0",
         ]
         try:
             process = subprocess.run(

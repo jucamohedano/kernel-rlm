@@ -14,6 +14,14 @@ The second additionally runs one real Laguna-XS.2 episode using vLLM 0.26.0,
 the original pinned checkpoint, and the local RLM training environment. It is
 not a prime-rl training run. No optimizer or LoRA update runs here.
 
+During the episode, the REPL exposes `cuda_feedback(source)`. Each call sends a
+candidate to the separate Modal verifier for compilation and fresh-input
+correctness checking, then returns `compiled`, `extension_used`, `correct`,
+`max_diff`, and `error` to the model's next turn. Feedback skips benchmarking
+and is capped at two calls; the final submission still receives the full
+correctness-plus-performance verification. The durable trace stores both
+feedback results and the final verification result.
+
 The CPU coordinator owns the REPL and records full requests and responses. A
 single inference A100 serves at most three calls, each capped at 2,048 output
 tokens. The inference function has a 600-second timeout and is cancelled before

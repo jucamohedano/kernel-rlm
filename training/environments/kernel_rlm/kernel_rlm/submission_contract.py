@@ -16,12 +16,16 @@ KERNEL_TASK_INSTRUCTION = (
     "load_extension, build_cuda_extension, source filenames, rebuild=, "
     "extra_cuda_flags=, or extra_nvcc_flags=. Those APIs are not accepted by the "
     "verifier. Include every import and binding needed by the source.\n\n"
-    "The REPL is CPU-only: inspect context and construct the source string, but do "
-    "not compile or run CUDA there. A separate GPU verifier imports the submitted "
-    "source, checks fresh inputs, and benchmarks only after correctness passes. Do "
-    "not delegate to sub-LLMs. After inspecting context, set answer['content'] to "
-    "the complete standalone Python source and answer['ready'] = True inside a "
-    "```repl``` block before the final allowed turn ends."
+    "The REPL provides cuda_feedback(source), which submits a candidate to a bounded "
+    "GPU verifier and returns a dictionary containing compiled, extension_used, "
+    "correct, max_diff, and error. Call cuda_feedback on each serious candidate "
+    "before final submission so you can use compilation errors and numerical "
+    "feedback to repair the kernel. Feedback checks correctness but does not run "
+    "the performance benchmark. The helper has a small call budget, so do not "
+    "call it on trivial text. Do not delegate to sub-LLMs. After using feedback, "
+    "set answer['content'] to the complete standalone Python source and "
+    "answer['ready'] = True inside a ```repl``` block before the final allowed "
+    "turn ends."
 )
 
 

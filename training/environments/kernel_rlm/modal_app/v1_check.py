@@ -47,7 +47,7 @@ async def check() -> dict:
     requests = []
     submission = Path("/opt/kernel_rlm/submission.py").read_text()
     replies = [
-        "```repl\nprint(context)\n```",
+        f"```repl\ncandidate = {submission!r}\nfeedback = cuda_feedback(candidate)\n```",
         f"```repl\nanswer['content'] = {submission!r}\nanswer['ready'] = True\n```",
     ]
 
@@ -59,6 +59,7 @@ async def check() -> dict:
             raise web.HTTPBadRequest(text="Unexpected extra model request")
         if index == 1:
             assert "REPL output:" in json.dumps(body["messages"])
+            assert "CUDA feedback:" in json.dumps(body["messages"])
             assert "class Model" in json.dumps(body["messages"])
         return web.json_response(
             {
