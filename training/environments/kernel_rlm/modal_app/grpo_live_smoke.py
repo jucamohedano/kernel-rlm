@@ -1,4 +1,4 @@
-"""Run the bounded Prime GRPO gate on two Modal A100 GPUs."""
+"""Run the bounded Prime GRPO gate on three Modal A100 GPUs."""
 
 from __future__ import annotations
 
@@ -24,6 +24,24 @@ RLM_TRAIN_SOURCE = (
     else Path("/root/rlm_train")
 )
 CONFIG = APP_ROOT / "configs" / "grpo_smoke.toml"
+
+
+def patch_prime_laguna_config() -> None:
+    model_source = Path("/root/prime_rl/trainer/model.py")
+    source = model_source.read_text()
+    marker = "model_config.use_cache = False"
+    compatibility = (
+        "if getattr(model_config, \"model_type\", \"\") == \"laguna\" "
+        "and getattr(model_config, \"gating\", None) is True:\n"
+        "        model_config.gating = \"per-head\"\n"
+    )
+    if compatibility not in source:
+        if marker not in source:
+            raise RuntimeError("Prime Laguna compatibility anchor is missing")
+        source = source.replace(marker, compatibility + marker, 1)
+        model_source.write_text(source)
+
+
 live_image = (
     modal.Image.from_registry(
         "vllm/vllm-openai:v0.26.0",
@@ -116,7 +134,7 @@ app = modal.App("kernel-rlm-grpo-live-smoke")
     image=live_image,
     secrets=[modal.Secret.from_name("wandb-secret")],
     volumes={"/models": models, "/traces": traces},
-    gpu="A100-80GB:2",
+    gpu="A100-80GB:3",
     cpu=16,
     memory=131072,
     timeout=1800,
@@ -128,6 +146,7 @@ app = modal.App("kernel-rlm-grpo-live-smoke")
 def train(run_id: str) -> dict[str, object]:
     output_dir = Path("/traces/live-grpo") / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
+    patch_prime_laguna_config()
     command = [
         "python",
         "-m",
@@ -162,7 +181,7 @@ def train(run_id: str) -> dict[str, object]:
         "model_id": MODEL_ID,
         "model_revision": REVISION,
         "prime_revision": PRIME_REVISION,
-        "gpu_topology": "1 inference A100 + 1 trainer A100",
+        "gpu_topology": "1 inference A100 + 2 trainer A100s",
         "config": str(CONFIG),
         "command": command,
         "returncode": returncode,

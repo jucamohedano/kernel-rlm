@@ -1,12 +1,12 @@
-# Bounded first live GRPO gate: one inference GPU + one trainer GPU.
-# This is a wiring run, not a learning run.
+# Bounded live GRPO run: one inference GPU + two trainer GPUs.
+# The workload is intentionally larger than the one-step wiring gate.
 
-max_steps = 1
+max_steps = 3
 seq_len = 8192
 output_dir = "/traces/outputs"
 
 [deployment]
-num_train_gpus = 1
+num_train_gpus = 2
 num_infer_gpus = 1
 
 [model]
@@ -17,6 +17,14 @@ path = "metrics.jsonl"
 
 [monitors.wandb]
 project = "laguna-kernel-rlm"
+
+[trainer.model]
+impl = "custom"
+ep = 2
+fused_lm_head_token_chunk_size = 1024
+
+[trainer.model.ac_offloading]
+max_inflight_activations = 1
 
 [trainer.model.lora]
 rank = 8
@@ -30,8 +38,8 @@ weight_decay = 0.01
 mu = 0.95
 
 [orchestrator]
-batch_size = 2
-group_size = 2
+batch_size = 8
+group_size = 8
 
 [orchestrator.train.sampling]
 max_completion_tokens = 256
@@ -54,5 +62,5 @@ name = "laguna-xs.2"
 
 [inference.vllm]
 enable_lora = true
-gpu_memory_utilization = 0.80
-max_model_len = 8192
+gpu_memory_utilization = 0.95
+max_model_len = 4096
