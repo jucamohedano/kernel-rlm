@@ -237,7 +237,7 @@ async def probe(run_id: str, rollouts: int = 1) -> dict:
                 "trajectory_passed" if report["trajectory_passed"] else "trajectory_failed"
             )
             if rollouts == 4:
-                report["status"] = "group_passed" if report["gate_passed"] else "no_quality_signal"
+                report["status"] = "group_passed" if report["gate_passed"] else "group_gate_failed"
     except Exception:
         report["status"] = "failed"
         report["error"] = traceback.format_exc()
