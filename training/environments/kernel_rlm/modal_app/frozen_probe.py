@@ -61,7 +61,9 @@ def preflight() -> dict:
     max_containers=1,
     scaledown_window=2,
 )
-async def probe(run_id: str) -> dict:
+async def probe(run_id: str, rollouts: int = 1) -> dict:
+    if rollouts not in (1, 4):
+        raise ValueError("Probe supports one trajectory or one four-rollout group")
     import asyncio
     import os
     import signal
@@ -123,7 +125,7 @@ async def probe(run_id: str) -> dict:
                 "poolside_v1",
             ]
             report["inference_command"] = command
-            report["scope"] = "one frozen trajectory; not a mixed-reward group"
+            report["scope"] = f"frozen vector-add probe: {rollouts} rollouts; no optimizer"
             with (directory / "inference.log").open("w") as logfile:
                 server = subprocess.Popen(
                     command,
@@ -190,9 +192,10 @@ async def probe(run_id: str) -> dict:
                         "submitted": 0,
                         "feedback_calls": 0,
                         "correct": 0,
+                        "quality_rewards": [],
                     }
                     report["groups"].append(group)
-                    for _rollout in range(1):
+                    for _rollout in range(rollouts):
                         episode = await environment.run_episode(task, context)
                         with (directory / "traces.jsonl").open("a") as output:
                             output.write(episode.model_dump_json() + "\n")
@@ -207,16 +210,34 @@ async def probe(run_id: str) -> dict:
                         group["submitted"] += bool(trace.info.get("kernel_submission"))
                         group["feedback_calls"] += trace.info.get("feedback_calls", 0)
                         group["correct"] += bool(trace.info.get("kernel_verify", {}).get("correct"))
+                        verification = trace.info.get("kernel_verify", {})
+                        quality_reward = 0.0
+                        if trace.info.get("kernel_static", {}).get("valid"):
+                            quality_reward += 0.1
+                            if verification.get("compiled") and verification.get("extension_used"):
+                                quality_reward += 0.2
+                            if verification.get("correct"):
+                                quality_reward += 0.4
+                        group["quality_rewards"].append(quality_reward)
                         print(json.dumps(group), flush=True)
                         (directory / "report.json").write_text(json.dumps(report, indent=2))
                         await traces.commit.aio()
             report["trajectory_passed"] = all(
                 group["correct"] > 0 and group["feedback_calls"] > 0 for group in report["groups"]
             )
-            report["gate_passed"] = False
+            report["gate_passed"] = (
+                rollouts == 4
+                and report["trajectory_passed"]
+                and all(
+                    len(group["rewards"]) == rollouts and len(set(group["quality_rewards"])) > 1
+                    for group in report["groups"]
+                )
+            )
             report["status"] = (
                 "trajectory_passed" if report["trajectory_passed"] else "trajectory_failed"
             )
+            if rollouts == 4:
+                report["status"] = "group_passed" if report["gate_passed"] else "no_quality_signal"
     except Exception:
         report["status"] = "failed"
         report["error"] = traceback.format_exc()
@@ -233,10 +254,12 @@ async def probe(run_id: str) -> dict:
 
 
 @app.local_entrypoint()
-def main() -> None:
+def main(rollouts: int = 1) -> None:
+    if rollouts not in (1, 4):
+        raise ValueError("Use --rollouts 1 or --rollouts 4")
     print(json.dumps(preflight.remote(), indent=2), flush=True)
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
-    report = probe.remote(run_id)
+    report = probe.remote(run_id, rollouts)
     destination = Path("logs/frozen-probe") / run_id
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "report.json").write_text(json.dumps(report, indent=2))
