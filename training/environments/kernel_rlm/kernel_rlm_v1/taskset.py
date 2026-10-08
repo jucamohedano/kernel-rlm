@@ -5,17 +5,10 @@ import json
 from pathlib import Path
 
 import verifiers.v1 as vf
+from kernel_rlm.submission_contract import KERNEL_TASK_INSTRUCTION, validate_submission_source
 from kernel_rlm.verifier import verify_cuda
 
-INSTRUCTION = (
-    "Inspect the PyTorch reference in context, then write a standalone Python source "
-    "string defining CPP_SOURCE, CUDA_SOURCE, and cuda_forward(*tensors). The function "
-    "must call a compiled CUDA extension implementing the reference operation. "
-    "Include imports and bindings. The REPL is CPU-only; do not compile here. "
-    "A separate GPU verifier compiles and checks the submitted source on fresh inputs. "
-    "Do not delegate to sub-LLMs. Inside a ```repl``` block set answer['content'] to "
-    "the complete source string and answer['ready'] = True before the last turn ends."
-)
+INSTRUCTION = KERNEL_TASK_INSTRUCTION
 
 
 class KernelData(vf.TaskData):
@@ -32,6 +25,24 @@ class KernelTask(vf.Task[KernelData]):
         trace.info["repl_transcript"] = record["messages"]
         if not source:
             return 0.0
+        is_valid, validation_error = validate_submission_source(source)
+        if not is_valid:
+            trace.info["kernel_static"] = {
+                "valid": False,
+                "error": validation_error,
+            }
+            trace.info["kernel_verify"] = {
+                "compiled": False,
+                "extension_used": False,
+                "correct": False,
+                "max_diff": None,
+                "speedup": None,
+                "ref_ms": None,
+                "kernel_ms": None,
+                "error": f"static validation: {validation_error}",
+            }
+            return 0.0
+        trace.info["kernel_static"] = {"valid": True, "error": ""}
         result = await asyncio.to_thread(verify_cuda, self.data.context, source)
         trace.info["kernel_verify"] = result
         reward = 0.1

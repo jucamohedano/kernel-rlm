@@ -12,28 +12,8 @@ from typing import Any
 import rlm_train
 from datasets import Dataset
 
+from kernel_rlm.submission_contract import KERNEL_TASK_INSTRUCTION, validate_submission_source
 from kernel_rlm.verifier import verify_cuda
-
-_TASK_INSTRUCTION = (
-    "The context contains a PyTorch reference module that defines the task. "
-    "Read it, then write a correct and fast CUDA implementation that computes "
-    "the same function. Your submission must be Python source defining "
-    "CPP_SOURCE, CUDA_SOURCE, and def cuda_forward(*tensors). "
-    "cuda_forward must call a compiled CUDA extension rather than the PyTorch "
-    "reference. You may use torch.utils.cpp_extension.load_inline to compile "
-    "the C++ and CUDA source. Include every import and binding needed by the "
-    "submission.\n\n"
-    "The verifier runs the submitted source in a fresh process, checks it on "
-    "new inputs, and benchmarks it only after correctness passes.\n\n"
-    "The REPL is CPU-only: use it to inspect context and construct a Python source "
-    "string, not to compile or run CUDA. A separate GPU verifier compiles and "
-    "executes your submitted source after submission. Lack of CUDA in this REPL "
-    "does not prevent submission. Do not call sub-LLMs for this bounded task. "
-    "After inspecting context, set answer['content'] to the complete standalone "
-    "Python source string and answer['ready'] = True inside a ```repl``` block. "
-    "Defining cuda_forward in REPL globals alone is not a submission. "
-    "Submit before the final allowed turn ends."
-)
 
 
 def _build_dataset(*, manifest_path: str, max_tasks: int | None = None, **kwargs: Any) -> Dataset:
@@ -46,7 +26,7 @@ def _build_dataset(*, manifest_path: str, max_tasks: int | None = None, **kwargs
             example = json.loads(line)
             task_id = example.get("_task_id", str(index))
             root_prompt = (
-                f"{_TASK_INSTRUCTION}\n\n"
+                f"{KERNEL_TASK_INSTRUCTION}\n\n"
                 f"Task {task_id}.\n"
                 f"Operators: {example.get('ops', '')}."
             )
@@ -70,6 +50,20 @@ async def score(info: Any, state: Any, **_kwargs: Any) -> float:
     metadata = json.loads(info) if isinstance(info, str) else (info or {})
     submitted = (state.get("rlm_final_answer") or state.get("final_answer") or "").strip()
     if not submitted:
+        return 0.0
+
+    is_valid, validation_error = validate_submission_source(submitted)
+    if not is_valid:
+        state["kernel_verify"] = {
+            "compiled": False,
+            "extension_used": False,
+            "correct": False,
+            "max_diff": None,
+            "speedup": None,
+            "ref_ms": None,
+            "kernel_ms": None,
+            "error": f"static validation: {validation_error}",
+        }
         return 0.0
 
     result = await asyncio.to_thread(
