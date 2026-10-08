@@ -49,7 +49,7 @@ name = "kernel-rlm"
 env.taskset.id = "kernel_rlm_v1"
 env.taskset.manifest_path = "/root/kernel_rlm/tasks/vector_add.jsonl"
 env.agent.harness.id = "kernel_rlm_v1"
-env.agent.harness.max_turns = 3
+env.agent.harness.max_turns = 5
 env.agent.harness.max_tokens = 256
 env.agent.runtime.type = "subprocess"
 
