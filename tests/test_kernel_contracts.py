@@ -1,0 +1,208 @@
+import asyncio
+import importlib.util
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
+REPO = Path(__file__).parents[1]
+ENVIRONMENT = REPO / "training/environments/kernel_rlm"
+TRAINING = REPO / "training/src"
+
+
+@pytest.fixture
+def modules(monkeypatch):
+    monkeypatch.syspath_prepend(str(ENVIRONMENT))
+    monkeypatch.syspath_prepend(str(TRAINING))
+    monkeypatch.setenv("PYTHONPATH", f"{ENVIRONMENT}:{TRAINING}:{REPO}")
+    from kernel_rlm import actions, feedback, verifier
+
+    spec = importlib.util.spec_from_file_location(
+        "kernel_program_test", ENVIRONMENT / "kernel_rlm_v1/program.py"
+    )
+    program = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(program)
+    return SimpleNamespace(actions=actions, feedback=feedback, verifier=verifier, program=program)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_structured_action_and_duplicate_fence(modules, nested):
+    function = {"name": "repl", "arguments": json.dumps({"code": "print(context)"})}
+    call = {"function": function} if nested else function
+    codes, errors = modules.actions.repl_actions(
+        {"content": "```repl\nprint(context)\n```", "tool_calls": [call]}, "stop"
+    )
+    assert codes == ["print(context)"]
+    assert errors == []
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        {"name": "bash", "arguments": "{}"},
+        {"name": "repl", "arguments": "{"},
+        {"name": "repl", "arguments": '{"code":42}'},
+        {"name": "repl", "arguments": "[]"},
+    ],
+)
+def test_bad_action_reports_error(modules, call):
+    codes, errors = modules.actions.repl_actions({"tool_calls": [call]}, "stop")
+    assert not codes
+    assert errors
+
+
+def test_truncated_actions_are_not_executed(modules):
+    codes, errors = modules.actions.repl_actions({"content": "```repl\nprint(1)\n```"}, "length")
+    assert not codes
+    assert "truncated" in errors[0]
+
+
+@pytest.mark.parametrize("transport", ["local", "http"])
+@pytest.mark.parametrize("fail", [False, True])
+def test_feedback_schema_budget_and_no_reward(modules, monkeypatch, transport, fail):
+    invocations = []
+
+    def verify(reference, source, **kwargs):
+        invocations.append(kwargs)
+        assert kwargs["benchmark"] is False
+        if fail:
+            raise TimeoutError("mock timeout")
+        return {"compiled": True, "correct": True, "extension_used": True, "max_diff": 0}
+
+    monkeypatch.setattr(modules.verifier, "verify_cuda", verify)
+    namespace = {"answer": {"ready": False, "content": ""}}
+    if transport == "local":
+        code = modules.feedback.build_local_feedback_bootstrap("reference", max_calls=1)
+    else:
+        code = modules.feedback.build_http_feedback_bootstrap("http://unused", max_calls=1)
+    exec(code, namespace)
+    if transport == "http":
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps(verify("reference", "source", benchmark=False)).encode()
+
+        namespace["_kernel_feedback_urlopen"] = lambda *args, **kwargs: Response()
+    first = namespace["cuda_feedback"]("source")
+    exhausted = namespace["cuda_feedback"]("source")
+    assert first.keys() == exhausted.keys()
+    assert first["compiled"] is not fail
+    assert exhausted["compiled"] is False
+    assert exhausted["feedback_calls_used"] == 1
+    assert exhausted["feedback_calls_remaining"] == 0
+    assert len(invocations) == 1
+    assert "budget exhausted" in exhausted["error"]
+    assert "reward" not in first
+    assert namespace["answer"] == {"ready": False, "content": ""}
+
+
+def test_timeout_budget_includes_two_feedback_calls(modules):
+    actions = modules.actions
+    assert actions.FEEDBACK_MAX_CALLS * actions.FEEDBACK_TIMEOUT_S < actions.REPL_TIMEOUT_S
+    assert actions.REPL_TIMEOUT_S < actions.BACKEND_TIMEOUT_S
+
+
+def test_feedback_through_real_worker_does_not_submit(modules, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    for key, value in {
+        "KERNEL_LIMITS": '{"max_turns":1,"max_tokens":128}',
+        "KERNEL_ENDPOINT": "http://unused",
+        "KERNEL_API_KEY": "test-only",
+        "KERNEL_MODEL": "fake-model",
+    }.items():
+        monkeypatch.setenv(key, value)
+    original_bootstrap = modules.program.build_local_feedback_bootstrap
+
+    def mock_bootstrap(*args, **kwargs):
+        return original_bootstrap(*args, **kwargs) + (
+            "\ndef _kernel_feedback_verify(*args, **kwargs):\n"
+            "    assert kwargs['benchmark'] is False\n"
+            "    return {'compiled': True, 'correct': True, 'extension_used': True}\n"
+        )
+
+    monkeypatch.setattr(modules.program, "build_local_feedback_bootstrap", mock_bootstrap)
+    content = "```repl\ncuda_feedback('a')\ncuda_feedback('b')\ncuda_feedback('c')\n```"
+    message = SimpleNamespace(content=content, model_dump=lambda **kwargs: {"content": content})
+    reply = SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason="stop")])
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=reply))),
+        close=AsyncMock(),
+    )
+    monkeypatch.setattr(modules.program, "AsyncOpenAI", lambda **kwargs: client)
+    asyncio.run(modules.program.run({"context": "CPU fixture", "prompt": "test"}))
+    record = json.loads((tmp_path / "submission.json").read_text())
+    assert record["feedback_calls"] == 2
+    assert record["submission"] == ""
+    assert record["termination_reason"] == "turn_limit"
+    assert "reward" not in record
+    assert "budget exhausted" in record["messages"][-1]["content"]
+
+
+@pytest.mark.parametrize(
+    "kind, expected",
+    [
+        ("structured", "submitted"),
+        ("fenced", "submitted"),
+        ("empty", "turn_limit"),
+        ("length", "truncated"),
+        ("error", "error"),
+    ],
+)
+def test_program_with_real_cpu_worker(modules, monkeypatch, tmp_path, kind, expected):
+    monkeypatch.chdir(tmp_path)
+    for key, value in {
+        "KERNEL_LIMITS": '{"max_turns":1,"max_tokens":128}',
+        "KERNEL_ENDPOINT": "http://unused",
+        "KERNEL_API_KEY": "test-only",
+        "KERNEL_MODEL": "fake-model",
+        "RLM_TRAIN_EXEC_TIMEOUT_S": "0.01",
+    }.items():
+        monkeypatch.setenv(key, value)
+    code = "import time\ntime.sleep(0.05)\nanswer['content'] = 'cpu-test-source'\nanswer['ready'] = True"
+    message = {
+        "content": f"```repl\n{code}\n```"
+        if kind in {"fenced", "length", "structured"}
+        else "Still working"
+    }
+    if kind == "structured":
+        message["tool_calls"] = [
+            {"function": {"name": "repl", "arguments": json.dumps({"code": code})}}
+        ]
+    reply = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=message["content"], model_dump=lambda **kwargs: message
+                ),
+                finish_reason="length" if kind == "length" else "stop",
+            )
+        ]
+    )
+    create = (
+        AsyncMock(side_effect=RuntimeError("model unavailable"))
+        if kind == "error"
+        else AsyncMock(return_value=reply)
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create)), close=AsyncMock()
+    )
+    monkeypatch.setattr(modules.program, "AsyncOpenAI", lambda **kwargs: client)
+    if kind == "error":
+        with pytest.raises(RuntimeError, match="model unavailable"):
+            asyncio.run(modules.program.run({"context": "CPU fixture", "prompt": "test"}))
+    else:
+        asyncio.run(modules.program.run({"context": "CPU fixture", "prompt": "test"}))
+    record = json.loads((tmp_path / "submission.json").read_text())
+    assert record["termination_reason"] == expected
+    assert record["repl_calls"] == (1 if expected == "submitted" else 0)
+    assert bool(record["submission"]) is (expected == "submitted")
+    assert record["feedback_calls"] == 0
+    client.close.assert_awaited_once()

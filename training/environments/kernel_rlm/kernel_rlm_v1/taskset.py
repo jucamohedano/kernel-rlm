@@ -24,6 +24,8 @@ class KernelTask(vf.Task[KernelData]):
         trace.info["repl_calls"] = record["repl_calls"]
         trace.info["feedback_calls"] = record.get("feedback_calls", 0)
         trace.info["repl_transcript"] = record["messages"]
+        trace.info["kernel_termination"] = record.get("termination_reason", "unknown")
+        trace.info["kernel_model_calls"] = record.get("model_calls", [])
         if not source:
             return 0.0
         is_valid, validation_error = validate_submission_source(source)

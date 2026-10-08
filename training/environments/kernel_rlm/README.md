@@ -298,3 +298,25 @@ custom `kernel_rlm_v1` taskset resolves inside the Modal image. The taskset
 manifest path resolves to `/root/kernel_rlm/tasks/vector_add.jsonl` in that
 image. The renderer ID is the registered `laguna-xs.2` variant, not the
 human-readable checkpoint spelling.
+
+### CPU-tested rollout contracts
+
+The V1 loop accepts fenced REPL blocks or structured `repl` calls. When both
+appear in a response, structured calls take precedence, so a duplicated fence
+does not execute twice. Unsupported/malformed calls produce feedback. Truncated
+responses execute no actions and receive a retry message.
+
+Local intermediate verification is limited to two calls of 120 seconds each.
+The enclosing REPL budget is 270 seconds (both calls plus overhead), and the
+backend watchdog is 300 seconds. Feedback always includes the same status,
+error, timing, and call-budget fields, including on exhaustion. Saved records
+distinguish `submitted`, `turn_limit`, `truncated`, and `error` termination.
+
+Intermediate `cuda_feedback` checks use `benchmark=False`; they do not award
+reward or submit the answer. Final scoring independently validates and verifies
+only the submitted source. There is no best-of-intermediate-candidates reward.
+
+From the repository root, run `python -m pytest tests/test_kernel_contracts.py -q`.
+These tests use mocked model responses and CUDA checks, including execution
+through the real CPU subprocess worker. They do not establish GPU compilation
+success or validate Prime's complete distributed training path.

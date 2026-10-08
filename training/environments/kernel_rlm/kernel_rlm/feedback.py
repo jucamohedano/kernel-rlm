@@ -49,6 +49,19 @@ def build_local_feedback_bootstrap(
                             + str(_kernel_feedback_error)
                         ),
                     }}
+            result = {{
+                "compiled": False,
+                "extension_used": False,
+                "correct": False,
+                "max_diff": None,
+                "speedup": None,
+                "ref_ms": None,
+                "kernel_ms": None,
+                "error": "",
+                **result,
+                "feedback_calls_used": _kernel_feedback_calls,
+                "feedback_calls_remaining": {max_calls} - _kernel_feedback_calls,
+            }}
             print("CUDA feedback: " + _kernel_feedback_json.dumps(result, sort_keys=True))
             return result
         """
@@ -105,6 +118,19 @@ def build_http_feedback_bootstrap(
                             + str(_kernel_feedback_error)
                         ),
                     }}
+            result = {{
+                "compiled": False,
+                "extension_used": False,
+                "correct": False,
+                "max_diff": None,
+                "speedup": None,
+                "ref_ms": None,
+                "kernel_ms": None,
+                "error": "",
+                **result,
+                "feedback_calls_used": _kernel_feedback_calls,
+                "feedback_calls_remaining": {max_calls} - _kernel_feedback_calls,
+            }}
             print("CUDA feedback: " + _kernel_feedback_json.dumps(result, sort_keys=True))
             return result
         """
