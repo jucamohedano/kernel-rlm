@@ -59,6 +59,7 @@ alpha = 16
 
 [orchestrator.renderer]
 name = "laguna-xs.2"
+enable_thinking = true
 
 [inference.vllm]
 enable_lora = true
