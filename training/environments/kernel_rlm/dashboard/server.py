@@ -34,6 +34,22 @@ def read_metrics(path: Path) -> list[dict]:
     return values
 
 
+def read_jsonl(path: Path) -> list[dict]:
+    values = []
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return values
+    for line in lines:
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            values.append(value)
+    return values
+
+
 def discover_runs(root: Path) -> list[dict]:
     runs: dict[str, dict] = {}
     for report_path in root.rglob("report.json"):
@@ -54,6 +70,13 @@ def discover_runs(root: Path) -> list[dict]:
         run_id = episode_path.parent.name
         run = runs.setdefault(run_id, {"id": run_id, "root": episode_path.parent, "report": {}})
         run.setdefault("episodes", []).append(episode_path)
+    for rollout_path in root.rglob("traces.jsonl"):
+        run_id = next(
+            (part for part in reversed(rollout_path.parts) if part.startswith("20")),
+            rollout_path.parent.name,
+        )
+        run = runs.setdefault(run_id, {"id": run_id, "root": rollout_path.parent, "report": {}})
+        run.setdefault("rollouts", []).append(rollout_path)
     return sorted(runs.values(), key=lambda run: run["id"], reverse=True)
 
 
@@ -150,6 +173,22 @@ def render_trace(path: Path) -> str:
     return "".join(items)
 
 
+def render_rollouts(path: Path) -> str:
+    rows = read_jsonl(path)
+    items = [f'<div class="card"><h3>{text(path.name)}</h3><div class="muted">{len(rows)} saved rollout records</div>']
+    for index, row in enumerate(rows[:12], 1):
+        reward = row.get("reward", row.get("score", "—"))
+        task = row.get("task_id", row.get("task", row.get("env", "—")))
+        items.append(
+            f'<details><summary>Rollout {index} · task={text(task)} · reward={text(reward)}</summary>'
+            f'<pre>{text(json.dumps(row, indent=2))}</pre></details>'
+        )
+    if len(rows) > 12:
+        items.append(f'<div class="muted">Showing the first 12 records; the source file contains {len(rows)}.</div>')
+    items.append("</div>")
+    return "".join(items)
+
+
 def render_run(root: Path, run_id: str) -> str:
     run = next((candidate for candidate in discover_runs(root) if candidate["id"] == run_id), None)
     if run is None:
@@ -164,13 +203,14 @@ def render_run(root: Path, run_id: str) -> str:
         f'<div class="card"><div class="muted">status</div><div class="value">{text(report.get("status", "artifacts"))}</div></div>'
         f'<div class="card"><div class="muted">latest reward</div><div class="value">{text(metric_value(metrics, ("reward/mean", "reward", "train/reward")))}</div></div>'
         f'<div class="card"><div class="muted">metric rows</div><div class="value">{len(metrics)}</div></div>'
-        f'<div class="card"><div class="muted">traces / episodes</div><div class="value">{len(trace_cards)} / {len(episode_cards)}</div></div></div>'
+        f'<div class="card"><div class="muted">traces / episodes / batches</div><div class="value">{len(trace_cards)} / {len(episode_cards)} / {len(run.get("rollouts", []))}</div></div></div>'
         '<h2>Learning curves</h2><div class="grid">'
         '<div class="card"><h3>Reward</h3>' + chart_svg(metrics, ("reward/mean", "reward", "train/reward"), "#71e39a") + '</div>'
         '<div class="card"><h3>Loss</h3>' + chart_svg(metrics, ("loss", "train/loss", "policy_loss"), "#f3c969") + '</div>'
         '<div class="card"><h3>Entropy</h3>' + chart_svg(metrics, ("entropy", "train/entropy"), "#8ecbff") + '</div></div>'
         '<h2>Run metadata</h2><div class="card"><pre>' + text(json.dumps(report, indent=2)) + '</pre></div>'
         '<h2>Traces</h2>' + ("".join(trace_cards) or '<div class="card empty">No rollout traces downloaded yet.</div>')
+        + '<h2>Prime rollout batches</h2>' + ("".join(render_rollouts(path) for path in run.get("rollouts", [])) or '<div class="card empty">No Prime JSONL batches downloaded yet.</div>')
         + '<h2>Episodes</h2>' + ("".join(episode_cards) or '<div class="card empty">No episode records downloaded yet.</div>')
     )
     return layout(f"Kernel-RLM · {run_id}", body)
