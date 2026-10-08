@@ -159,7 +159,8 @@ def test_worker_exit_during_forced_cleanup(modules):
     assert backend._proc is None
 
 
-def test_feedback_through_real_worker_does_not_submit(modules, monkeypatch, tmp_path):
+@pytest.mark.parametrize("workflow", ["budget", "scaffold", "invalid_syntax"])
+def test_feedback_through_real_worker_does_not_submit(modules, monkeypatch, tmp_path, workflow):
     monkeypatch.chdir(tmp_path)
     for key, value in {
         "KERNEL_LIMITS": '{"max_turns":1,"max_tokens":128,"model_timeout_s":90}',
@@ -179,6 +180,20 @@ def test_feedback_through_real_worker_does_not_submit(modules, monkeypatch, tmp_
 
     monkeypatch.setattr(modules.program, "build_local_feedback_bootstrap", mock_bootstrap)
     content = "```repl\ncuda_feedback('a')\ncuda_feedback('b')\ncuda_feedback('c')\n```"
+    if workflow != "budget":
+        from kernel_rlm.submission_contract import CUDA_ASSEMBLY_TEMPLATE
+
+        code = (
+            "assert compile is None\n"
+            "cpp_declarations = 'torch::Tensor launch(torch::Tensor x);'\n"
+            "cuda_implementation = 'torch::Tensor launch(torch::Tensor x) { return x; }'\n"
+            + CUDA_ASSEMBLY_TEMPLATE
+        )
+        if workflow == "invalid_syntax":
+            code = code.replace("import ast\n", "source = 'def broken('\nimport ast\n")
+        else:
+            code += '\nanswer["content"] = source\nanswer["ready"] = True\n'
+        content = f"```repl\n{code}\n```"
     message = SimpleNamespace(content=content, model_dump=lambda **kwargs: {"content": content})
     reply = SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason="stop")])
     client = SimpleNamespace(
@@ -188,11 +203,21 @@ def test_feedback_through_real_worker_does_not_submit(modules, monkeypatch, tmp_
     monkeypatch.setattr(modules.program, "AsyncOpenAI", lambda **kwargs: client)
     asyncio.run(modules.program.run({"context": "CPU fixture", "prompt": "test"}))
     record = json.loads((tmp_path / "submission.json").read_text())
-    assert record["feedback_calls"] == 2
-    assert record["submission"] == ""
-    assert record["termination_reason"] == "turn_limit"
     assert "reward" not in record
-    assert "budget exhausted" in record["messages"][-1]["content"]
+    if workflow == "budget":
+        assert record["feedback_calls"] == 2
+        assert record["submission"] == ""
+        assert record["termination_reason"] == "turn_limit"
+        assert "budget exhausted" in record["messages"][-1]["content"]
+    elif workflow == "scaffold":
+        assert record["feedback_calls"] == 1
+        assert "CPP_SOURCE" in record["submission"]
+        assert record["termination_reason"] == "submitted"
+        assert "'correct': True" in record["messages"][-1]["content"]
+    else:
+        assert record["feedback_calls"] == 0
+        assert record["submission"] == ""
+        assert "SyntaxError" in record["messages"][-1]["content"]
 
 
 @pytest.mark.parametrize(

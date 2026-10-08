@@ -41,8 +41,10 @@ CUDA_ASSEMBLY_TEMPLATE = textwrap.dedent(
         + "functions=['launch'], extra_cuda_cflags=['-O3'], verbose=False)\n"
         + "def cuda_forward(*tensors):\n    return _module.launch(*tensors)\n"
     )
-    compile(source, "<candidate>", "exec")
+    import ast
+    ast.parse(source, filename="<candidate>", mode="exec")
     result = cuda_feedback(source)
+    print(result)
     """
 ).strip()
 
@@ -69,8 +71,10 @@ CUDA_BUILD_GUIDE = textwrap.dedent(
        not a library path string. Use only the load_inline keywords shown here.
        Never add is_pure_python, keep_debug_buffers, opt_level, or invented options.
     4. Prepare complete source as a string in the REPL; do not exec it or build
-       an extension directly in the REPL. Check Python syntax with compile(source,
-       "<candidate>", "exec") without executing it. Then call cuda_feedback(source).
+       an extension directly in the REPL. Import ast and check Python syntax with
+       ast.parse(source, filename="<candidate>", mode="exec") without executing it.
+       The REPL disables compile, exec, and eval; do not call those builtins.
+       Then call cuda_feedback(source) and print the returned dictionary.
        There are exactly TWO feedback calls per trajectory. Inspect compiled,
        extension_used, correct, and error; max_diff alone does not prove success.
        Repair the reported error before spending the second call. If correct,
