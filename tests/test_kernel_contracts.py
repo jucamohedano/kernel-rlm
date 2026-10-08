@@ -110,6 +110,39 @@ def test_timeout_budget_includes_two_feedback_calls(modules):
     assert actions.REPL_TIMEOUT_S < actions.BACKEND_TIMEOUT_S
 
 
+def test_prompt_scaffold_assembles_source_without_loading_extension(modules):
+    import ast
+
+    from kernel_rlm.submission_contract import (
+        CUDA_ASSEMBLY_TEMPLATE,
+        KERNEL_TASK_INSTRUCTION,
+        validate_submission_source,
+    )
+
+    received = []
+    namespace = {
+        "cpp_declarations": "#include <torch/extension.h>\ntorch::Tensor launch(torch::Tensor x);",
+        "cuda_implementation": "#include <torch/extension.h>\ntorch::Tensor launch(torch::Tensor x) { return x; }",
+        "cuda_feedback": lambda source: received.append(source),
+    }
+    exec(CUDA_ASSEMBLY_TEMPLATE, namespace)
+    assert received == [namespace["source"]]
+    assert validate_submission_source(namespace["source"])[0]
+    tree = ast.parse(namespace["source"])
+    call = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "load_inline"
+    )
+    keywords = {keyword.arg: keyword.value for keyword in call.keywords}
+    assert ast.literal_eval(keywords["functions"]) == ["launch"]
+    assert "is_python_module" not in keywords
+    assert KERNEL_TASK_INSTRUCTION.startswith("Inspect the PyTorch reference in context")
+    assert KERNEL_TASK_INSTRUCTION.endswith(CUDA_ASSEMBLY_TEMPLATE)
+
+
 def test_worker_exit_during_forced_cleanup(modules):
     from rlm_train.repl.subprocess import SubprocessReplBackend, WorkerProtocolError
 

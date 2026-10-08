@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import textwrap
 
 KERNEL_TASK_INSTRUCTION = (
     "Inspect the PyTorch reference in context, then write a standalone Python source "
@@ -29,6 +30,66 @@ KERNEL_TASK_INSTRUCTION = (
 )
 
 
+CUDA_ASSEMBLY_TEMPLATE = textwrap.dedent(
+    r"""
+    source = (
+        "import torch\nfrom torch.utils.cpp_extension import load_inline\n"
+        + "CPP_SOURCE = " + repr(cpp_declarations) + "\n"
+        + "CUDA_SOURCE = " + repr(cuda_implementation) + "\n"
+        + "_module = load_inline(name='kernel_rlm_candidate', "
+        + "cpp_sources=CPP_SOURCE, cuda_sources=CUDA_SOURCE, "
+        + "functions=['launch'], extra_cuda_cflags=['-O3'], verbose=False)\n"
+        + "def cuda_forward(*tensors):\n    return _module.launch(*tensors)\n"
+    )
+    compile(source, "<candidate>", "exec")
+    result = cuda_feedback(source)
+    """
+).strip()
+
+CUDA_BUILD_GUIDE = textwrap.dedent(
+    """
+
+    CUDA build rules and expected workflow:
+
+    1. Read context once. Identify input shapes, dtypes, output shape, and the
+       reference operation. Implement the computation yourself in a CUDA kernel;
+       do not call the reference operation or delegate the computation to PyTorch.
+    2. Keep CPP_SOURCE to includes and a declaration of the exported function
+       named launch. Put __global__ kernels, their definitions, the matching
+       launch function definition, and every <<<...>>> kernel launch in CUDA_SOURCE.
+       The ordinary C++ compiler must never receive CUDA kernel-launch syntax.
+       Include <torch/extension.h> in both translation units and <cuda_runtime.h>
+       in CUDA_SOURCE. Match declaration and definition names, argument types,
+       and return type exactly; use Tensor.numel(), not numels().
+    3. Use the binding scaffold below. functions=["launch"] generates the Python
+       binding automatically: do NOT also write PYBIND11_MODULE or TORCH_LIBRARY.
+       Adapt the launch signature to the reference inputs; the task-independent
+       scaffold intentionally does not supply the kernel computation.
+       Do not set is_python_module=False: cuda_forward needs a Python module,
+       not a library path string. Use only the load_inline keywords shown here.
+       Never add is_pure_python, keep_debug_buffers, opt_level, or invented options.
+    4. Prepare complete source as a string in the REPL; do not exec it or build
+       an extension directly in the REPL. Check Python syntax with compile(source,
+       "<candidate>", "exec") without executing it. Then call cuda_feedback(source).
+       There are exactly TWO feedback calls per trajectory. Inspect compiled,
+       extension_used, correct, and error; max_diff alone does not prove success.
+       Repair the reported error before spending the second call. If correct,
+       preserve that exact candidate and submit it immediately.
+    5. Reserve the last turn for submission. After the second feedback call,
+       make any necessary final repair and submit your best complete source,
+       even if verification failed. Do not ask for exhausted feedback.
+       Set answer["content"] = source and answer["ready"] = True in the REPL.
+
+    Assembly scaffold: run after creating task-specific cpp_declarations and
+    cuda_implementation strings. This is assembly code, not the final submission.
+    Submit the assembled source string. Use repl fences for actual REPL actions.
+    Keep launch's signature consistent with the tensors passed to cuda_forward.
+    """
+)
+
+KERNEL_TASK_INSTRUCTION += "\n\n" + CUDA_BUILD_GUIDE + "\n" + CUDA_ASSEMBLY_TEMPLATE
+
+
 def _call_name(function: ast.expr) -> str:
     if isinstance(function, ast.Name):
         return function.id
@@ -49,16 +110,13 @@ def validate_submission_source(source: str) -> tuple[bool, str]:
         target.id
         for node in tree.body
         if isinstance(node, ast.Assign | ast.AnnAssign)
-        for target in (
-            node.targets if isinstance(node, ast.Assign) else [node.target]
-        )
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
         if isinstance(target, ast.Name)
     }
     if "CPP_SOURCE" not in assigned_names or "CUDA_SOURCE" not in assigned_names:
         return False, "source must define CPP_SOURCE and CUDA_SOURCE"
     if not any(
-        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        and node.name == "cuda_forward"
+        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == "cuda_forward"
         for node in tree.body
     ):
         return False, "source must define cuda_forward"
@@ -82,8 +140,7 @@ def validate_submission_source(source: str) -> tuple[bool, str]:
     if not load_inline_calls:
         return False, "source must call torch.utils.cpp_extension.load_inline"
     if not any(
-        {keyword.arg for keyword in call.keywords if keyword.arg}
-        >= {"cpp_sources", "cuda_sources"}
+        {keyword.arg for keyword in call.keywords if keyword.arg} >= {"cpp_sources", "cuda_sources"}
         for call in load_inline_calls
     ):
         return False, "load_inline must receive cpp_sources and cuda_sources"
