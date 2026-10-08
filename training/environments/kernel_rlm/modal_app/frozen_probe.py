@@ -25,10 +25,15 @@ def preflight() -> dict:
         {
             "taskset": {"id": "kernel_rlm_v1", "manifest_path": "/tmp/probe.jsonl"},
             "agent": {
-                "harness": {"id": "kernel_rlm_v1", "max_turns": 5, "max_tokens": 2048},
+                "harness": {
+                    "id": "kernel_rlm_v1",
+                    "max_turns": 5,
+                    "max_tokens": 2048,
+                    "model_timeout_s": 90,
+                },
                 "runtime": {"type": "subprocess"},
                 "sampling": {"temperature": 1.0, "max_tokens": 2048},
-                "timeout": {"rollout": 360, "scoring": 180},
+                "timeout": {"rollout": 480, "scoring": 260},
             },
         }
     )
@@ -50,7 +55,7 @@ def preflight() -> dict:
     gpu="A100-80GB:2",
     cpu=12,
     memory=98304,
-    timeout=960,
+    timeout=1260,
     startup_timeout=180,
     retries=0,
     max_containers=1,
@@ -84,7 +89,7 @@ async def probe(run_id: str) -> dict:
     started = time.monotonic()
     server = None
     try:
-        async with asyncio.timeout(900):
+        async with asyncio.timeout(1200):
             snapshot = snapshot_download(MODEL_ID, revision=REVISION, local_files_only=True)
             server_env = {**os.environ, "CUDA_VISIBLE_DEVICES": "0"}
             command = [
@@ -107,10 +112,18 @@ async def probe(run_id: str) -> dict:
                 "1024",
                 "--gpu-memory-utilization",
                 "0.95",
-                "--enforce-eager",
                 "--enable-lora",
-                "--trust-remote-code",
+                "--max-lora-rank",
+                "8",
+                "--max-loras",
+                "1",
+                "--reasoning-parser",
+                "poolside_v1",
+                "--tool-call-parser",
+                "poolside_v1",
             ]
+            report["inference_command"] = command
+            report["scope"] = "one frozen trajectory; not a mixed-reward group"
             with (directory / "inference.log").open("w") as logfile:
                 server = subprocess.Popen(
                     command,
@@ -134,18 +147,11 @@ async def probe(run_id: str) -> dict:
                     await asyncio.sleep(2)
             else:
                 raise TimeoutError("Inference startup exceeded 450 seconds")
-            rows = [
-                json.loads(line)
-                for line in Path("/root/kernel_rlm/tasks/lvl1_seed42.jsonl")
-                .read_text()
-                .splitlines()
-            ]
             selected = [
                 {
                     "_task_id": "vector_add",
                     "code": Path("/root/kernel_rlm/tasks/vector_add.py").read_text(),
                 },
-                next(row for row in rows if row["_task_id"] == "lvl1-seed42-0049"),
             ]
             manifest = directory / "manifest.jsonl"
             manifest.write_text("\n".join(json.dumps(row) for row in selected))
@@ -153,10 +159,15 @@ async def probe(run_id: str) -> dict:
                 {
                     "taskset": {"id": "kernel_rlm_v1", "manifest_path": str(manifest)},
                     "agent": {
-                        "harness": {"id": "kernel_rlm_v1", "max_turns": 5, "max_tokens": 2048},
+                        "harness": {
+                            "id": "kernel_rlm_v1",
+                            "max_turns": 5,
+                            "max_tokens": 2048,
+                            "model_timeout_s": 90,
+                        },
                         "runtime": {"type": "subprocess"},
                         "sampling": {"temperature": 1.0, "max_tokens": 2048},
-                        "timeout": {"rollout": 360, "scoring": 180},
+                        "timeout": {"rollout": 480, "scoring": 260},
                     },
                 }
             )
@@ -181,7 +192,7 @@ async def probe(run_id: str) -> dict:
                         "correct": 0,
                     }
                     report["groups"].append(group)
-                    for _rollout in range(4):
+                    for _rollout in range(1):
                         episode = await environment.run_episode(task, context)
                         with (directory / "traces.jsonl").open("a") as output:
                             output.write(episode.model_dump_json() + "\n")
@@ -199,13 +210,13 @@ async def probe(run_id: str) -> dict:
                         print(json.dumps(group), flush=True)
                         (directory / "report.json").write_text(json.dumps(report, indent=2))
                         await traces.commit.aio()
-            report["gate_passed"] = all(
-                len(set(group["rewards"])) > 1
-                and group["correct"] > 0
-                and group["feedback_calls"] > 0
-                for group in report["groups"]
+            report["trajectory_passed"] = all(
+                group["correct"] > 0 and group["feedback_calls"] > 0 for group in report["groups"]
             )
-            report["status"] = "passed" if report["gate_passed"] else "no_training_signal"
+            report["gate_passed"] = False
+            report["status"] = (
+                "trajectory_passed" if report["trajectory_passed"] else "trajectory_failed"
+            )
     except Exception:
         report["status"] = "failed"
         report["error"] = traceback.format_exc()

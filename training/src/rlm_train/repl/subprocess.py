@@ -89,7 +89,10 @@ class SubprocessReplBackend(ReplBackend):
                 try:
                     await asyncio.wait_for(self._proc.wait(), timeout=2.0)
                 except TimeoutError:
-                    self._proc.kill()
+                    try:
+                        self._proc.kill()
+                    except ProcessLookupError:
+                        pass
                     await self._proc.wait()
             if self._stderr_task and not self._stderr_task.done():
                 self._stderr_task.cancel()

@@ -3,7 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -110,10 +110,26 @@ def test_timeout_budget_includes_two_feedback_calls(modules):
     assert actions.REPL_TIMEOUT_S < actions.BACKEND_TIMEOUT_S
 
 
+def test_worker_exit_during_forced_cleanup(modules):
+    from rlm_train.repl.subprocess import SubprocessReplBackend, WorkerProtocolError
+
+    backend = SubprocessReplBackend()
+    backend._proc = SimpleNamespace(
+        returncode=None,
+        terminate=Mock(),
+        kill=Mock(side_effect=ProcessLookupError),
+        wait=AsyncMock(side_effect=[TimeoutError(), None]),
+    )
+    backend._send = AsyncMock()
+    backend._read_line = AsyncMock(side_effect=WorkerProtocolError("closed"))
+    asyncio.run(backend.stop())
+    assert backend._proc is None
+
+
 def test_feedback_through_real_worker_does_not_submit(modules, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     for key, value in {
-        "KERNEL_LIMITS": '{"max_turns":1,"max_tokens":128}',
+        "KERNEL_LIMITS": '{"max_turns":1,"max_tokens":128,"model_timeout_s":90}',
         "KERNEL_ENDPOINT": "http://unused",
         "KERNEL_API_KEY": "test-only",
         "KERNEL_MODEL": "fake-model",

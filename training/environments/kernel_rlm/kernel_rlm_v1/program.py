@@ -31,7 +31,7 @@ async def run(task: dict) -> None:
         base_url=os.environ["KERNEL_ENDPOINT"],
         api_key=os.environ.pop("KERNEL_API_KEY"),
         max_retries=0,
-        timeout=150,
+        timeout=limits.get("model_timeout_s", 150),
     )
     backend = SubprocessReplBackend(request_timeout=BACKEND_TIMEOUT_S)
     messages = build_rlm_system_prompt(

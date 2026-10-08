@@ -11,6 +11,7 @@ from verifiers.v1.runtimes import ProgramResult, Runtime
 class KernelHarnessConfig(vf.HarnessConfig):
     max_turns: int = Field(3, ge=1, le=8)
     max_tokens: int = Field(2048, ge=1, le=4096)
+    model_timeout_s: float = Field(150, gt=0)
 
 
 class KernelHarness(vf.Harness[KernelHarnessConfig]):
@@ -38,7 +39,11 @@ class KernelHarness(vf.Harness[KernelHarnessConfig]):
                 "KERNEL_API_KEY": secret,
                 "KERNEL_MODEL": ctx.model,
                 "KERNEL_LIMITS": json.dumps(
-                    {"max_turns": self.config.max_turns, "max_tokens": self.config.max_tokens}
+                    {
+                        "max_turns": self.config.max_turns,
+                        "max_tokens": self.config.max_tokens,
+                        "model_timeout_s": self.config.model_timeout_s,
+                    }
                 ),
             },
         )
