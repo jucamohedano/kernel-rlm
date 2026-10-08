@@ -9,9 +9,16 @@ import modal
 
 from .attention_lora import MODEL_ID, REVISION, models
 from .grpo_live_smoke import live_image
+from .inference_runtime import (
+    PROBE_TIMEOUT_S,
+    STARTUP_TIMEOUT_S,
+    cache_environment,
+    wait_for_inference,
+)
 from .rollout_smoke import traces
 
 app = modal.App("kernel-rlm-frozen-probe")
+inference_cache = modal.Volume.from_name("kernel-rlm-inference-cache", create_if_missing=True)
 
 
 @app.function(image=live_image, timeout=120, cpu=1, memory=4096)
@@ -51,7 +58,7 @@ def preflight() -> dict:
 
 @app.function(
     image=live_image,
-    volumes={"/models": models, "/traces": traces},
+    volumes={"/models": models, "/traces": traces, "/inference-cache": inference_cache},
     gpu="A100-80GB:2",
     cpu=12,
     memory=98304,
@@ -70,7 +77,7 @@ async def probe(run_id: str, rollouts: int = 1) -> dict:
     import subprocess
     import time
     import traceback
-    import urllib.request
+    from importlib.metadata import version
 
     import verifiers.v1 as vf
     from huggingface_hub import snapshot_download
@@ -87,13 +94,22 @@ async def probe(run_id: str, rollouts: int = 1) -> dict:
         "status": "running",
         "groups": [],
         "gate_passed": False,
+        "startup_timeout_seconds": STARTUP_TIMEOUT_S,
+        "probe_timeout_seconds": PROBE_TIMEOUT_S,
     }
     started = time.monotonic()
     server = None
     try:
-        async with asyncio.timeout(1200):
+        async with asyncio.timeout(PROBE_TIMEOUT_S):
             snapshot = snapshot_download(MODEL_ID, revision=REVISION, local_files_only=True)
-            server_env = {**os.environ, "CUDA_VISIBLE_DEVICES": "0"}
+            cache_identity = {
+                "model_revision": REVISION,
+                "gpu": "A100-80GB-sm80",
+                **{package: version(package) for package in ("vllm", "torch", "triton")},
+            }
+            cache_env = cache_environment(Path("/inference-cache"), cache_identity)
+            report["inference_cache"] = {"identity": cache_identity, "environment": cache_env}
+            server_env = {**os.environ, **cache_env, "CUDA_VISIBLE_DEVICES": "0"}
             command = [
                 "python",
                 "-m",
@@ -137,18 +153,9 @@ async def probe(run_id: str, rollouts: int = 1) -> dict:
             os.environ["CUDA_VISIBLE_DEVICES"] = "1"
             os.environ["PROBE_API_KEY"] = "unused-local-endpoint"
             os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0"
-            for _attempt in range(225):
-                if server.poll() is not None:
-                    raise RuntimeError("Inference server exited; inspect inference.log")
-                try:
-                    await asyncio.to_thread(
-                        urllib.request.urlopen, "http://127.0.0.1:8000/health", timeout=2
-                    )
-                    break
-                except OSError:
-                    await asyncio.sleep(2)
-            else:
-                raise TimeoutError("Inference startup exceeded 450 seconds")
+            report["inference_startup_seconds"] = await wait_for_inference(server)
+            (directory / "report.json").write_text(json.dumps(report, indent=2))
+            await inference_cache.commit.aio()
             selected = [
                 {
                     "_task_id": "vector_add",
@@ -247,9 +254,18 @@ async def probe(run_id: str, rollouts: int = 1) -> dict:
                 os.killpg(server.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
+            try:
+                await asyncio.to_thread(server.wait, timeout=10)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(server.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await asyncio.to_thread(server.wait, timeout=5)
         report["elapsed_seconds"] = time.monotonic() - started
         (directory / "report.json").write_text(json.dumps(report, indent=2))
         await traces.commit.aio()
+        await inference_cache.commit.aio()
     return report
 
 

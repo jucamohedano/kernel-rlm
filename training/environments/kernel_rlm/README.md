@@ -320,3 +320,27 @@ From the repository root, run `python -m pytest tests/test_kernel_contracts.py -
 These tests use mocked model responses and CUDA checks, including execution
 through the real CPU subprocess worker. They do not establish GPU compilation
 success or validate Prime's complete distributed training path.
+
+### Frozen-probe startup budget and cache
+
+The probe mounts `kernel-rlm-inference-cache` at `/inference-cache` and sets
+`VLLM_CACHE_ROOT` inside a namespace keyed by the model revision, A100 GPU
+architecture, and installed vLLM/PyTorch/Triton versions. vLLM manages its
+Inductor/Triton compilation artifacts internally; no separate Triton override
+is set. Cache writes are committed after readiness and after server shutdown.
+Only trusted inference processes should write this executable-code cache.
+
+Readiness has a 600-second elapsed-time deadline. The overall probe still has
+a 1200-second deadline and Modal's 1260-second hard limit includes cleanup.
+More startup time leaves less rollout time; it does not extend the overall cap.
+All four rollouts already share one server process. The server is terminated
+after the group, with forced shutdown if graceful shutdown exceeds 10 seconds;
+no warm idle GPU deployment is retained.
+
+The first run must populate the new cache. Later compatible runs can reuse it,
+but still load weights and perform GPU warmup/graph capture. Compare saved
+`inference_startup_seconds` and inference logs before claiming a speedup.
+Run `python -m pytest tests/test_inference_runtime.py -q` for CPU-only checks.
+
+References: [vLLM startup optimization](https://docs.vllm.ai/en/v0.26.0/configuration/optimization/)
+and [Modal volume persistence](https://modal.com/docs/guide/volumes).
