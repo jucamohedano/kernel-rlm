@@ -42,7 +42,7 @@ batch_size = 8
 group_size = 8
 
 [orchestrator.train.sampling]
-max_completion_tokens = 256
+max_completion_tokens = 512
 
 [[orchestrator.train.source]]
 name = "kernel-rlm"
@@ -50,7 +50,7 @@ env.taskset.id = "kernel_rlm_v1"
 env.taskset.manifest_path = "/root/kernel_rlm/tasks/vector_add.jsonl"
 env.agent.harness.id = "kernel_rlm_v1"
 env.agent.harness.max_turns = 5
-env.agent.harness.max_tokens = 256
+env.agent.harness.max_tokens = 512
 env.agent.runtime.type = "subprocess"
 
 [orchestrator.model.lora]
