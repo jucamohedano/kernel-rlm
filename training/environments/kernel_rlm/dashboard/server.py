@@ -204,7 +204,15 @@ def render_timeline(trace: dict) -> str:
     info = trace.get("info", {})
     calls = iter(trace.get("calls", []))
     events = []
-    for index, message in enumerate(info.get("repl_transcript", []), 1):
+    transcript = info.get("repl_transcript", [])
+    if not transcript:
+        sampled_nodes = {call["node"] for call in trace.get("calls", [])}
+        transcript = [
+            node["message"]
+            for index, node in enumerate(trace.get("nodes", []))
+            if node["message"].get("role") != "assistant" or index in sampled_nodes
+        ]
+    for index, message in enumerate(transcript, 1):
         role = message.get("role", "unknown")
         content = message.get("content", "")
         label = f"{index:02d} · {role.upper()}"

@@ -186,7 +186,11 @@ async def probe(run_id: str) -> dict:
                         with (directory / "traces.jsonl").open("a") as output:
                             output.write(episode.model_dump_json() + "\n")
                         if not episode.ok:
-                            raise RuntimeError(f"Episode failed: {episode.errors}")
+                            errors = [
+                                str(error) for trace in episode.traces for error in trace.errors
+                            ]
+                            report["episode_errors"] = errors
+                            raise RuntimeError(f"Episode failed: {errors}")
                         trace = episode.traces[0]
                         group["rewards"].append(trace.reward)
                         group["submitted"] += bool(trace.info.get("kernel_submission"))

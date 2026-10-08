@@ -49,3 +49,17 @@ def test_empty_run_and_out_of_range_selection(tmp_path):
     assert "No trajectory messages downloaded" in page
     assert "No series recorded" in page
     assert "Run not found" in dashboard.render_run(tmp_path, "missing")
+
+
+def test_failed_trace_without_final_transcript():
+    page = dashboard.render_timeline(
+        {
+            "nodes": [
+                {"message": {"role": "user", "content": "initial prompt"}},
+                {"message": {"role": "assistant", "content": "partial response"}},
+            ],
+            "calls": [{"node": 1, "finish_reason": "stop"}],
+        }
+    )
+    assert "initial prompt" in page
+    assert "partial response" in page
