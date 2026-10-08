@@ -29,9 +29,9 @@ CONFIG = APP_ROOT / "configs" / "grpo_smoke.toml"
 def patch_prime_laguna_config() -> None:
     model_source = Path("/root/prime_rl/trainer/model.py")
     source = model_source.read_text()
-    marker = "model_config.use_cache = False"
+    marker = "    model_config.use_cache = False\n"
     compatibility = (
-        "if getattr(model_config, \"model_type\", \"\") == \"laguna\" "
+        "    if getattr(model_config, \"model_type\", \"\") == \"laguna\" "
         "and getattr(model_config, \"gating\", None) is True:\n"
         "        model_config.gating = \"per-head\"\n"
     )
