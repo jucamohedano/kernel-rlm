@@ -17,3 +17,6 @@ def test_short_run_checkpoint_schedule_and_retention():
     assert periodic + [config["max_steps"]] == [2, 3]
     assert "ckpt" not in config["trainer"]
     assert "ckpt" not in config["orchestrator"]
+    assert (
+        config["orchestrator"]["train"]["source"][0]["env"]["taskset"]["speed_reward_weight"] == 0
+    )

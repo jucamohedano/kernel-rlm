@@ -340,8 +340,24 @@ The current launcher creates fresh runs; automatic resume is not implemented.
 
 A normal final save is supported; a Modal hard timeout or crash does not
 guarantee one. Remote save/load round-trip remains to be validated on the first
-bounded training job. Checkpointing alone does not resolve the reward-filter
-or spending-limit launch blockers.
+bounded training job.
+
+### First-phase reward and spending guards
+
+The training taskset sets `speed_reward_weight = 0.0`: speedup is still measured
+and saved, but training rewards use only static validity, compilation and
+correctness (0, 0.1, 0.3, 0.7). Therefore all-correct groups have zero advantage
+range and the existing Prime gate rejects them regardless of timing variation.
+Failed groups with different partial-credit stages can still carry signal;
+this is not a strict binary all-fail filter. Frozen probes keep their default
+speed reward unless explicitly configured otherwise.
+
+The GPU function has a 900-second execution limit and 120-second startup limit.
+The child training process has 780 seconds, then SIGTERM, a 30-second grace,
+and SIGKILL if needed, leaving time for reports and volume commit. No retries.
+This is a wall-clock guard, not a guaranteed dollar cap or checkpoint-on-signal
+implementation. A timed stop can lose work since the last completed checkpoint.
+Live stdout is now written directly to `prime.log`; W&B still receives metrics.
 
 ### Frozen-probe cache details
 

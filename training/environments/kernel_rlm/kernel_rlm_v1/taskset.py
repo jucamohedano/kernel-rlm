@@ -13,6 +13,7 @@ INSTRUCTION = KERNEL_TASK_INSTRUCTION
 
 class KernelData(vf.TaskData):
     context: str
+    speed_reward_weight: float = 0.1
 
 
 class KernelTask(vf.Task[KernelData]):
@@ -53,12 +54,15 @@ class KernelTask(vf.Task[KernelData]):
             reward += 0.2
         if result.get("correct"):
             reward += 0.4
-            reward += 0.1 * min(max(float(result.get("speedup") or 0), 0), 3)
+            reward += self.data.speed_reward_weight * min(
+                max(float(result.get("speedup") or 0), 0), 3
+            )
         return reward
 
 
 class KernelTasksetConfig(vf.TasksetConfig):
     manifest_path: str
+    speed_reward_weight: float = 0.1
 
 
 class KernelTaskset(vf.Taskset[KernelTask, KernelTasksetConfig]):
@@ -69,7 +73,11 @@ class KernelTaskset(vf.Taskset[KernelTask, KernelTasksetConfig]):
         return [
             KernelTask(
                 KernelData(
-                    idx=index, name=str(row["_task_id"]), prompt=INSTRUCTION, context=row["code"]
+                    idx=index,
+                    name=str(row["_task_id"]),
+                    prompt=INSTRUCTION,
+                    context=row["code"],
+                    speed_reward_weight=self.config.speed_reward_weight,
                 ),
                 self.config.task,
             )
