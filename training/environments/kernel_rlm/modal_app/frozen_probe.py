@@ -68,7 +68,7 @@ def preflight() -> dict:
     max_containers=1,
     scaledown_window=2,
 )
-async def probe(run_id: str, rollouts: int = 1) -> dict:
+async def probe(run_id: str, rollouts: int = 1, curriculum: bool = False) -> dict:
     if rollouts not in (1, 4):
         raise ValueError("Probe supports one trajectory or one four-rollout group")
     import asyncio
@@ -141,7 +141,11 @@ async def probe(run_id: str, rollouts: int = 1) -> dict:
                 "poolside_v1",
             ]
             report["inference_command"] = command
-            report["scope"] = f"frozen vector-add probe: {rollouts} rollouts; no optimizer"
+            report["scope"] = (
+                f"Frozen {'softplus + sigmoid curriculum' if curriculum else 'vector-add'} "
+                f"probe: {rollouts} rollouts per task; no optimizer"
+            )
+            report["title"] = report["scope"]
             with (directory / "inference.log").open("w") as logfile:
                 server = subprocess.Popen(
                     command,
@@ -162,6 +166,16 @@ async def probe(run_id: str, rollouts: int = 1) -> dict:
                     "code": Path("/root/kernel_rlm/tasks/vector_add.py").read_text(),
                 },
             ]
+            if curriculum:
+                task_ids = {"lvl1-seed42-0011", "lvl1-seed42-0049"}
+                selected = [
+                    row
+                    for line in Path("/root/kernel_rlm/tasks/lvl1_seed42.jsonl").read_text().splitlines()
+                    if (row := json.loads(line))["_task_id"] in task_ids
+                ]
+                if len(selected) != len(task_ids):
+                    raise ValueError("Missing or duplicated curriculum probe tasks")
+            report["task_ids"] = [row["_task_id"] for row in selected]
             manifest = directory / "manifest.jsonl"
             manifest.write_text("\n".join(json.dumps(row) for row in selected))
             config = SingleAgentEnvConfig.model_validate(
@@ -270,12 +284,12 @@ async def probe(run_id: str, rollouts: int = 1) -> dict:
 
 
 @app.local_entrypoint()
-def main(rollouts: int = 1) -> None:
+def main(rollouts: int = 1, curriculum: bool = False) -> None:
     if rollouts not in (1, 4):
         raise ValueError("Use --rollouts 1 or --rollouts 4")
     print(json.dumps(preflight.remote(), indent=2), flush=True)
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
-    report = probe.remote(run_id, rollouts)
+    report = probe.remote(run_id, rollouts, curriculum)
     destination = Path("logs/frozen-probe") / run_id
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "report.json").write_text(json.dumps(report, indent=2))
