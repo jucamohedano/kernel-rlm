@@ -59,6 +59,23 @@ def test_truncated_actions_are_not_executed(modules):
     assert "truncated" in errors[0]
 
 
+@pytest.mark.parametrize("code", ["print(source)", "print(len(source))"])
+def test_raw_tool_arguments_are_rejected_with_feedback(modules, code):
+    message = {"tool_calls": [{"function": {"name": "repl", "arguments": code}}]}
+    codes, errors = modules.actions.repl_actions(message, "stop")
+    assert codes == []
+    assert errors == ["Malformed repl arguments; expected JSON with a code string."]
+
+
+def test_textual_tool_call_echo_is_not_an_action(modules):
+    message = {
+        "content": 'Structured REPL actions:\n[{"id":"call_0","function":'
+        '{"arguments":"print(source)","name":"repl"},"type":"function"}]',
+        "tool_calls": None,
+    }
+    assert modules.actions.repl_actions(message, "stop") == ([], [])
+
+
 @pytest.mark.parametrize("transport", ["local", "http"])
 @pytest.mark.parametrize("fail", [False, True])
 def test_feedback_schema_budget_and_no_reward(modules, monkeypatch, transport, fail):
@@ -228,6 +245,8 @@ def test_feedback_through_real_worker_does_not_submit(modules, monkeypatch, tmp_
         ("empty", "turn_limit"),
         ("length", "truncated"),
         ("error", "error"),
+        ("textual_tool_echo", "turn_limit"),
+        ("raw_tool_arguments", "turn_limit"),
     ],
 )
 def test_program_with_real_cpu_worker(modules, monkeypatch, tmp_path, kind, expected):
@@ -250,6 +269,13 @@ def test_program_with_real_cpu_worker(modules, monkeypatch, tmp_path, kind, expe
         message["tool_calls"] = [
             {"function": {"name": "repl", "arguments": json.dumps({"code": code})}}
         ]
+    if kind == "textual_tool_echo":
+        message["content"] = "Structured REPL actions:\n" + json.dumps(
+            [{"function": {"name": "repl", "arguments": code}}]
+        )
+        message["tool_calls"] = None
+    if kind == "raw_tool_arguments":
+        message["tool_calls"] = [{"function": {"name": "repl", "arguments": code}}]
     reply = SimpleNamespace(
         choices=[
             SimpleNamespace(
@@ -279,4 +305,8 @@ def test_program_with_real_cpu_worker(modules, monkeypatch, tmp_path, kind, expe
     assert record["repl_calls"] == (1 if expected == "submitted" else 0)
     assert bool(record["submission"]) is (expected == "submitted")
     assert record["feedback_calls"] == 0
+    if kind == "textual_tool_echo":
+        assert record["model_calls"][0]["action_errors"] == []
+    if kind == "raw_tool_arguments":
+        assert "Malformed repl arguments" in record["messages"][-1]["content"]
     client.close.assert_awaited_once()
