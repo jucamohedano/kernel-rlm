@@ -1,9 +1,13 @@
 import ast
 import asyncio
 import json
+import signal
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
+
+import pytest
 
 ROOT = Path(__file__).parents[1] / "training/environments/kernel_rlm"
 
@@ -72,3 +76,61 @@ def test_launch_deadlines_and_no_retry():
     ]
     assert waits == [780, 30, 10]
     assert sum(waits) < options["timeout"]
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "terminate", "kill"])
+def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome):
+    tree = ast.parse((ROOT / "modal_app/grpo_live_smoke.py").read_text())
+    train = next(
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "train"
+    )
+    train.decorator_list = []
+    process = Mock(pid=123)
+    timeout = subprocess.TimeoutExpired("prime", 780)
+    process.wait.side_effect = {
+        "success": [0],
+        "failure": [1],
+        "terminate": [timeout, -15],
+        "kill": [timeout, timeout, -9],
+    }[outcome]
+    popen = Mock(return_value=process)
+    killpg = Mock()
+    traces = Mock()
+    namespace = {
+        "Path": lambda value: tmp_path / value.lstrip("/"),
+        "patch_prime_laguna_config": Mock(),
+        "subprocess": SimpleNamespace(
+            Popen=popen, STDOUT=subprocess.STDOUT, TimeoutExpired=subprocess.TimeoutExpired
+        ),
+        "os": SimpleNamespace(killpg=killpg),
+        "signal": signal,
+        "json": json,
+        "traces": traces,
+        "MODEL_ID": "test-model",
+        "REVISION": "test-revision",
+        "PRIME_REVISION": "test-prime",
+        "CONFIG": "test-config",
+    }
+    exec(compile(ast.Module(body=[train], type_ignores=[]), "launch-test", "exec"), namespace)
+    if outcome == "success":
+        namespace["train"]("test-run")
+    else:
+        with pytest.raises(RuntimeError):
+            namespace["train"]("test-run")
+    report = json.loads((tmp_path / "traces/live-grpo/test-run/report.json").read_text())
+    assert (
+        report["status"]
+        == {
+            "success": "passed",
+            "failure": "failed",
+            "terminate": "budget_timeout",
+            "kill": "budget_timeout",
+        }[outcome]
+    )
+    traces.commit.assert_called_once()
+    assert popen.call_args.kwargs["start_new_session"] is True
+    assert killpg.call_count == {"success": 0, "failure": 0, "terminate": 1, "kill": 2}[outcome]
+    if outcome in {"terminate", "kill"}:
+        assert killpg.call_args_list[0].args == (123, signal.SIGTERM)
+    if outcome == "kill":
+        assert killpg.call_args_list[1].args == (123, signal.SIGKILL)
