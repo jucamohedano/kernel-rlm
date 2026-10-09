@@ -344,13 +344,14 @@ bounded training job.
 
 ### First-phase reward and spending guards
 
-The training taskset sets `speed_reward_weight = 0.0`: speedup is still measured
-and saved, but training rewards use only static validity, compilation and
-correctness (0, 0.1, 0.3, 0.7). Therefore all-correct groups have zero advantage
-range and the existing Prime gate rejects them regardless of timing variation.
-Failed groups with different partial-credit stages can still carry signal;
-this is not a strict binary all-fail filter. Frozen probes keep their default
-speed reward unless explicitly configured otherwise.
+The training taskset uses `speed_reward_weight = 0.1`. Correct kernels receive
+the quality reward plus `0.1 * clamp(speedup, 0, 3)`. The existing Prime gate
+rejects zero-advantage-range groups: identical total rewards, including speed.
+All-correct groups remain useful when their speed rewards differ. Failed
+groups with different partial-credit stages can also carry signal. This is
+not an all-pass/all-fail filter. Frozen-probe reward-diversity checks likewise
+use total reward; quality-only rewards remain diagnostic. Timing noise can
+therefore affect admission, so inspect the saved benchmark measurements.
 
 The GPU function has a 900-second execution limit and 120-second startup limit.
 The child training process has 780 seconds, then SIGTERM, a 30-second grace,

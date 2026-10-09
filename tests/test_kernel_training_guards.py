@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 ROOT = Path(__file__).parents[1] / "training/environments/kernel_rlm"
 
 
-def test_actual_reward_ignores_speed_when_configured():
+def test_actual_reward_includes_speed_for_correct_kernels():
     tree = ast.parse((ROOT / "kernel_rlm_v1/taskset.py").read_text())
     method = next(node for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef))
     method.decorator_list = []
@@ -34,14 +34,15 @@ def test_actual_reward_ignores_speed_when_configured():
             )
         )
     )
-    task = SimpleNamespace(data=SimpleNamespace(context="reference", speed_reward_weight=0.0))
+    task = SimpleNamespace(data=SimpleNamespace(context="reference", speed_reward_weight=0.1))
     rewards = []
-    for speed in (0.5, 1.0, 3.0):
+    for speed in (0.5, 1.0, 3.0, 3.0):
         result["speedup"] = speed
         trace = SimpleNamespace(info={})
         rewards.append(asyncio.run(namespace["kernel_reward"](task, trace, runtime)))
         assert trace.info["kernel_verify"]["speedup"] == speed
-    assert max(rewards) - min(rewards) == 0
+    assert rewards[0] < rewards[1] < rewards[2]
+    assert rewards[2] == rewards[3]
     result["correct"] = False
     assert (
         asyncio.run(namespace["kernel_reward"](task, SimpleNamespace(info={}), runtime))

@@ -250,7 +250,7 @@ async def probe(run_id: str, rollouts: int = 1, curriculum: bool = False) -> dic
                 rollouts == 4
                 and report["trajectory_passed"]
                 and all(
-                    len(group["rewards"]) == rollouts and len(set(group["quality_rewards"])) > 1
+                    len(group["rewards"]) == rollouts and len(set(group["rewards"])) > 1
                     for group in report["groups"]
                 )
             )

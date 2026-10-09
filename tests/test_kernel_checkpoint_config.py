@@ -18,5 +18,5 @@ def test_short_run_checkpoint_schedule_and_retention():
     assert "ckpt" not in config["trainer"]
     assert "ckpt" not in config["orchestrator"]
     assert (
-        config["orchestrator"]["train"]["source"][0]["env"]["taskset"]["speed_reward_weight"] == 0
+        config["orchestrator"]["train"]["source"][0]["env"]["taskset"]["speed_reward_weight"] == 0.1
     )
