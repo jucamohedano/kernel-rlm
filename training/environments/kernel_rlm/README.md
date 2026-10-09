@@ -383,3 +383,28 @@ Run `python -m pytest tests/test_inference_runtime.py -q` for CPU-only checks.
 
 References: [vLLM startup optimization](https://docs.vllm.ai/en/v0.26.0/configuration/optimization/)
 and [Modal volume persistence](https://modal.com/docs/guide/volumes).
+
+### Optional child-call probe
+
+Training keeps `enable_subcall = false` by default. To test the wiring without
+an optimizer, run from this directory:
+
+```bash
+../../../.venv/bin/modal run -m modal_app.frozen_probe --subcalls
+```
+
+- One vector-add trajectory; two A100s (inference and verification).
+- One child call per trajectory, including batched calls and aliases.
+- Child prompt: at most 2,048 tokenizer tokens, excluding the fixed system message.
+- Child output: at most 2,048 tokens. Truncation is reported to the parent.
+- Child timeout: 90 seconds, no retries. A failed request consumes the call budget.
+- The child has no REPL or recursion. The parent waits for its reply before continuing.
+- Root and child use the same intercepted client and model. No second model is loaded.
+- Overall deadline: 780 seconds, including inference startup (at most 420 seconds).
+- Full child prompts, replies, usage, errors, and latency are saved in
+  `trace.info.kernel_subcalls` and displayed in a closed dashboard section.
+
+The probe explicitly asks for one child call. It checks wiring, not spontaneous
+delegation or a quality improvement. Only the final kernel receives reward.
+Child requests appear in V1 traces; their GRPO credit assignment must be reviewed
+before enabling this option in training. CPU tests cannot validate that behavior.

@@ -55,6 +55,10 @@ class BoundedSubcalls:
                 )
             choice = response.choices[0]
             content = choice.message.content or ""
+            if not content.strip() or getattr(choice.message, "tool_calls", None):
+                raise ValueError(
+                    "Child must return text advice, not an empty response or tool call"
+                )
             entry.update(
                 status="completed",
                 response=content,

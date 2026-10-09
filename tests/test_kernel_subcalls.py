@@ -80,6 +80,14 @@ def test_truncation_is_visible(subcalls):
     assert "truncated" in asyncio.run(child.query("help"))
 
 
+def test_empty_child_reply_is_not_success(subcalls):
+    records = []
+    child = subcalls(fake_client(content=""), "same-model", len, records)
+    with pytest.raises(ValueError, match="text advice"):
+        asyncio.run(child.query("help"))
+    assert records[0]["status"] == "failed"
+
+
 def test_real_worker_proxy_single_and_batched_share_budget(subcalls):
     from rlm_train.proxy import ClientHandle, SubLLMProxy
     from rlm_train.repl.subprocess import SubprocessReplBackend

@@ -65,6 +65,26 @@ def test_failed_trace_without_final_transcript():
     assert "partial response" in page
 
 
+def test_child_calls_do_not_shift_parent_token_labels():
+    page = dashboard.render_timeline(
+        {
+            "info": {
+                "repl_transcript": [{"role": "assistant", "content": "parent reply"}],
+                "kernel_model_calls": [
+                    {"finish_reason": "stop", "usage": {"completion_tokens": 15}}
+                ],
+                "kernel_subcalls": [{"prompt": "child prompt", "response": "<child reply>"}],
+            },
+            "calls": [{"finish_reason": "length", "usage": {"completion_tokens": 2048}}],
+        }
+    )
+    assert "15 output tokens" in page
+    assert "2048 output tokens" not in page
+    assert "child prompt" in page
+    assert "&lt;child reply&gt;" in page
+    assert "<details open" not in page
+
+
 def test_index_has_descriptive_labels_outcomes_and_search(tmp_path):
     run = tmp_path / "frozen-probe" / "20261008T225956Z-5733f992"
     run.mkdir(parents=True)
