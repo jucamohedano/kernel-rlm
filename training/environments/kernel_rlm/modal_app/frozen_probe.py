@@ -42,7 +42,10 @@ def preflight(subcalls: bool = False) -> dict:
                 },
                 "runtime": {"type": "subprocess"},
                 "sampling": {"temperature": 1.0, "max_tokens": 2048},
-                "timeout": {"rollout": 480, "scoring": 260},
+                "timeout": {
+                    "rollout": 300 if subcalls else 480,
+                    "scoring": 60 if subcalls else 260,
+                },
             },
         }
     )
@@ -100,7 +103,7 @@ async def probe(
         "status": "running",
         "groups": [],
         "gate_passed": False,
-        "startup_timeout_seconds": STARTUP_TIMEOUT_S,
+        "startup_timeout_seconds": 420 if subcalls else STARTUP_TIMEOUT_S,
         "probe_timeout_seconds": 780 if subcalls else PROBE_TIMEOUT_S,
         "subcalls_enabled": subcalls,
     }
