@@ -225,6 +225,8 @@ def folded(label: str, value: object) -> str:
 def render_timeline(trace: dict) -> str:
     info = trace.get("info", {})
     calls = iter(trace.get("calls", []))
+    if info.get("kernel_subcalls"):
+        calls = iter(info.get("kernel_model_calls", []))
     events = []
     transcript = info.get("repl_transcript", [])
     if not transcript:
@@ -261,6 +263,10 @@ def render_timeline(trace: dict) -> str:
             body = folded(label_name, content)
         events.append(
             f'<article class="event"><div class="event-label">{text(label)}</div>{body}</article>'
+        )
+    if info.get("kernel_subcalls"):
+        events.append(
+            folded("Child calls · full prompts, replies, usage and errors", info["kernel_subcalls"])
         )
     return '<div class="timeline">' + "".join(events) + "</div>"
 

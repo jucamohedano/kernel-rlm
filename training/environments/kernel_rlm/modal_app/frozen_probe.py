@@ -22,7 +22,7 @@ inference_cache = modal.Volume.from_name("kernel-rlm-inference-cache", create_if
 
 
 @app.function(image=live_image, timeout=120, cpu=1, memory=4096)
-def preflight() -> dict:
+def preflight(subcalls: bool = False) -> dict:
     from renderers import LagunaXS2RendererConfig
     from verifiers.v1.clients import ModelContext
     from verifiers.v1.configs.client import TrainClientConfig
@@ -37,6 +37,8 @@ def preflight() -> dict:
                     "max_turns": 5,
                     "max_tokens": 2048,
                     "model_timeout_s": 90,
+                    "enable_subcall": subcalls,
+                    "subcall_probe": subcalls,
                 },
                 "runtime": {"type": "subprocess"},
                 "sampling": {"temperature": 1.0, "max_tokens": 2048},
@@ -68,9 +70,13 @@ def preflight() -> dict:
     max_containers=1,
     scaledown_window=2,
 )
-async def probe(run_id: str, rollouts: int = 1, curriculum: bool = False) -> dict:
+async def probe(
+    run_id: str, rollouts: int = 1, curriculum: bool = False, subcalls: bool = False
+) -> dict:
     if rollouts not in (1, 4):
         raise ValueError("Probe supports one trajectory or one four-rollout group")
+    if subcalls and (rollouts != 1 or curriculum):
+        raise ValueError("Subcall wiring probe is limited to one vector-add trajectory")
     import asyncio
     import os
     import signal
@@ -95,12 +101,13 @@ async def probe(run_id: str, rollouts: int = 1, curriculum: bool = False) -> dic
         "groups": [],
         "gate_passed": False,
         "startup_timeout_seconds": STARTUP_TIMEOUT_S,
-        "probe_timeout_seconds": PROBE_TIMEOUT_S,
+        "probe_timeout_seconds": 780 if subcalls else PROBE_TIMEOUT_S,
+        "subcalls_enabled": subcalls,
     }
     started = time.monotonic()
     server = None
     try:
-        async with asyncio.timeout(PROBE_TIMEOUT_S):
+        async with asyncio.timeout(report["probe_timeout_seconds"]):
             snapshot = snapshot_download(MODEL_ID, revision=REVISION, local_files_only=True)
             cache_identity = {
                 "model_revision": REVISION,
@@ -146,6 +153,8 @@ async def probe(run_id: str, rollouts: int = 1, curriculum: bool = False) -> dic
                 f"probe: {rollouts} rollouts per task; no optimizer"
             )
             report["title"] = report["scope"]
+            if subcalls:
+                report["title"] = "Subcall wiring: one child, vector-add, frozen policy"
             with (directory / "inference.log").open("w") as logfile:
                 server = subprocess.Popen(
                     command,
@@ -157,7 +166,9 @@ async def probe(run_id: str, rollouts: int = 1, curriculum: bool = False) -> dic
             os.environ["CUDA_VISIBLE_DEVICES"] = "1"
             os.environ["PROBE_API_KEY"] = "unused-local-endpoint"
             os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0"
-            report["inference_startup_seconds"] = await wait_for_inference(server)
+            report["inference_startup_seconds"] = await wait_for_inference(
+                server, timeout_s=420 if subcalls else STARTUP_TIMEOUT_S
+            )
             (directory / "report.json").write_text(json.dumps(report, indent=2))
             await inference_cache.commit.aio()
             selected = [
@@ -187,10 +198,15 @@ async def probe(run_id: str, rollouts: int = 1, curriculum: bool = False) -> dic
                             "max_turns": 5,
                             "max_tokens": 2048,
                             "model_timeout_s": 90,
+                            "enable_subcall": subcalls,
+                            "subcall_probe": subcalls,
                         },
                         "runtime": {"type": "subprocess"},
                         "sampling": {"temperature": 1.0, "max_tokens": 2048},
-                        "timeout": {"rollout": 480, "scoring": 260},
+                        "timeout": {
+                            "rollout": 300 if subcalls else 480,
+                            "scoring": 60 if subcalls else 260,
+                        },
                     },
                 }
             )
@@ -214,6 +230,7 @@ async def probe(run_id: str, rollouts: int = 1, curriculum: bool = False) -> dic
                         "feedback_calls": 0,
                         "correct": 0,
                         "quality_rewards": [],
+                        "completed_subcalls": 0,
                     }
                     report["groups"].append(group)
                     for _rollout in range(rollouts):
@@ -227,6 +244,10 @@ async def probe(run_id: str, rollouts: int = 1, curriculum: bool = False) -> dic
                             report["episode_errors"] = errors
                             raise RuntimeError(f"Episode failed: {errors}")
                         trace = episode.traces[0]
+                        group["completed_subcalls"] += sum(
+                            call.get("status") == "completed"
+                            for call in trace.info.get("kernel_subcalls", [])
+                        )
                         group["rewards"].append(trace.reward)
                         group["submitted"] += bool(trace.info.get("kernel_submission"))
                         group["feedback_calls"] += trace.info.get("feedback_calls", 0)
@@ -259,6 +280,15 @@ async def probe(run_id: str, rollouts: int = 1, curriculum: bool = False) -> dic
             )
             if rollouts == 4:
                 report["status"] = "group_passed" if report["gate_passed"] else "group_gate_failed"
+            if subcalls:
+                report["subcall_wiring_passed"] = all(
+                    group["completed_subcalls"] == 1 for group in report["groups"]
+                )
+                report["status"] = (
+                    "subcall_probe_passed"
+                    if report["subcall_wiring_passed"] and report["trajectory_passed"]
+                    else "subcall_probe_failed"
+                )
     except Exception:
         report["status"] = "failed"
         report["error"] = traceback.format_exc()
@@ -284,12 +314,14 @@ async def probe(run_id: str, rollouts: int = 1, curriculum: bool = False) -> dic
 
 
 @app.local_entrypoint()
-def main(rollouts: int = 1, curriculum: bool = False) -> None:
+def main(rollouts: int = 1, curriculum: bool = False, subcalls: bool = False) -> None:
     if rollouts not in (1, 4):
         raise ValueError("Use --rollouts 1 or --rollouts 4")
-    print(json.dumps(preflight.remote(), indent=2), flush=True)
+    if subcalls and (rollouts != 1 or curriculum):
+        raise ValueError("Subcall wiring probe is limited to one vector-add trajectory")
+    print(json.dumps(preflight.remote(subcalls), indent=2), flush=True)
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
-    report = probe.remote(run_id, rollouts, curriculum)
+    report = probe.remote(run_id, rollouts, curriculum, subcalls)
     destination = Path("logs/frozen-probe") / run_id
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "report.json").write_text(json.dumps(report, indent=2))

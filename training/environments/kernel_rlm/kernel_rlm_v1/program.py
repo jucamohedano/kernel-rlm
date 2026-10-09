@@ -1,4 +1,4 @@
-"""Bounded root-only RLM loop; model requests pass through V1 interception."""
+"""Bounded RLM loop; root and optional child requests use V1 interception."""
 
 import asyncio
 import json
@@ -14,6 +14,12 @@ from kernel_rlm.actions import (
     repl_actions,
 )
 from kernel_rlm.feedback import build_local_feedback_bootstrap
+from kernel_rlm.subcalls import (
+    PROBE_INSTRUCTION,
+    SUBCALL_INSTRUCTION,
+    SUBCALL_TIMEOUT_S,
+    BoundedSubcalls,
+)
 from openai import AsyncOpenAI
 from rlm.utils.prompts import (
     RLM_SYSTEM_PROMPT,
@@ -22,6 +28,7 @@ from rlm.utils.prompts import (
     build_user_prompt,
 )
 
+from rlm_train.proxy import ClientHandle, SubLLMProxy
 from rlm_train.repl.subprocess import SubprocessReplBackend
 
 
@@ -33,11 +40,18 @@ async def run(task: dict) -> None:
         max_retries=0,
         timeout=limits.get("model_timeout_s", 150),
     )
-    backend = SubprocessReplBackend(request_timeout=BACKEND_TIMEOUT_S)
+    subcall_timeout = SUBCALL_TIMEOUT_S if limits.get("enable_subcall") else 0
+    backend = SubprocessReplBackend(request_timeout=BACKEND_TIMEOUT_S + subcall_timeout)
+    proxy = None
+    task_prompt = task["prompt"]
+    if limits.get("enable_subcall"):
+        task_prompt = task_prompt.replace("Do not delegate to sub-LLMs.", SUBCALL_INSTRUCTION)
+        if limits.get("subcall_probe"):
+            task_prompt += "\n" + PROBE_INSTRUCTION
     messages = build_rlm_system_prompt(
         RLM_SYSTEM_PROMPT,
         QueryMetadata(task["context"]),
-        root_prompt=task["prompt"],
+        root_prompt=task_prompt,
         orchestrator=False,
     )
     record = {
@@ -48,10 +62,39 @@ async def run(task: dict) -> None:
         "messages": messages,
         "termination_reason": "turn_limit",
         "model_calls": [],
+        "subcalls": [],
     }
     try:
-        os.environ["RLM_TRAIN_EXEC_TIMEOUT_S"] = str(REPL_TIMEOUT_S)
-        await backend.start(proxy_url="http://127.0.0.1:1", rollout_id="bounded-v1")
+        os.environ["RLM_TRAIN_EXEC_TIMEOUT_S"] = str(REPL_TIMEOUT_S + subcall_timeout)
+        proxy_url = "http://127.0.0.1:1"
+        if limits.get("enable_subcall"):
+            from transformers import AutoTokenizer
+
+            tokenizer = AutoTokenizer.from_pretrained(
+                os.environ["KERNEL_MODEL"], local_files_only=True
+            )
+            subcalls = BoundedSubcalls(
+                client,
+                os.environ["KERNEL_MODEL"],
+                lambda prompt: len(tokenizer.encode(prompt, add_special_tokens=False)),
+                record["subcalls"],
+            )
+            proxy = SubLLMProxy()
+            proxy.register(
+                "bounded-v1",
+                ClientHandle(
+                    client=None,
+                    model=os.environ["KERNEL_MODEL"],
+                    fake_query=subcalls.query,
+                    max_concurrent=1,
+                ),
+            )
+            await proxy.start()
+            proxy_url = proxy.url
+            messages[0]["content"] += (
+                "\nDeployment limits override general examples: " + SUBCALL_INSTRUCTION
+            )
+        await backend.start(proxy_url=proxy_url, rollout_id="bounded-v1")
         await backend.load_context(task["context"])
         await backend.bootstrap(
             build_local_feedback_bootstrap(
@@ -60,7 +103,7 @@ async def run(task: dict) -> None:
         )
         for turn in range(limits["max_turns"]):
             turn_prompt = build_user_prompt(
-                root_prompt=task["prompt"],
+                root_prompt=task_prompt,
                 iteration=turn,
                 context_count=1,
                 history_count=0,
@@ -83,7 +126,13 @@ async def run(task: dict) -> None:
                 content += "\nStructured REPL actions:\n" + json.dumps(raw_message["tool_calls"])
             messages.append({"role": "assistant", "content": content})
             record["model_calls"].append(
-                {"finish_reason": choice.finish_reason, "action_errors": action_errors}
+                {
+                    "finish_reason": choice.finish_reason,
+                    "action_errors": action_errors,
+                    "usage": response.usage.model_dump()
+                    if getattr(response, "usage", None)
+                    else {},
+                }
             )
             record["turns"] += 1
             if action_errors:
@@ -115,6 +164,8 @@ async def run(task: dict) -> None:
     finally:
         Path("submission.json").write_text(json.dumps(record))
         await backend.stop()
+        if proxy is not None:
+            await proxy.stop()
         await client.close()
 
 

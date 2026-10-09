@@ -12,6 +12,8 @@ class KernelHarnessConfig(vf.HarnessConfig):
     max_turns: int = Field(3, ge=1, le=8)
     max_tokens: int = Field(2048, ge=1, le=4096)
     model_timeout_s: float = Field(150, gt=0)
+    enable_subcall: bool = False
+    subcall_probe: bool = False
 
 
 class KernelHarness(vf.Harness[KernelHarnessConfig]):
@@ -43,6 +45,8 @@ class KernelHarness(vf.Harness[KernelHarnessConfig]):
                         "max_turns": self.config.max_turns,
                         "max_tokens": self.config.max_tokens,
                         "model_timeout_s": self.config.model_timeout_s,
+                        "enable_subcall": self.config.enable_subcall,
+                        "subcall_probe": self.config.subcall_probe,
                     }
                 ),
             },

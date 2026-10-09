@@ -1,6 +1,7 @@
 import asyncio
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -312,4 +313,72 @@ def test_program_with_real_cpu_worker(modules, monkeypatch, tmp_path, kind, expe
         assert "No executable REPL action" in record["messages"][-1]["content"]
     if kind == "raw_tool_arguments":
         assert "Malformed repl arguments" in record["messages"][-1]["content"]
+    client.close.assert_awaited_once()
+
+
+def test_enabled_subcall_through_program_and_worker(modules, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(
+        "KERNEL_LIMITS",
+        json.dumps(
+            {
+                "max_turns": 1,
+                "max_tokens": 2048,
+                "enable_subcall": True,
+                "subcall_probe": True,
+            }
+        ),
+    )
+    monkeypatch.setenv("KERNEL_ENDPOINT", "http://unused")
+    monkeypatch.setenv("KERNEL_API_KEY", "test-only")
+    monkeypatch.setenv("KERNEL_MODEL", "fake-model")
+    tokenizer = SimpleNamespace(encode=lambda text, **kwargs: list(text))
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(
+            AutoTokenizer=SimpleNamespace(from_pretrained=lambda *args, **kwargs: tokenizer)
+        ),
+    )
+    content = (
+        "```repl\nchild_advice = llm_query('help with CUDA')\nprint(child_advice)\n"
+        "answer['content'] = 'test-source'\nanswer['ready'] = True\n```"
+    )
+    root = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=content, model_dump=lambda **kwargs: {"content": content}
+                ),
+                finish_reason="stop",
+            )
+        ]
+    )
+    child = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="use threadIdx.x"),
+                finish_reason="stop",
+            )
+        ],
+        usage=None,
+    )
+    client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=AsyncMock(side_effect=[root, child]))
+        ),
+        close=AsyncMock(),
+    )
+    monkeypatch.setattr(modules.program, "AsyncOpenAI", lambda **kwargs: client)
+    asyncio.run(
+        modules.program.run({"context": "reference", "prompt": "Do not delegate to sub-LLMs."})
+    )
+    record = json.loads((tmp_path / "submission.json").read_text())
+    assert record["submission"] == "test-source"
+    assert len(record["subcalls"]) == 1
+    assert record["subcalls"][0]["response"] == "use threadIdx.x"
+    assert "use threadIdx.x" in record["messages"][-1]["content"]
+    assert "Do not delegate" not in str(record["messages"])
+    assert "2,048" in record["messages"][0]["content"]
+    assert client.chat.completions.create.await_count == 2
     client.close.assert_awaited_once()
