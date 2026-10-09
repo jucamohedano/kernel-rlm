@@ -76,11 +76,16 @@ def test_child_calls_do_not_shift_parent_token_labels():
                 "kernel_subcalls": [{"prompt": "child prompt", "response": "<child reply>"}],
             },
             "calls": [{"finish_reason": "length", "usage": {"completion_tokens": 2048}}],
+            "nodes": [
+                {"parent": None, "message": {"role": "system", "content": "root"}},
+                {"parent": None, "message": {"role": "system", "content": "child policy"}},
+            ],
         }
     )
     assert "15 output tokens" in page
     assert "2048 output tokens" not in page
     assert "child prompt" in page
+    assert "child policy" in page
     assert "&lt;child reply&gt;" in page
     assert "<details open" not in page
 

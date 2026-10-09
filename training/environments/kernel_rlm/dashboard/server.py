@@ -265,6 +265,14 @@ def render_timeline(trace: dict) -> str:
             f'<article class="event"><div class="event-label">{text(label)}</div>{body}</article>'
         )
     if info.get("kernel_subcalls"):
+        child_systems = [
+            node["message"]
+            for index, node in enumerate(trace.get("nodes", []))
+            if index > 0 and node.get("parent") is None
+            and node["message"].get("role") == "system"
+        ]
+        if child_systems:
+            events.append(folded("Child system instructions", child_systems))
         events.append(
             folded("Child calls · full prompts, replies, usage and errors", info["kernel_subcalls"])
         )
