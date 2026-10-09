@@ -132,20 +132,41 @@ def layout(title: str, body: str) -> str:
 
 def render_index(root: Path) -> str:
     runs = discover_runs(root)
+    labels = read_json(Path(__file__).with_name("run_labels.json"))
     cards = []
     for run in runs:
         report = run["report"]
         metrics = run.get("metrics", [])
         status = report.get("status", "artifacts")
+        category = run["root"].parent.name.replace("-", " ").replace("_", " ").title()
+        title = report.get("title") or labels.get(run["id"]) or report.get("scope") or category
+        groups = report.get("groups", [])
+        completed = sum(len(group.get("rewards", [])) for group in groups)
+        correct = sum(group.get("correct", 0) for group in groups)
+        outcome = (
+            f"{correct}/{completed} correct final submissions"
+            if completed
+            else "No completed rollouts recorded"
+        )
+        duration = report.get("elapsed_seconds")
+        elapsed = f"{duration / 60:.1f} min" if isinstance(duration, int | float) else "Not recorded"
         cards.append(
-            f'<div class="card run"><div><h3><a href="/?run={quote(run["id"])}">{text(run["id"])}</a></h3>'
-            f'<div class="muted">{text(report.get("model_id", "Kernel-RLM"))}</div></div>'
-            f'<span class="pill">{text(status)} · {len(metrics)} metric rows</span></div>'
+            f'<article class="card run" data-run><div><span class="badge">{text(category)}</span>'
+            f'<h3><a href="/?run={quote(run["id"])}">{text(title)}</a></h3>'
+            f'<p>{text(outcome)} · Duration: {text(elapsed)}</p>'
+            f'<div class="muted">{text(report.get("model_id", "Model not recorded"))}</div>'
+            f'<details><summary>Run ID and recorded metrics</summary>{text(run["id"])}'
+            f' · {len(metrics)} metric rows</details></div>'
+            f'<span class="pill">{text(str(status).replace("_", " "))}</span></article>'
         )
     body = (
         '<header><div><h1>Kernel-RLM Experiments</h1><div class="muted">Saved Modal artifacts · CPU-only viewer</div></div>'
         f'<span class="pill">{len(runs)} runs</span></header>'
-        "<h2>Runs</h2>"
+        '<p>Newest first. Frozen probes test the workflow without updating model weights. '
+        'Correctness is not a speedup or a training improvement.</p>'
+        '<label for="run-search">Find an experiment</label> '
+        '<input id="run-search" type="search" placeholder="Search name, outcome, model or run ID">'
+        '<p id="run-count" aria-live="polite"></p><h2>Runs</h2>'
         + (
             "".join(cards)
             or '<div class="card empty">No reports found. Download a Modal run directory into this root.</div>'

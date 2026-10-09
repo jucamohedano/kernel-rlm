@@ -12,3 +12,9 @@ document.querySelector('#trajectory')?.addEventListener('change', event => {
 document.querySelector('#expand')?.addEventListener('change', event => {
   document.querySelectorAll('#trace details').forEach(detail => { detail.open = event.target.checked; });
 });
+document.querySelector('#run-search')?.addEventListener('input', event => {
+  const query = event.target.value.toLowerCase();
+  const runs = [...document.querySelectorAll('[data-run]')];
+  runs.forEach(run => { run.hidden = !run.textContent.toLowerCase().includes(query); });
+  document.querySelector('#run-count').textContent = `${runs.filter(run => !run.hidden).length} of ${runs.length} runs shown`;
+});

@@ -73,7 +73,9 @@ def test_textual_tool_call_echo_is_not_an_action(modules):
         '{"arguments":"print(source)","name":"repl"},"type":"function"}]',
         "tool_calls": None,
     }
-    assert modules.actions.repl_actions(message, "stop") == ([], [])
+    codes, errors = modules.actions.repl_actions(message, "stop")
+    assert codes == []
+    assert "No executable REPL action" in errors[0]
 
 
 @pytest.mark.parametrize("transport", ["local", "http"])
@@ -306,7 +308,8 @@ def test_program_with_real_cpu_worker(modules, monkeypatch, tmp_path, kind, expe
     assert bool(record["submission"]) is (expected == "submitted")
     assert record["feedback_calls"] == 0
     if kind == "textual_tool_echo":
-        assert record["model_calls"][0]["action_errors"] == []
+        assert "No executable REPL action" in record["model_calls"][0]["action_errors"][0]
+        assert "No executable REPL action" in record["messages"][-1]["content"]
     if kind == "raw_tool_arguments":
         assert "Malformed repl arguments" in record["messages"][-1]["content"]
     client.close.assert_awaited_once()

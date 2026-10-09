@@ -63,3 +63,27 @@ def test_failed_trace_without_final_transcript():
     )
     assert "initial prompt" in page
     assert "partial response" in page
+
+
+def test_index_has_descriptive_labels_outcomes_and_search(tmp_path):
+    run = tmp_path / "frozen-probe" / "20261008T225956Z-5733f992"
+    run.mkdir(parents=True)
+    (run / "report.json").write_text(
+        json.dumps(
+            {
+                "run_id": run.name,
+                "status": "group_passed",
+                "elapsed_seconds": 600,
+                "model_id": "<script>unsafe</script>",
+                "groups": [{"rewards": [0.7, 0.7, 0.7, 0], "correct": 3}],
+            }
+        )
+    )
+    page = dashboard.render_index(tmp_path)
+    assert "Fixed syntax check · three correct submissions" in page
+    assert "3/4 correct final submissions" in page
+    assert "10.0 min" in page
+    assert 'id="run-search"' in page
+    assert "<script>unsafe</script>" not in page
+    assert "&lt;script&gt;unsafe&lt;/script&gt;" in page
+    assert run.name in page

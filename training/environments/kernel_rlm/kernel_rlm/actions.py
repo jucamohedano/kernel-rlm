@@ -37,4 +37,11 @@ def repl_actions(message: dict, finish_reason: str) -> tuple[list[str], list[str
         if any(code not in structured for code in fenced):
             errors.append("Mixed action formats: only structured calls executed; use one format.")
         return structured, errors
+    if not fenced:
+        errors.append(
+            "No executable REPL action found. Use a ```repl``` block or an actual repl "
+            'tool call with JSON arguments {"code": "..."}. Text describing tool calls '
+            "is not executed. If your candidate is ready, submit it by setting "
+            "answer['content'] = source and answer['ready'] = True inside a REPL block."
+        )
     return fenced, errors

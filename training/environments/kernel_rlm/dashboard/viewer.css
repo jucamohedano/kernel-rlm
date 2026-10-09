@@ -20,5 +20,7 @@ pre { margin:10px 0 0; padding:14px; white-space:pre-wrap; overflow-wrap:anywher
 .badge { display:inline-block; border:1px solid var(--line); border-radius:4px; padding:2px 7px; font:11px ui-monospace,monospace; } .warning { color:#964629; } .panel[hidden] { display:none; }
 svg { width:100%; height:125px; } svg text { fill:var(--muted); font:10px ui-monospace,monospace; } .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:14px; }
 .run { padding:18px; border:1px solid var(--line); border-radius:7px; background:var(--card); } .run h3 { margin:0; } footer { margin-top:28px; font-size:12px; color:var(--muted); }
+.run { margin-bottom:14px; gap:20px; align-items:start; } .run[hidden] { display:none; }
+.run h3 { margin-top:10px; } #run-search { padding:10px; width:min(520px,100%); }
 @media(max-width:1100px) { .workspace { grid-template-columns:220px minmax(0,1fr); } .metrics { grid-column:2; } }
 @media(max-width:700px) { main { padding:14px; } .workspace { display:block; } .sidebar { position:static; } nav { padding:14px; } .timeline { margin-left:6px; } }

@@ -1,0 +1,9 @@
+{
+  "20261008T180943Z-7008be4c": "Initial probe · startup timeout",
+  "20261008T181838Z-5cd752df": "Eager inference · trajectory timeout",
+  "20261008T193339Z-84033a9d": "First correct CUDA submission · single rollout",
+  "20261008T195702Z-1a650c4d": "Baseline prompt · four-rollout comparison",
+  "20261008T202911Z-1f6615e9": "CUDA build guidance · startup timeout",
+  "20261008T223820Z-01ae1f00": "Persistent cache · blocked syntax-check instruction",
+  "20261008T225956Z-5733f992": "Fixed syntax check · three correct submissions"
+}
