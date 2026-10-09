@@ -321,7 +321,29 @@ These tests use mocked model responses and CUDA checks, including execution
 through the real CPU subprocess worker. They do not establish GPU compilation
 success or validate Prime's complete distributed training path.
 
-### Frozen-probe startup budget and cache
+### Training checkpoints
+
+`configs/grpo_level1.toml` enables Prime's shared `[ckpt]` configuration with
+`interval = 2` and `keep_last = 2`. For the current three-step run this means
+an intermediate checkpoint at step 2 and a final checkpoint at step 3 on normal
+completion. The shared configuration applies to trainer and orchestrator.
+Artifacts live under `/traces/outputs/<run-name>/checkpoints` on the persistent
+`kernel-rlm-traces` Modal volume. No checkpoint is created by frozen probes.
+
+Prime's trainer saves model state, optimizer state, scheduler and progress.
+These are resumable training checkpoints, not necessarily small adapter-only
+exports; allow storage and save time for model state too. Retention limits
+checkpoint count, not total volume bytes or other inference-weight artifacts.
+Do not delete the previous run when resuming: preserve its run name, configure
+`resume` (optionally `resume.step`), and remove the launcher's `--clean` flag.
+The current launcher creates fresh runs; automatic resume is not implemented.
+
+A normal final save is supported; a Modal hard timeout or crash does not
+guarantee one. Remote save/load round-trip remains to be validated on the first
+bounded training job. Checkpointing alone does not resolve the reward-filter
+or spending-limit launch blockers.
+
+### Frozen-probe cache details
 
 The probe mounts `kernel-rlm-inference-cache` at `/inference-cache` and sets
 `VLLM_CACHE_ROOT` inside a namespace keyed by the model revision, A100 GPU

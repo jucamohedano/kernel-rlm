@@ -5,6 +5,10 @@ max_steps = 3
 seq_len = 8192
 output_dir = "/traces/outputs"
 
+[ckpt]
+interval = 2
+keep_last = 2
+
 [deployment]
 num_train_gpus = 2
 num_infer_gpus = 1
