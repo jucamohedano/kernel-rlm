@@ -87,3 +87,5 @@ def test_index_has_descriptive_labels_outcomes_and_search(tmp_path):
     assert "<script>unsafe</script>" not in page
     assert "&lt;script&gt;unsafe&lt;/script&gt;" in page
     assert run.name in page
+    (run / "report.json").write_text(json.dumps({"run_id": run.name, "groups": {"legacy": 4}}))
+    assert "No completed rollouts recorded" in dashboard.render_index(tmp_path)

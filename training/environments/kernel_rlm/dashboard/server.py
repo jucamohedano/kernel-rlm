@@ -141,6 +141,7 @@ def render_index(root: Path) -> str:
         category = run["root"].parent.name.replace("-", " ").replace("_", " ").title()
         title = report.get("title") or labels.get(run["id"]) or report.get("scope") or category
         groups = report.get("groups", [])
+        groups = [group for group in groups if isinstance(group, dict)] if isinstance(groups, list) else []
         completed = sum(len(group.get("rewards", [])) for group in groups)
         correct = sum(group.get("correct", 0) for group in groups)
         outcome = (
