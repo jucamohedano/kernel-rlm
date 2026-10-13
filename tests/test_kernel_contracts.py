@@ -214,7 +214,11 @@ def test_feedback_through_real_worker_does_not_submit(modules, monkeypatch, tmp_
         else:
             code += '\nanswer["content"] = source\nanswer["ready"] = True\n'
         content = f"```repl\n{code}\n```"
-    message = SimpleNamespace(content=content, model_dump=lambda **kwargs: {"content": content})
+    reasoning = "```repl\nraise RuntimeError('Never execute thoughts')\n```"
+    message = SimpleNamespace(
+        content=content,
+        model_dump=lambda **kwargs: {"content": content, "reasoning_content": reasoning},
+    )
     reply = SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason="stop")])
     client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=reply))),
@@ -224,6 +228,7 @@ def test_feedback_through_real_worker_does_not_submit(modules, monkeypatch, tmp_
     asyncio.run(modules.program.run({"context": "CPU fixture", "prompt": "test"}))
     record = json.loads((tmp_path / "submission.json").read_text())
     assert "reward" not in record
+    assert any(message.get("reasoning_content") == reasoning for message in record["messages"])
     if workflow == "budget":
         assert record["feedback_calls"] == 2
         assert record["submission"] == ""
@@ -308,6 +313,10 @@ def test_program_with_real_cpu_worker(modules, monkeypatch, tmp_path, kind, expe
     assert record["repl_calls"] == (1 if expected == "submitted" else 0)
     assert bool(record["submission"]) is (expected == "submitted")
     assert record["feedback_calls"] == 0
+    if kind == "structured":
+        saved = next(message for message in record["messages"] if message["role"] == "assistant")
+        assert saved["tool_calls"] == message["tool_calls"]
+        assert "Structured REPL actions:" not in saved["content"]
     if kind == "textual_tool_echo":
         assert "No executable REPL action" in record["model_calls"][0]["action_errors"][0]
         assert "No executable REPL action" in record["messages"][-1]["content"]

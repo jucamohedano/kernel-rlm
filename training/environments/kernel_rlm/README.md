@@ -431,8 +431,30 @@ the existing timeout; a queue timeout does not start CUDA and returns an explici
 verification failure. This can lower rewards under overload, so inspect timeout
 errors before interpreting a failed group as a model failure.
 
-This guard prevents verifier-versus-verifier overlap. It does not pause vLLM,
-free inference memory, or make shared-GPU speed measurements reliable. Training
-remains on hold until the actual three-GPU layout is validated. Prime's pinned
-`/pause` endpoint uses `mode="keep", clear_cache=False`; pausing alone is not a
-memory-offload solution. Thinking remains off during this resource work.
+The training launcher also sets `KERNEL_INFERENCE_ADMIN_URL` to the local engine
+on port 8100, not the client-facing router on port 8000. While holding the lock,
+the verifier pauses generation, runs on GPU 0, and resumes in `finally`. The
+pinned Prime weight-update and LoRA-reload functions acquire the same lock, so
+they cannot resume inference during a benchmark. Control failures do not start
+verification. This coordination is for one container, not multiple hosts.
+
+Pausing retains active requests and cache; it does not offload weights. The
+inference reservation is therefore reduced from 95% to 86%, with eight active
+sequences and 1,024 batched tokens. Correctness comparisons use chunks, and trial
+outputs are released before the next trial. The verifier records free memory
+and peak tensor allocation. Large or non-contiguous tasks still need measurement.
+
+The tradeoff is less KV capacity and generation stalls during verification.
+Queue and model timeouts remain possible under load. A passing one-GPU stress
+probe is not proof that all 50 tasks or an eight-trajectory training group fit.
+Run `../../../.venv/bin/modal run -m modal_app.shared_gpu_probe --cpu-only` for
+configuration validation. Without `--cpu-only`, the probe uses one A100 with a
+720-second cap: pause/resume, a large known kernel, then one thinking-enabled
+trajectory. It never performs optimizer updates. Reports and traces are saved
+under `kernel-rlm-traces:shared-gpu-probe`.
+
+Training thinking remains disabled until its probe is reviewed. The harness
+preserves returned reasoning in assistant history but executes only actual
+content/tool actions. Root sampled tokens, including reasoning, retain their
+loss mask. Child branches remain excluded; neither thoughts nor subcalls earn
+an extra reward.

@@ -136,9 +136,13 @@ async def run(task: dict) -> None:
             raw_message = choice.message.model_dump(exclude_none=True)
             codes, action_errors = repl_actions(raw_message, choice.finish_reason)
             content = choice.message.content or ""
+            assistant_message = {"role": "assistant", "content": content}
             if raw_message.get("tool_calls"):
-                content += "\nStructured REPL actions:\n" + json.dumps(raw_message["tool_calls"])
-            messages.append({"role": "assistant", "content": content})
+                assistant_message["tool_calls"] = raw_message["tool_calls"]
+            reasoning = raw_message.get("reasoning_content") or raw_message.get("reasoning")
+            if isinstance(reasoning, str) and reasoning:
+                assistant_message["reasoning_content"] = reasoning
+            messages.append(assistant_message)
             record["model_calls"].append(
                 {
                     "finish_reason": choice.finish_reason,
