@@ -6,7 +6,11 @@ import ast
 import textwrap
 
 KERNEL_TASK_INSTRUCTION = (
-    "Inspect the PyTorch reference in context, then write a standalone Python source "
+    "Inspect the PyTorch reference in the read-only context variable. Never assign to "
+    "context or context_0; use a new variable for your work. Before coding, read the "
+    "forward signature and get_inputs() to determine the exact input count, shapes, "
+    "and dtypes. Match cuda_forward(*tensors) and the exported C++ launch signature "
+    "to that input count. Then write a standalone Python source "
     "string defining CPP_SOURCE, CUDA_SOURCE, and cuda_forward(*tensors). The source "
     "must implement the reference operation with a compiled CUDA extension.\n\n"
     "The submission must import load_inline from torch.utils.cpp_extension and call "
@@ -23,10 +27,13 @@ KERNEL_TASK_INSTRUCTION = (
     "before final submission so you can use compilation errors and numerical "
     "feedback to repair the kernel. Feedback checks correctness but does not run "
     "the performance benchmark. The helper has a small call budget, so do not "
-    "call it on trivial text. Do not delegate to sub-LLMs. After using feedback, "
+    "call it on trivial text. Read all error details. If feedback says the bound "
+    "C++ call returned None, make the exported launch function return the output tensor. "
+    "If the TypeError lists two input tensors, accept two tensors; do not guess from "
+    "the operation's name. Do not delegate to sub-LLMs. After using feedback, "
     "set answer['content'] to the complete standalone Python source and "
     "answer['ready'] = True inside a ```repl``` block before the final allowed "
-    "turn ends."
+    "turn ends. Do not print the candidate instead of setting both answer fields."
 )
 
 
@@ -53,8 +60,9 @@ CUDA_BUILD_GUIDE = textwrap.dedent(
 
     CUDA build rules and expected workflow:
 
-    1. Read context once. Identify input shapes, dtypes, output shape, and the
-       reference operation. Implement the computation yourself in a CUDA kernel;
+    1. Read the read-only context once. Never overwrite context or context_0.
+       Inspect the reference's forward signature and get_inputs() to confirm the
+       exact argument count, shapes, dtypes, and output behavior. Implement the computation yourself in a CUDA kernel;
        do not call the reference operation or delegate the computation to PyTorch.
     2. Keep CPP_SOURCE to includes and a declaration of the exported function
        named launch. Put __global__ kernels, their definitions, the matching
@@ -65,7 +73,9 @@ CUDA_BUILD_GUIDE = textwrap.dedent(
        and return type exactly; use Tensor.numel(), not numels().
     3. Use the binding scaffold below. functions=["launch"] generates the Python
        binding automatically: do NOT also write PYBIND11_MODULE or TORCH_LIBRARY.
-       Adapt the launch signature to the reference inputs; the task-independent
+       The bound C++ function must return the output tensor if cuda_forward must
+       return a tensor; a void function returns None to Python. Adapt the launch
+       signature to the reference inputs; the task-independent
        scaffold intentionally does not supply the kernel computation.
        Do not set is_python_module=False: cuda_forward needs a Python module,
        not a library path string. Use only the load_inline keywords shown here.
@@ -82,7 +92,8 @@ CUDA_BUILD_GUIDE = textwrap.dedent(
     5. Reserve the last turn for submission. After the second feedback call,
        make any necessary final repair and submit your best complete source,
        even if verification failed. Do not ask for exhausted feedback.
-       Set answer["content"] = source and answer["ready"] = True in the REPL.
+       The last REPL block must set answer["content"] = source and
+       answer["ready"] = True. Printing source does not submit it.
 
     Assembly scaffold: run after creating task-specific cpp_declarations and
     cuda_implementation strings. This is assembly code, not the final submission.

@@ -159,7 +159,9 @@ def test_prompt_scaffold_assembles_source_without_loading_extension(modules):
     keywords = {keyword.arg: keyword.value for keyword in call.keywords}
     assert ast.literal_eval(keywords["functions"]) == ["launch"]
     assert "is_python_module" not in keywords
-    assert KERNEL_TASK_INSTRUCTION.startswith("Inspect the PyTorch reference in context")
+    assert KERNEL_TASK_INSTRUCTION.startswith(
+        "Inspect the PyTorch reference in the read-only context"
+    )
     assert KERNEL_TASK_INSTRUCTION.endswith(CUDA_ASSEMBLY_TEMPLATE)
 
 
@@ -257,8 +259,8 @@ def test_structured_repl_call_gets_matching_tool_observation(modules, monkeypatc
         "KERNEL_MODEL": "fake-model",
     }.items():
         monkeypatch.setenv(key, value)
-    code = "print(context)"
-    final_action = "```repl\nanswer['content'] = 'cpu-test-source'\nanswer['ready'] = True\n```"
+    code = "context = 'fabricated one-input reference'\nprint(context)"
+    final_code = "print(context)\nanswer['content'] = 'cpu-test-source'\nanswer['ready'] = True"
     replies = [
         SimpleNamespace(
             choices=[
@@ -312,13 +314,23 @@ def test_structured_repl_call_gets_matching_tool_observation(modules, monkeypatc
             choices=[
                 SimpleNamespace(
                     message=SimpleNamespace(
-                        content=(final_action),
+                        content=None,
                         model_dump=lambda **kwargs: {
                             "role": "assistant",
-                            "content": final_action,
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call-repl-2",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "repl",
+                                        "arguments": json.dumps({"code": final_code}),
+                                    },
+                                }
+                            ],
                         },
                     ),
-                    finish_reason="stop",
+                    finish_reason="tool_calls",
                 )
             ]
         ),
@@ -342,10 +354,11 @@ def test_structured_repl_call_gets_matching_tool_observation(modules, monkeypatc
     )
     call_message = next(message for message in messages if message.get("tool_calls"))
     call_id = call_message["tool_calls"][0]["id"]
-    tool_reply = next(message for message in messages if message.get("role") == "tool")
-    assert tool_reply["tool_call_id"] == call_id == "call-repl-1"
-    assert "CPU fixture" in tool_reply["content"]
-    assert tool_reply["content"].startswith("REPL output:")
+    tool_replies = [message for message in messages if message.get("role") == "tool"]
+    assert tool_replies[0]["tool_call_id"] == call_id == "call-repl-1"
+    assert "context is read-only" in tool_replies[0]["content"]
+    assert tool_replies[1]["tool_call_id"] == "call-repl-2"
+    assert "CPU fixture" in tool_replies[1]["content"]
     assert "Structured REPL actions:" not in str(messages)
     record = json.loads((tmp_path / "submission.json").read_text())
     assert record["submission"] == "cpu-test-source"

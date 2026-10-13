@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import io
 import json
 import os
@@ -103,6 +104,22 @@ _SAFE_BUILTINS = {
     "globals": None,
     "locals": None,
 }
+
+
+def reject_context_rebinding(code: str) -> None:
+    if not os.environ.get("RLM_TRAIN_READONLY_CONTEXT"):
+        return
+    tree = ast.parse(code)
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Name)
+            and node.id in {"context", "context_0"}
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+        ):
+            raise ValueError(
+                f"{node.id} is read-only. Inspect it, then store results in a new variable."
+            )
+
 
 RESERVED_TOOL_NAMES = frozenset(
     {
@@ -310,6 +327,7 @@ class Worker:
         start = time.perf_counter()
         with self._capture_output() as (out_buf, err_buf):
             try:
+                reject_context_rebinding(code)
                 combined = {**self.globals, **self.locals}
                 self._exec_with_timeout(code, combined)
                 for k, v in combined.items():

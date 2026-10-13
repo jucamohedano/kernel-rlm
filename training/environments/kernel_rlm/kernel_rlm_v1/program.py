@@ -74,6 +74,7 @@ async def run(task: dict) -> None:
     }
     try:
         os.environ["RLM_TRAIN_EXEC_TIMEOUT_S"] = str(REPL_TIMEOUT_S + subcall_timeout)
+        os.environ["RLM_TRAIN_READONLY_CONTEXT"] = "1"
         proxy_url = "http://127.0.0.1:1"
         if limits.get("enable_subcall"):
             from transformers import AutoTokenizer
