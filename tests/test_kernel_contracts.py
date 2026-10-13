@@ -159,9 +159,14 @@ def test_prompt_scaffold_assembles_source_without_loading_extension(modules):
     keywords = {keyword.arg: keyword.value for keyword in call.keywords}
     assert ast.literal_eval(keywords["functions"]) == ["launch"]
     assert "is_python_module" not in keywords
-    assert "Never write import context" in KERNEL_TASK_INSTRUCTION
-    assert "get_inputs()" in KERNEL_TASK_INSTRUCTION
-    assert "read-only context variable" in KERNEL_TASK_INSTRUCTION
+    assert "Never use import context" in KERNEL_TASK_INSTRUCTION
+    assert "string containing the reference Python source" in KERNEL_TASK_INSTRUCTION
+    assert "Model()" in KERNEL_TASK_INSTRUCTION
+    assert "ast.parse(context)" in KERNEL_TASK_INSTRUCTION
+    from kernel_rlm.subcalls import KERNEL_SYSTEM
+
+    assert "not a module, Model instance, or callable" in KERNEL_SYSTEM
+    assert "or execute the reference" in KERNEL_SYSTEM
     assert KERNEL_TASK_INSTRUCTION.endswith(CUDA_ASSEMBLY_TEMPLATE)
 
 

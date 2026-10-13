@@ -6,11 +6,14 @@ import ast
 import textwrap
 
 KERNEL_TASK_INSTRUCTION = (
-    "The PyTorch reference is already loaded in the read-only context variable. Never "
-    "write import context, and never assign to context or context_0. First inspect it "
-    "with print(context); store your work in new variables. Before coding, read the "
-    "forward signature and get_inputs() to determine the exact input count, shapes, "
-    "and dtypes. Match cuda_forward(*tensors) and the exported C++ launch signature "
+    "The read-only variable context is a string containing the reference Python source; "
+    "it is not a module, Model instance, or callable. Model and get_inputs are not "
+    "defined as REPL objects. Never use import context, context.forward, Model(), "
+    "call get_inputs(), or execute the reference with exec/eval/compile. Inspect the "
+    "text with print(context) or parse it statically with ast.parse(context). Never "
+    "assign to context or context_0. Read the Model.forward and get_inputs definitions "
+    "in that source text to infer input count, shapes, and dtypes; do not guess. Match "
+    "cuda_forward(*tensors) and the exported C++ launch signature "
     "to that input count. Then write a standalone Python source "
     "string defining CPP_SOURCE, CUDA_SOURCE, and cuda_forward(*tensors). The source "
     "must implement the reference operation with a compiled CUDA extension.\n\n"
@@ -61,10 +64,13 @@ CUDA_BUILD_GUIDE = textwrap.dedent(
 
     CUDA build rules and expected workflow:
 
-    1. Read the read-only context once. Never overwrite context or context_0.
-       Inspect the reference's forward signature and get_inputs() to confirm the
-       exact argument count, shapes, dtypes, and output behavior. Implement the computation yourself in a CUDA kernel;
-       do not call the reference operation or delegate the computation to PyTorch.
+    1. `context` is a read-only string of reference Python source, not an imported
+       module or a `Model` object. The REPL does not define `Model` or `get_inputs`.
+       Inspect their definitions in the text, or parse the text with `ast.parse(context)`;
+       do not instantiate `Model`, call `get_inputs()`, or execute the reference.
+       Never overwrite `context` or `context_0`. Infer the input count, shapes, dtypes,
+       and output behavior from the source. Implement the computation yourself in a
+       CUDA kernel; do not call the reference operation or delegate it to PyTorch.
     2. Keep CPP_SOURCE to includes and a declaration of the exported function
        named launch. Put __global__ kernels, their definitions, the matching
        launch function definition, and every <<<...>>> kernel launch in CUDA_SOURCE.
