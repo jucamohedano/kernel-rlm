@@ -1,7 +1,7 @@
 # First real curriculum run: 50 Level-1 CUDA tasks, one inference A100, and
 # two trainer A100s. Keep this bounded while validating signal and traces.
 
-max_steps = 3
+max_steps = 6
 seq_len = 8192
 output_dir = "/traces/outputs"
 
@@ -42,15 +42,15 @@ weight_decay = 0.01
 mu = 0.95
 
 [orchestrator]
-batch_size = 8
-group_size = 8
+batch_size = 4
+group_size = 4
 
 [orchestrator.train.sampling]
 max_completion_tokens = 2048
 
 [orchestrator.concurrency]
-initial_inflight = 8
-max_inflight = 8
+initial_inflight = 4
+max_inflight = 4
 
 [[orchestrator.train.source]]
 name = "kernel-rlm-level1"

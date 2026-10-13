@@ -1,6 +1,7 @@
 import ast
 import asyncio
 import json
+import shlex
 import signal
 import subprocess
 from pathlib import Path
@@ -66,7 +67,7 @@ def test_launch_deadlines_and_no_retry():
         for item in train.decorator_list[0].keywords
         if item.arg in {"timeout", "startup_timeout", "retries"}
     }
-    assert options == {"timeout": 900, "startup_timeout": 120, "retries": 0}
+    assert options == {"timeout": 3450, "startup_timeout": 120, "retries": 0}
     waits = [
         ast.literal_eval(keyword.value)
         for node in ast.walk(train)
@@ -76,8 +77,9 @@ def test_launch_deadlines_and_no_retry():
         for keyword in node.keywords
         if keyword.arg == "timeout"
     ]
-    assert waits == [780, 30, 10]
+    assert waits == [3300, 30, 10]
     assert sum(waits) < options["timeout"]
+    assert options["timeout"] + options["startup_timeout"] < 3600
 
 
 @pytest.mark.parametrize("outcome", ["success", "failure", "terminate", "kill"])
@@ -88,7 +90,7 @@ def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome):
     )
     train.decorator_list = []
     process = Mock(pid=123)
-    timeout = subprocess.TimeoutExpired("prime", 780)
+    timeout = subprocess.TimeoutExpired("prime", 3300)
     process.wait.side_effect = {
         "success": [0],
         "failure": [1],
@@ -107,6 +109,7 @@ def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome):
         "os": SimpleNamespace(killpg=killpg, environ={}),
         "signal": signal,
         "json": json,
+        "shlex": shlex,
         "traces": traces,
         "MODEL_ID": "test-model",
         "REVISION": "test-revision",
@@ -131,6 +134,9 @@ def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome):
     )
     traces.commit.assert_called_once()
     assert popen.call_args.kwargs["start_new_session"] is True
+    assert popen.call_args.args[0][:3] == ["/bin/bash", "-o", "pipefail"]
+    assert "2>&1 | tee " in popen.call_args.args[0][4]
+    assert popen.call_args.args[0][4].endswith("prime.log")
     assert killpg.call_count == {"success": 0, "failure": 0, "terminate": 1, "kill": 2}[outcome]
     if outcome in {"terminate", "kill"}:
         assert killpg.call_args_list[0].args == (123, signal.SIGTERM)

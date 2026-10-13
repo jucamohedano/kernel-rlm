@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import signal
 import subprocess
 from datetime import UTC, datetime
@@ -18,7 +19,9 @@ from .rollout_smoke import traces
 
 _module_dir = Path(__file__).resolve().parent
 APP_ROOT = _module_dir.parent if (_module_dir.parent / "configs").exists() else Path("/root")
-REPO_ROOT = next((parent for parent in APP_ROOT.parents if (parent / "rlm").exists()), Path("/root"))
+REPO_ROOT = next(
+    (parent for parent in APP_ROOT.parents if (parent / "rlm").exists()), Path("/root")
+)
 PROJECT_ROOT = REPO_ROOT if (REPO_ROOT / "notes").exists() else REPO_ROOT.parent
 RLM_SOURCE = REPO_ROOT / "rlm" if (REPO_ROOT / "rlm").exists() else Path("/root/rlm")
 RLM_TRAIN_SOURCE = (
@@ -51,9 +54,9 @@ def patch_prime_laguna_config() -> None:
     source = model_source.read_text()
     marker = "    model_config.use_cache = False\n"
     compatibility = (
-        "    if getattr(model_config, \"model_type\", \"\") == \"laguna\" "
-        "and getattr(model_config, \"gating\", None) is True:\n"
-        "        model_config.gating = \"per-head\"\n"
+        '    if getattr(model_config, "model_type", "") == "laguna" '
+        'and getattr(model_config, "gating", None) is True:\n'
+        '        model_config.gating = "per-head"\n'
     )
     if compatibility not in source:
         if marker not in source:
@@ -97,8 +100,7 @@ live_image = (
         "flash-linear-attention",
     )
     .run_commands(
-        "python -m pip install --no-deps "
-        "modelexpress==0.3.0 prime==0.6.19 prime-sandboxes==0.2.39"
+        "python -m pip install --no-deps modelexpress==0.3.0 prime==0.6.19 prime-sandboxes==0.2.39"
     )
     .pip_install("torch==2.11.0", index_url="https://download.pytorch.org/whl/cu128")
     .pip_install("torchvision==0.26.0", index_url="https://download.pytorch.org/whl/cu128")
@@ -158,7 +160,7 @@ app = modal.App("kernel-rlm-grpo-live-smoke")
     gpu="A100-80GB:3",
     cpu=16,
     memory=131072,
-    timeout=900,
+    timeout=3450,
     startup_timeout=120,
     retries=0,
     max_containers=1,
@@ -171,6 +173,7 @@ def train(run_id: str) -> dict[str, object]:
     patch_prime_laguna_config()
     command = [
         "python",
+        "-u",
         "-m",
         "prime_rl.entrypoints.rl",
         "@",
@@ -183,37 +186,35 @@ def train(run_id: str) -> dict[str, object]:
         "--no-dashboard",
     ]
     log_path = output_dir / "prime.log"
-    with log_path.open("w") as log_file:
-        process = subprocess.Popen(
-            command,
-            cwd="/root",
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            start_new_session=True,
-        )
-        timed_out = False
+    pipeline = f"{shlex.join(command)} 2>&1 | tee {shlex.quote(str(log_path))}"
+    process = subprocess.Popen(
+        ["/bin/bash", "-o", "pipefail", "-c", pipeline],
+        cwd="/root",
+        start_new_session=True,
+    )
+    timed_out = False
+    try:
+        returncode = process.wait(timeout=3300)
+    except subprocess.TimeoutExpired:
+        timed_out = True
         try:
-            returncode = process.wait(timeout=780)
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            returncode = process.wait(timeout=30)
         except subprocess.TimeoutExpired:
-            timed_out = True
             try:
-                os.killpg(process.pid, signal.SIGTERM)
+                os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            try:
-                returncode = process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                returncode = process.wait(timeout=10)
+            returncode = process.wait(timeout=10)
     report = {
         "status": "budget_timeout" if timed_out else ("passed" if returncode == 0 else "failed"),
-        "training_timeout_seconds": 780,
-        "modal_timeout_seconds": 900,
+        "training_timeout_seconds": 3300,
+        "modal_timeout_seconds": 3450,
+        "startup_timeout_seconds": 120,
+        "total_wall_clock_cap_seconds": 3570,
         "run_id": run_id,
         "model_id": MODEL_ID,
         "model_revision": REVISION,
