@@ -11,6 +11,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
+from kernel_rlm.gpu_sharing import paused_inference
 from kernel_rlm.verifier_slot import verifier_slot
 
 _RUNNER = textwrap.dedent(
@@ -72,6 +73,8 @@ _RUNNER = textwrap.dedent(
 
     extension_builds = []
     extension_calls = []
+    result["free_memory_before_gib"] = torch.cuda.mem_get_info()[0] / (1024 ** 3)
+    torch.cuda.reset_peak_memory_stats()
 
     class TrackedExtension:
         def __init__(self, module):
@@ -138,10 +141,22 @@ _RUNNER = textwrap.dedent(
                 )
                 correct = False
                 break
-            difference = (reference_output.float() - candidate_output.float()).abs().max().item()
-            max_diff = max(max_diff, float(difference))
-            if not torch.allclose(reference_output, candidate_output, atol=atol, rtol=rtol):
-                correct = False
+            reference_flat = reference_output.reshape(-1)
+            candidate_flat = candidate_output.reshape(-1)
+            reference_chunk = candidate_chunk = None
+            for start in range(0, reference_flat.numel(), 1048576):
+                reference_chunk = reference_flat[start:start + 1048576]
+                candidate_chunk = candidate_flat[start:start + 1048576]
+                difference = (reference_chunk.float() - candidate_chunk.float()).abs().max().item()
+                max_diff = max(max_diff, float(difference))
+                if not torch.allclose(reference_chunk, candidate_chunk, atol=atol, rtol=rtol):
+                    correct = False
+            del reference_flat, candidate_flat, reference_output, candidate_output
+            del reference_chunk, candidate_chunk
+            if inputs:
+                del inputs
+            del model
+            if not correct:
                 break
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
@@ -164,6 +179,7 @@ _RUNNER = textwrap.dedent(
         except Exception as error:
             result["error"] = f"benchmark failed: {type(error).__name__}: {error}"
 
+    result["peak_allocated_gib"] = torch.cuda.max_memory_allocated() / (1024 ** 3)
     print(json.dumps(result))
     """
 )
@@ -216,13 +232,17 @@ def verify_cuda(
         ]
         try:
             with verifier_slot(timeout_s) as remaining:
-                process = subprocess.run(
-                    command,
-                    capture_output=True,
-                    text=True,
-                    timeout=remaining,
-                    cwd=cwd,
-                )
+                with paused_inference(remaining) as execution_budget:
+                    process = subprocess.run(
+                        command,
+                        capture_output=True,
+                        text=True,
+                        timeout=execution_budget,
+                        cwd=cwd,
+                        env={**os.environ, "CUDA_VISIBLE_DEVICES": "0"}
+                        if os.environ.get("KERNEL_INFERENCE_ADMIN_URL")
+                        else None,
+                    )
         except (subprocess.TimeoutExpired, TimeoutError) as error:
             failure["error"] = (
                 f"verification timed out within {timeout_s}s (queue + execution): {error}"

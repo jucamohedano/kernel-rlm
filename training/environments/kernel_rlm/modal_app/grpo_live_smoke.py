@@ -31,6 +31,22 @@ CURRICULUM_LEVEL1 = PROJECT_ROOT / "notes" / "curriculum" / "lvl1_seed42.jsonl"
 
 
 def patch_prime_laguna_config() -> None:
+    clients_path = Path("/root/prime_rl/orchestrator/clients.py")
+    clients = clients_path.read_text()
+    if "from kernel_rlm.gpu_sharing import exclusive_weight_update" not in clients:
+        for name in ("update_weights", "load_lora_adapter"):
+            marker = f"async def {name}("
+            if clients.count(marker) != 1:
+                raise RuntimeError(f"Prime GPU coordination anchor missing: {name}")
+            clients = clients.replace(marker, f"@exclusive_weight_update\n{marker}", 1)
+        clients = clients.replace(
+            "from __future__ import annotations\n",
+            "from __future__ import annotations\n\n"
+            "from kernel_rlm.gpu_sharing import exclusive_weight_update\n",
+            1,
+        )
+        compile(clients, str(clients_path), "exec")
+        clients_path.write_text(clients)
     model_source = Path("/root/prime_rl/trainer/model.py")
     source = model_source.read_text()
     marker = "    model_config.use_cache = False\n"
@@ -149,6 +165,7 @@ app = modal.App("kernel-rlm-grpo-live-smoke")
     scaledown_window=2,
 )
 def train(run_id: str) -> dict[str, object]:
+    os.environ["KERNEL_INFERENCE_ADMIN_URL"] = "http://127.0.0.1:8100"
     output_dir = Path("/traces/live-grpo") / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
     patch_prime_laguna_config()

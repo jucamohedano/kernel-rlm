@@ -39,3 +39,8 @@ def test_training_matches_probe_generation_and_bounds_concurrency():
     assert orchestrator["concurrency"] == {"initial_inflight": 8, "max_inflight": 8}
     assert orchestrator["concurrency"]["max_inflight"] >= orchestrator["group_size"]
     assert config["seq_len"] == config["inference"]["vllm"]["max_model_len"] == 8192
+    assert config["inference"]["vllm"]["gpu_memory_utilization"] == 0.86
+    assert (
+        config["inference"]["vllm"]["lora_target_modules"]
+        == config["trainer"]["model"]["lora"]["target_modules"]
+    )

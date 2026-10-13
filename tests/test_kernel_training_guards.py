@@ -103,7 +103,7 @@ def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome):
         "subprocess": SimpleNamespace(
             Popen=popen, STDOUT=subprocess.STDOUT, TimeoutExpired=subprocess.TimeoutExpired
         ),
-        "os": SimpleNamespace(killpg=killpg),
+        "os": SimpleNamespace(killpg=killpg, environ={}),
         "signal": signal,
         "json": json,
         "traces": traces,
