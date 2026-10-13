@@ -46,6 +46,7 @@ def test_actual_reward_includes_speed_for_correct_kernels():
         trace = SimpleNamespace(info={})
         rewards.append(asyncio.run(namespace["kernel_reward"](task, trace, runtime)))
         assert trace.info["kernel_verify"]["speedup"] == speed
+        assert trace.info["kernel_reward"] == rewards[-1]
     assert rewards[0] < rewards[1] < rewards[2]
     assert rewards[2] == rewards[3]
     result["correct"] = False

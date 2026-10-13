@@ -159,9 +159,9 @@ def test_prompt_scaffold_assembles_source_without_loading_extension(modules):
     keywords = {keyword.arg: keyword.value for keyword in call.keywords}
     assert ast.literal_eval(keywords["functions"]) == ["launch"]
     assert "is_python_module" not in keywords
-    assert KERNEL_TASK_INSTRUCTION.startswith(
-        "Inspect the PyTorch reference in the read-only context"
-    )
+    assert "Never write import context" in KERNEL_TASK_INSTRUCTION
+    assert "get_inputs()" in KERNEL_TASK_INSTRUCTION
+    assert "read-only context variable" in KERNEL_TASK_INSTRUCTION
     assert KERNEL_TASK_INSTRUCTION.endswith(CUDA_ASSEMBLY_TEMPLATE)
 
 

@@ -197,16 +197,27 @@ async def probe(run_id: str):
                         function = call.get("function", call)
                         tool_names.append(function.get("name", "unknown"))
                 verification = info.get("kernel_verify", {})
-                reward = float(trace.get("reward") or 0.0)
+                v1_scores = (trace.get("rewards") or {}).get("kernel_reward", {})
+                v1_reward = v1_scores.get("score") if isinstance(v1_scores, dict) else None
+                if v1_reward is None:
+                    v1_reward = info.get("kernel_reward")
+                reward = float(v1_reward) if isinstance(v1_reward, int | float) else None
                 submitted = bool(info.get("kernel_submission"))
                 correct = bool(verification.get("correct"))
                 report["episode_ok"] = episode.ok
                 report["reward"] = reward
+                report["reward_source"] = (
+                    "trace.rewards.kernel_reward.score"
+                    if v1_scores.get("score") is not None
+                    else "trace.info.kernel_reward"
+                    if info.get("kernel_reward") is not None
+                    else "not serialized"
+                )
                 report["termination"] = info.get("kernel_termination", "unknown")
                 report["groups"] = [
                     {
                         "task": "thinking-vector-add",
-                        "rewards": [reward],
+                        "rewards": [reward] if reward is not None else [],
                         "correct": int(correct),
                         "submitted": int(submitted),
                     }

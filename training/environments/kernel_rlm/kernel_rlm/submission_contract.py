@@ -6,8 +6,9 @@ import ast
 import textwrap
 
 KERNEL_TASK_INSTRUCTION = (
-    "Inspect the PyTorch reference in the read-only context variable. Never assign to "
-    "context or context_0; use a new variable for your work. Before coding, read the "
+    "The PyTorch reference is already loaded in the read-only context variable. Never "
+    "write import context, and never assign to context or context_0. First inspect it "
+    "with print(context); store your work in new variables. Before coding, read the "
     "forward signature and get_inputs() to determine the exact input count, shapes, "
     "and dtypes. Match cuda_forward(*tensors) and the exported C++ launch signature "
     "to that input count. Then write a standalone Python source "

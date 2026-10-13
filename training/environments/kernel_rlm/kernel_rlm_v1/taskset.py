@@ -31,6 +31,7 @@ class KernelTask(vf.Task[KernelData]):
         trace.info["kernel_model_calls"] = record.get("model_calls", [])
         trace.info["kernel_subcalls"] = record.get("subcalls", [])
         if not source:
+            trace.info["kernel_reward"] = 0.0
             return 0.0
         is_valid, validation_error = validate_submission_source(source)
         if not is_valid:
@@ -48,6 +49,7 @@ class KernelTask(vf.Task[KernelData]):
                 "kernel_ms": None,
                 "error": f"static validation: {validation_error}",
             }
+            trace.info["kernel_reward"] = 0.0
             return 0.0
         trace.info["kernel_static"] = {"valid": True, "error": ""}
         result = await asyncio.to_thread(verify_cuda, self.data.context, source)
@@ -60,6 +62,7 @@ class KernelTask(vf.Task[KernelData]):
             reward += self.data.speed_reward_weight * min(
                 max(float(result.get("speedup") or 0), 0), 3
             )
+        trace.info["kernel_reward"] = reward
         return reward
 
 
