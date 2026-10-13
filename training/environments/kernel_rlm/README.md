@@ -422,3 +422,17 @@ The kernel prompt now asks for a concrete subproblem, relevant context, and an
 expected response format. Each turn reports remaining feedback and child budgets;
 the final turn explicitly requests submission. These reminders do not guarantee
 model compliance. Thinking remains disabled pending a separate validation.
+
+### Verifier concurrency guard
+
+Intermediate feedback and final scoring share one container-wide Linux file lock.
+Only one verifier subprocess runs at a time. Queue waiting and execution share
+the existing timeout; a queue timeout does not start CUDA and returns an explicit
+verification failure. This can lower rewards under overload, so inspect timeout
+errors before interpreting a failed group as a model failure.
+
+This guard prevents verifier-versus-verifier overlap. It does not pause vLLM,
+free inference memory, or make shared-GPU speed measurements reliable. Training
+remains on hold until the actual three-GPU layout is validated. Prime's pinned
+`/pause` endpoint uses `mode="keep", clear_cache=False`; pausing alone is not a
+memory-offload solution. Thinking remains off during this resource work.

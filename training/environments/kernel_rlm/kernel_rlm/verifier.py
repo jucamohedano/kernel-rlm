@@ -11,6 +11,8 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
+from kernel_rlm.verifier_slot import verifier_slot
+
 _RUNNER = textwrap.dedent(
     """
     import importlib.util
@@ -213,20 +215,22 @@ def verify_cuda(
             "1" if benchmark else "0",
         ]
         try:
-            process = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-                cwd=cwd,
+            with verifier_slot(timeout_s) as remaining:
+                process = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=remaining,
+                    cwd=cwd,
+                )
+        except (subprocess.TimeoutExpired, TimeoutError) as error:
+            failure["error"] = (
+                f"verification timed out within {timeout_s}s (queue + execution): {error}"
             )
-        except subprocess.TimeoutExpired:
-            failure["error"] = f"verification timed out after {timeout_s}s"
             return failure
         if process.returncode != 0:
             failure["error"] = (
-                f"verifier crashed (rc={process.returncode}): "
-                f"{(process.stderr or '')[-1500:]}"
+                f"verifier crashed (rc={process.returncode}): {(process.stderr or '')[-1500:]}"
             )
             return failure
         try:
