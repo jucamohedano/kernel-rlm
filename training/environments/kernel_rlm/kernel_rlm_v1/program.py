@@ -15,14 +15,15 @@ from kernel_rlm.actions import (
 )
 from kernel_rlm.feedback import build_local_feedback_bootstrap
 from kernel_rlm.subcalls import (
+    KERNEL_SYSTEM,
     PROBE_INSTRUCTION,
     SUBCALL_INSTRUCTION,
     SUBCALL_TIMEOUT_S,
     BoundedSubcalls,
+    turn_budget,
 )
 from openai import AsyncOpenAI
 from rlm.utils.prompts import (
-    RLM_SYSTEM_PROMPT,
     QueryMetadata,
     build_rlm_system_prompt,
     build_user_prompt,
@@ -49,11 +50,17 @@ async def run(task: dict) -> None:
         if limits.get("subcall_probe"):
             task_prompt += "\n" + PROBE_INSTRUCTION
     messages = build_rlm_system_prompt(
-        RLM_SYSTEM_PROMPT,
+        KERNEL_SYSTEM,
         QueryMetadata(task["context"]),
         root_prompt=task_prompt,
         orchestrator=False,
     )
+    for message in messages:
+        message["content"] = message["content"].replace(
+            "Each sub-LLM call can handle roughly ~100k tokens at once.", ""
+        )
+    if not limits.get("enable_subcall"):
+        messages[0]["content"] += " Subcalls are disabled for this run."
     record = {
         "submission": "",
         "repl_calls": 0,
@@ -108,6 +115,13 @@ async def run(task: dict) -> None:
                 context_count=1,
                 history_count=0,
                 max_iterations=limits["max_turns"],
+            )
+            turn_prompt["content"] += turn_budget(
+                turn,
+                limits["max_turns"],
+                record["feedback_calls"],
+                bool(record["subcalls"]),
+                limits.get("enable_subcall", False),
             )
             if messages[-1]["role"] == "user":
                 messages[-1]["content"] += "\n\n" + turn_prompt["content"]

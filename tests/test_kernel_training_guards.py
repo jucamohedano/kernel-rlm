@@ -25,6 +25,7 @@ def test_actual_reward_includes_speed_for_correct_kernels():
         "json": json,
         "validate_submission_source": lambda source: (True, ""),
         "verify_cuda": lambda *args: result,
+        "mask_child_branches": lambda trace: None,
     }
     exec(compile(ast.Module(body=[method], type_ignores=[]), "reward-test", "exec"), namespace)
     runtime = SimpleNamespace(

@@ -195,8 +195,9 @@ prime / V1 SingleAgentEnv
   -> Episode / Trace: intercepted messages, rewards, verification, submission
 ```
 
-The bounded program is root-only: no sub-LLM endpoint is connected. It uses the
-fork's prompts, code-block parser, answer protocol, and persistent worker.
+The bounded program uses a kernel-specific prompt, the fork's code-block parser,
+answer protocol, and persistent worker. Optional one-shot child calls share the
+intercepted client; only root-generated tokens contribute to the GRPO loss.
 The harness runtime must already contain `rlm`, `rlm_train`, `kernel_rlm_v1`, and
 their dependencies. The Modal check uses subprocesses **inside the Modal CPU
 container**, not the laptop. Subprocesses are not a security sandbox; production
@@ -386,8 +387,9 @@ and [Modal volume persistence](https://modal.com/docs/guide/volumes).
 
 ### Optional child-call probe
 
-Training keeps `enable_subcall = false` by default. To test the wiring without
-an optimizer, run from this directory:
+The harness default is `enable_subcall = false`; `grpo_level1.toml` explicitly
+enables one optional child call without forcing delegation. To test the wiring
+without an optimizer, run from this directory:
 
 ```bash
 ../../../.venv/bin/modal run -m modal_app.frozen_probe --subcalls
@@ -406,5 +408,17 @@ an optimizer, run from this directory:
 
 The probe explicitly asks for one child call. It checks wiring, not spontaneous
 delegation or a quality improvement. Only the final kernel receives reward.
-Child requests appear in V1 traces; their GRPO credit assignment must be reviewed
-before enabling this option in training. CPU tests cannot validate that behavior.
+Scoring masks child branches before Prime assigns advantages. It preserves child
+messages and stores their original masks/logprobs in `trace.info.child_loss_exclusions`.
+Root tokens retain their original masks; child replies in root observations remain
+context-only. Unknown independent branches fail closed instead of silently training.
+Root-only loss does not freeze a shared model: root updates can indirectly change
+future child behavior when both use the same weights.
+
+Run `../../../.venv/bin/modal run -m modal_app.subcall_preflight` to check the saved
+trace through real V1 serialization and pinned Prime advantage/sample conversion
+on CPU. This does not test a GPU optimizer update or solve verifier GPU contention.
+The kernel prompt now asks for a concrete subproblem, relevant context, and an
+expected response format. Each turn reports remaining feedback and child budgets;
+the final turn explicitly requests submission. These reminders do not guarantee
+model compliance. Thinking remains disabled pending a separate validation.

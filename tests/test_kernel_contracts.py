@@ -380,5 +380,8 @@ def test_enabled_subcall_through_program_and_worker(modules, monkeypatch, tmp_pa
     assert "use threadIdx.x" in record["messages"][-1]["content"]
     assert "Do not delegate" not in str(record["messages"])
     assert "2,048" in record["messages"][0]["content"]
+    assert "100k" not in str(record["messages"])
+    assert "500K" not in str(record["messages"])
+    assert "FINAL TURN" in str(record["messages"])
     assert client.chat.completions.create.await_count == 2
     client.close.assert_awaited_once()

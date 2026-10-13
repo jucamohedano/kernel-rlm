@@ -33,6 +33,8 @@ def test_training_matches_probe_generation_and_bounds_concurrency():
     assert orchestrator["train"]["sampling"]["max_completion_tokens"] == 2048
     assert harness["max_tokens"] == 2048
     assert harness["max_turns"] == 5
+    assert harness["enable_subcall"] is True
+    assert harness["subcall_probe"] is False
     assert orchestrator["renderer"]["enable_thinking"] is False
     assert orchestrator["concurrency"] == {"initial_inflight": 8, "max_inflight": 8}
     assert orchestrator["concurrency"]["max_inflight"] >= orchestrator["group_size"]

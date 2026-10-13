@@ -6,6 +6,7 @@ from pathlib import Path
 
 import verifiers.v1 as vf
 from kernel_rlm.submission_contract import KERNEL_TASK_INSTRUCTION, validate_submission_source
+from kernel_rlm.training_mask import mask_child_branches
 from kernel_rlm.verifier import verify_cuda
 
 INSTRUCTION = KERNEL_TASK_INSTRUCTION
@@ -19,6 +20,7 @@ class KernelData(vf.TaskData):
 class KernelTask(vf.Task[KernelData]):
     @vf.reward(weight=1.0)
     async def kernel_reward(self, trace: vf.Trace, runtime: vf.Runtime) -> float:
+        mask_child_branches(trace)
         record = json.loads(await runtime.read("submission.json", max_bytes=1_000_000))
         source = record["submission"].strip()
         trace.info["kernel_submission"] = source

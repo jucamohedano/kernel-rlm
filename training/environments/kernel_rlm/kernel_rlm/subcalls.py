@@ -12,15 +12,48 @@ SUBCALL_INSTRUCTION = (
     "You may call llm_query(prompt) inside the REPL once per trajectory. "
     "The child is the same model with a fresh context, no REPL, and no further recursion. "
     "Its prompt limit is 2,048 tokens; its output limit is 2,048 tokens. "
-    "Send only the relevant reference or compiler error. Store and inspect the returned "
+    "Delegate a specific subproblem, not the entire kernel: indexing, synchronization, "
+    "a compiler error, or a memory-access choice. Give an explicit question, the relevant "
+    "code, and the expected answer format. Never send bare context without a question. "
+    "For example: llm_query('Explain this indexing error; return a corrected expression "
+    "and a short explanation. Fragment: ' + fragment). Store and inspect the returned "
     "text, then implement and verify the kernel yourself. Calling a child earns no reward. "
     "Batched calls share the same single-call budget; rlm_query is only a one-shot alias."
 )
 PROBE_INSTRUCTION = (
     "For this subcall wiring probe, use llm_query exactly once from a REPL block before "
-    "building the kernel. Ask it for a CUDA implementation approach using context, "
+    "building the kernel. Ask a specific question about indexing or bounds using context, "
     "store its reply in child_advice, and print(child_advice). Then complete the task."
 )
+
+KERNEL_SYSTEM = (
+    "You solve CUDA tasks through a persistent Python REPL. The reference code is in "
+    "the string variable context. Inspect it with Python and print relevant results. "
+    "Execute Python by placing it inside a fenced repl block. Observations arrive in "
+    "the next user message. Do not invent tool calls or results. "
+    "Prepare kernel source as a string and use cuda_feedback(source) for compiler and "
+    "correctness feedback. The REPL disables exec, eval, and compile; use ast.parse "
+    "for syntax checks. Submit with answer['content'] = source and answer['ready'] = True "
+    "inside the REPL. Do not submit just a variable name or prose. "
+    "Preserve the best source and reserve the final turn for submission."
+)
+
+
+def turn_budget(turn, max_turns, feedback_used, child_used, enabled):
+    remaining = max(0, 2 - feedback_used)
+    message = (
+        f"\nTurn {turn + 1}/{max_turns}. Feedback calls remaining: {remaining}. "
+        f"Child calls remaining: {int(enabled and not child_used)}."
+    )
+    if remaining == 0:
+        message += " Do not call cuda_feedback again."
+    if turn + 1 == max_turns:
+        message += (
+            " FINAL TURN: make any final repair and submit your best complete source now "
+            "with answer['content'] = source; answer['ready'] = True. "
+            "Do not request more feedback or delegation."
+        )
+    return message
 
 
 class BoundedSubcalls:

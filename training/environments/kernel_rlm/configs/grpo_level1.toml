@@ -60,6 +60,8 @@ env.taskset.speed_reward_weight = 0.1
 env.agent.harness.id = "kernel_rlm_v1"
 env.agent.harness.max_turns = 5
 env.agent.harness.max_tokens = 2048
+env.agent.harness.enable_subcall = true
+env.agent.harness.subcall_probe = false
 env.agent.runtime.type = "subprocess"
 
 [orchestrator.train.source.curriculum.sampler]
