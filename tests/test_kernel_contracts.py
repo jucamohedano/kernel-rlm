@@ -229,6 +229,9 @@ def test_feedback_through_real_worker_does_not_submit(modules, monkeypatch, tmp_
     record = json.loads((tmp_path / "submission.json").read_text())
     assert "reward" not in record
     assert any(message.get("reasoning_content") == reasoning for message in record["messages"])
+    request = client.chat.completions.create.await_args.kwargs
+    assert [tool["function"]["name"] for tool in request["tools"]] == ["repl"]
+    assert request["tool_choice"] == "auto"
     if workflow == "budget":
         assert record["feedback_calls"] == 2
         assert record["submission"] == ""
@@ -243,6 +246,109 @@ def test_feedback_through_real_worker_does_not_submit(modules, monkeypatch, tmp_
         assert record["feedback_calls"] == 0
         assert record["submission"] == ""
         assert "SyntaxError" in record["messages"][-1]["content"]
+
+
+def test_structured_repl_call_gets_matching_tool_observation(modules, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    for key, value in {
+        "KERNEL_LIMITS": '{"max_turns":3,"max_tokens":128}',
+        "KERNEL_ENDPOINT": "http://unused",
+        "KERNEL_API_KEY": "test-only",
+        "KERNEL_MODEL": "fake-model",
+    }.items():
+        monkeypatch.setenv(key, value)
+    code = "print(context)"
+    final_action = "```repl\nanswer['content'] = 'cpu-test-source'\nanswer['ready'] = True\n```"
+    replies = [
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=None,
+                        model_dump=lambda **kwargs: {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call-python-0",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "python",
+                                        "arguments": json.dumps({"code": code}),
+                                    },
+                                }
+                            ],
+                        },
+                    ),
+                    finish_reason="tool_calls",
+                )
+            ]
+        ),
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=None,
+                        model_dump=lambda **kwargs: {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call-repl-1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "repl",
+                                        "arguments": json.dumps({"code": code}),
+                                    },
+                                }
+                            ],
+                        },
+                    ),
+                    finish_reason="tool_calls",
+                )
+            ]
+        ),
+        SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=(final_action),
+                        model_dump=lambda **kwargs: {
+                            "role": "assistant",
+                            "content": final_action,
+                        },
+                    ),
+                    finish_reason="stop",
+                )
+            ]
+        ),
+    ]
+    create = AsyncMock(side_effect=replies)
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create)), close=AsyncMock()
+    )
+    monkeypatch.setattr(modules.program, "AsyncOpenAI", lambda **kwargs: client)
+    asyncio.run(modules.program.run({"context": "CPU fixture", "prompt": "inspect"}))
+    final_request = create.await_args_list[2].kwargs
+    messages = final_request["messages"]
+    assert not any(
+        call.get("function", call).get("name") == "python"
+        for message in messages
+        for call in message.get("tool_calls", [])
+    )
+    assert any(
+        message.get("role") == "user" and "only tool is repl" in message.get("content", "")
+        for message in messages
+    )
+    call_message = next(message for message in messages if message.get("tool_calls"))
+    call_id = call_message["tool_calls"][0]["id"]
+    tool_reply = next(message for message in messages if message.get("role") == "tool")
+    assert tool_reply["tool_call_id"] == call_id == "call-repl-1"
+    assert "CPU fixture" in tool_reply["content"]
+    assert tool_reply["content"].startswith("REPL output:")
+    assert "Structured REPL actions:" not in str(messages)
+    record = json.loads((tmp_path / "submission.json").read_text())
+    assert record["submission"] == "cpu-test-source"
 
 
 @pytest.mark.parametrize(
@@ -315,7 +421,8 @@ def test_program_with_real_cpu_worker(modules, monkeypatch, tmp_path, kind, expe
     assert record["feedback_calls"] == 0
     if kind == "structured":
         saved = next(message for message in record["messages"] if message["role"] == "assistant")
-        assert saved["tool_calls"] == message["tool_calls"]
+        assert saved["tool_calls"][0]["function"]["name"] == "repl"
+        assert saved["tool_calls"][0]["id"].startswith("repl_")
         assert "Structured REPL actions:" not in saved["content"]
     if kind == "textual_tool_echo":
         assert "No executable REPL action" in record["model_calls"][0]["action_errors"][0]

@@ -8,6 +8,19 @@ FEEDBACK_MAX_CALLS = 2
 FEEDBACK_TIMEOUT_S = 120
 REPL_TIMEOUT_S = FEEDBACK_MAX_CALLS * FEEDBACK_TIMEOUT_S + 30
 BACKEND_TIMEOUT_S = REPL_TIMEOUT_S + 30
+REPL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "repl",
+        "description": "Run Python code in the persistent task REPL. Use only this tool.",
+        "parameters": {
+            "type": "object",
+            "properties": {"code": {"type": "string"}},
+            "required": ["code"],
+            "additionalProperties": False,
+        },
+    },
+}
 
 
 def repl_actions(message: dict, finish_reason: str) -> tuple[list[str], list[str]]:
@@ -19,7 +32,8 @@ def repl_actions(message: dict, finish_reason: str) -> tuple[list[str], list[str
         function = call.get("function", call)
         if function.get("name") != "repl":
             errors.append(
-                f"Unsupported tool {function.get('name')!r}; use repl with a code string."
+                f"Unsupported tool {function.get('name')!r}. The only tool is repl; "
+                'call it with JSON arguments such as {"code": "print(context)"}.'
             )
             continue
         try:

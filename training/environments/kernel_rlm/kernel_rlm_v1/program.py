@@ -11,6 +11,7 @@ from kernel_rlm.actions import (
     FEEDBACK_MAX_CALLS,
     FEEDBACK_TIMEOUT_S,
     REPL_TIMEOUT_S,
+    REPL_TOOL,
     repl_actions,
 )
 from kernel_rlm.feedback import build_local_feedback_bootstrap
@@ -131,14 +132,49 @@ async def run(task: dict) -> None:
                 model=os.environ["KERNEL_MODEL"],
                 messages=messages,
                 max_tokens=limits["max_tokens"],
+                tools=[REPL_TOOL],
+                tool_choice="auto",
             )
             choice = response.choices[0]
             raw_message = choice.message.model_dump(exclude_none=True)
             codes, action_errors = repl_actions(raw_message, choice.finish_reason)
             content = choice.message.content or ""
             assistant_message = {"role": "assistant", "content": content}
-            if raw_message.get("tool_calls"):
-                assistant_message["tool_calls"] = raw_message["tool_calls"]
+            structured_calls = raw_message.get("tool_calls") or []
+            repl_calls = []
+            if structured_calls and codes:
+                expected_codes = iter(codes)
+                for call in structured_calls:
+                    function = call.get("function", call)
+                    if function.get("name") != "repl":
+                        continue
+                    arguments = function.get("arguments", "{}")
+                    try:
+                        arguments = (
+                            json.loads(arguments) if isinstance(arguments, str) else arguments
+                        )
+                    except json.JSONDecodeError:
+                        continue
+                    code = arguments.get("code") if isinstance(arguments, dict) else None
+                    if not isinstance(code, str):
+                        continue
+                    try:
+                        expected_code = next(expected_codes)
+                    except StopIteration:
+                        break
+                    if code.strip() != expected_code:
+                        continue
+                    call_id = call.get("id") or f"repl_{record['turns']}_{len(repl_calls)}"
+                    repl_calls.append(
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {"name": "repl", "arguments": json.dumps({"code": code})},
+                        }
+                    )
+            structured_action = bool(repl_calls) and len(repl_calls) == len(codes)
+            if structured_action:
+                assistant_message["tool_calls"] = repl_calls
             reasoning = raw_message.get("reasoning_content") or raw_message.get("reasoning")
             if isinstance(reasoning, str) and reasoning:
                 assistant_message["reasoning_content"] = reasoning
@@ -153,9 +189,7 @@ async def run(task: dict) -> None:
                 }
             )
             record["turns"] += 1
-            if action_errors:
-                messages.append({"role": "user", "content": "\n".join(action_errors)})
-            for code in codes:
+            for code_index, code in enumerate(codes):
                 result = await backend.execute(code)
                 record["repl_calls"] += 1
                 observation = "REPL output:\n" + (result.stdout + result.stderr)[:20000]
@@ -163,13 +197,23 @@ async def run(task: dict) -> None:
                     if line.startswith("CUDA feedback: "):
                         feedback = json.loads(line.removeprefix("CUDA feedback: "))
                         record["feedback_calls"] = feedback["feedback_calls_used"]
-                if messages[-1]["role"] == "user":
+                if structured_action:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": repl_calls[code_index]["id"],
+                            "content": observation,
+                        }
+                    )
+                elif messages[-1]["role"] == "user":
                     messages[-1]["content"] += "\n\n" + observation
                 else:
                     messages.append({"role": "user", "content": observation})
                 if result.final_answer is not None:
                     record["submission"] = result.final_answer
                     break
+            if action_errors:
+                messages.append({"role": "user", "content": "\n".join(action_errors)})
             if record["submission"]:
                 record["termination_reason"] = "submitted"
                 break

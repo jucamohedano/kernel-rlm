@@ -27,9 +27,12 @@ PROBE_INSTRUCTION = (
 )
 
 KERNEL_SYSTEM = (
-    "You solve CUDA tasks through a persistent Python REPL. The reference code is in "
+    "You solve CUDA tasks through a persistent Python REPL. The only available tool is "
+    "repl, which accepts one JSON string argument named code. Use it for Python actions. "
+    "Never call python, bash, or another tool name. You may instead put Python inside a "
+    "fenced repl block. Do not mix the two action formats in one response. The reference code is in "
     "the string variable context. Inspect it with Python and print relevant results. "
-    "Execute Python by placing it inside a fenced repl block. Observations arrive in "
+    "Observations arrive in "
     "the next user message. Do not invent tool calls or results. "
     "Prepare kernel source as a string and use cuda_feedback(source) for compiler and "
     "correctness feedback. The REPL disables exec, eval, and compile; use ast.parse "

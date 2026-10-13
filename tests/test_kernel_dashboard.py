@@ -114,3 +114,9 @@ def test_index_has_descriptive_labels_outcomes_and_search(tmp_path):
     assert run.name in page
     (run / "report.json").write_text(json.dumps({"run_id": run.name, "groups": {"legacy": 4}}))
     assert "No completed rollouts recorded" in dashboard.render_index(tmp_path)
+
+
+def test_project_guide_is_available_from_dashboard():
+    page = dashboard.render_project_guide()
+    assert "Train Laguna to write CUDA kernels" in page
+    assert "Project brief" in page

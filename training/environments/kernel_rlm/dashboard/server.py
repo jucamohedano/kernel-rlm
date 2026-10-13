@@ -124,10 +124,15 @@ def layout(title: str, body: str) -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{text(title)}</title><style>{styles}</style></head>
 <body><nav><strong>Kernel<span style="color:var(--accent)">RLM</span> / experiments</strong>
-<a href="/">All runs</a></nav><main>{body}
+<a href="/">All runs</a><a href="/guide">Project guide</a></nav><main>{body}
 <footer>Local saved artifacts · No GPU jobs · Layout inspired by
 <a href="https://posttrainbench.com/traces/">PostTrainBench</a></footer>
 </main><script>{script}</script></body></html>"""
+
+
+def render_project_guide() -> str:
+    path = Path(__file__).resolve().parents[5] / "PROJECT_TRACKER.html"
+    return path.read_text(encoding="utf-8")
 
 
 def render_index(root: Path) -> str:
@@ -393,7 +398,34 @@ def render_run(root: Path, run_id: str, trajectory: int = 0) -> str:
 def make_handler(root: Path):
     class DashboardHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            query = parse_qs(urlparse(self.path).query)
+            request = urlparse(self.path)
+            project_root = Path(__file__).resolve().parents[5]
+            static_pages = {
+                "/guide": ("PROJECT_TRACKER.html", "text/html"),
+                "/PROJECT_TRACKER_ARCHIVE.html": ("PROJECT_TRACKER_ARCHIVE.html", "text/html"),
+                "/notes/datasets.md": ("notes/datasets.md", "text/markdown"),
+                "/notes/reward-design.md": ("notes/reward-design.md", "text/markdown"),
+                "/rlm/training/environments/kernel_rlm/README.md": (
+                    "rlm/training/environments/kernel_rlm/README.md",
+                    "text/markdown",
+                ),
+            }
+            if request.path in static_pages:
+                relative_path, media_type = static_pages[request.path]
+                try:
+                    document = (project_root / relative_path).read_text(encoding="utf-8")
+                except OSError:
+                    self.send_error(404, "Project document is unavailable")
+                    return
+                payload = document.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", f"{media_type}; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
+            query = parse_qs(request.query)
             run_id = unquote(query.get("run", [""])[0])
             raw_trajectory = query.get("trajectory", ["0"])[0]
             trajectory = (
