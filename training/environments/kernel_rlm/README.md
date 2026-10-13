@@ -373,9 +373,14 @@ Only trusted inference processes should write this executable-code cache.
 Readiness has a 600-second elapsed-time deadline. The overall probe still has
 a 1200-second deadline and Modal's 1260-second hard limit includes cleanup.
 More startup time leaves less rollout time; it does not extend the overall cap.
-All four rollouts already share one server process. The server is terminated
+All rollouts in a probe share one server process. The server is terminated
 after the group, with forced shutdown if graceful shutdown exceeds 10 seconds;
-no warm idle GPU deployment is retained.
+no warm idle GPU deployment is retained. The frozen probe accepts groups of
+four or eight. An eight-sample group for one Level-1 task uses
+`modal run -m modal_app.frozen_probe --rollouts 8 --curriculum-task-id lvl1-seed42-0011`.
+This is a frozen-policy measurement, not training. The 13 October run reached
+the 1,200-second probe deadline after six samples; inspect its saved partial
+traces before extending the deadline or starting GRPO.
 
 The first run must populate the new cache. Later compatible runs can reuse it,
 but still load weights and perform GPU warmup/graph capture. Compare saved

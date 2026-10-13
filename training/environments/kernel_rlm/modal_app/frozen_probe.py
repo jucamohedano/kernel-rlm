@@ -74,10 +74,16 @@ def preflight(subcalls: bool = False) -> dict:
     scaledown_window=2,
 )
 async def probe(
-    run_id: str, rollouts: int = 1, curriculum: bool = False, subcalls: bool = False
+    run_id: str,
+    rollouts: int = 1,
+    curriculum: bool = False,
+    subcalls: bool = False,
+    curriculum_task_id: str | None = None,
 ) -> dict:
-    if rollouts not in (1, 4):
-        raise ValueError("Probe supports one trajectory or one four-rollout group")
+    if rollouts not in (1, 4, 8):
+        raise ValueError("Probe supports one trajectory or a four/eight-rollout group")
+    if rollouts == 8 and not curriculum_task_id:
+        raise ValueError("An eight-rollout group must name one curriculum task")
     if subcalls and (rollouts != 1 or curriculum):
         raise ValueError("Subcall wiring probe is limited to one vector-add trajectory")
     import asyncio
@@ -151,10 +157,14 @@ async def probe(
                 "poolside_v1",
             ]
             report["inference_command"] = command
-            report["scope"] = (
-                f"Frozen {'softplus + sigmoid curriculum' if curriculum else 'vector-add'} "
-                f"probe: {rollouts} rollouts per task; no optimizer"
+            task_scope = (
+                f"curriculum task {curriculum_task_id}"
+                if curriculum_task_id
+                else "softplus + sigmoid curriculum"
+                if curriculum
+                else "vector-add"
             )
+            report["scope"] = f"Frozen {task_scope} probe: {rollouts} rollouts; no optimizer"
             report["title"] = report["scope"]
             if subcalls:
                 report["title"] = "Subcall wiring: one child, vector-add, frozen policy"
@@ -180,15 +190,21 @@ async def probe(
                     "code": Path("/root/kernel_rlm/tasks/vector_add.py").read_text(),
                 },
             ]
-            if curriculum:
-                task_ids = {"lvl1-seed42-0011", "lvl1-seed42-0049"}
+            if curriculum or curriculum_task_id:
+                task_ids = (
+                    {curriculum_task_id}
+                    if curriculum_task_id
+                    else {"lvl1-seed42-0011", "lvl1-seed42-0049"}
+                )
                 selected = [
                     row
-                    for line in Path("/root/kernel_rlm/tasks/lvl1_seed42.jsonl").read_text().splitlines()
+                    for line in Path("/root/kernel_rlm/tasks/lvl1_seed42.jsonl")
+                    .read_text()
+                    .splitlines()
                     if (row := json.loads(line))["_task_id"] in task_ids
                 ]
                 if len(selected) != len(task_ids):
-                    raise ValueError("Missing or duplicated curriculum probe tasks")
+                    raise ValueError("Missing or duplicated curriculum probe task")
             report["task_ids"] = [row["_task_id"] for row in selected]
             manifest = directory / "manifest.jsonl"
             manifest.write_text("\n".join(json.dumps(row) for row in selected))
@@ -271,7 +287,7 @@ async def probe(
                 group["correct"] > 0 and group["feedback_calls"] > 0 for group in report["groups"]
             )
             report["gate_passed"] = (
-                rollouts == 4
+                rollouts in (4, 8)
                 and report["trajectory_passed"]
                 and all(
                     len(group["rewards"]) == rollouts and len(set(group["rewards"])) > 1
@@ -281,7 +297,7 @@ async def probe(
             report["status"] = (
                 "trajectory_passed" if report["trajectory_passed"] else "trajectory_failed"
             )
-            if rollouts == 4:
+            if rollouts in (4, 8):
                 report["status"] = "group_passed" if report["gate_passed"] else "group_gate_failed"
             if subcalls:
                 report["subcall_wiring_passed"] = all(
@@ -317,14 +333,21 @@ async def probe(
 
 
 @app.local_entrypoint()
-def main(rollouts: int = 1, curriculum: bool = False, subcalls: bool = False) -> None:
-    if rollouts not in (1, 4):
-        raise ValueError("Use --rollouts 1 or --rollouts 4")
+def main(
+    rollouts: int = 1,
+    curriculum: bool = False,
+    subcalls: bool = False,
+    curriculum_task_id: str | None = None,
+) -> None:
+    if rollouts not in (1, 4, 8):
+        raise ValueError("Use --rollouts 1, --rollouts 4, or --rollouts 8")
+    if rollouts == 8 and not curriculum_task_id:
+        raise ValueError("Eight rollouts require --curriculum-task-id")
     if subcalls and (rollouts != 1 or curriculum):
         raise ValueError("Subcall wiring probe is limited to one vector-add trajectory")
     print(json.dumps(preflight.remote(subcalls), indent=2), flush=True)
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
-    report = probe.remote(run_id, rollouts, curriculum, subcalls)
+    report = probe.remote(run_id, rollouts, curriculum, subcalls, curriculum_task_id)
     destination = Path("logs/frozen-probe") / run_id
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "report.json").write_text(json.dumps(report, indent=2))
