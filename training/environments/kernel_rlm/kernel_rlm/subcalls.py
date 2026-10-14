@@ -3,6 +3,8 @@
 import asyncio
 import time
 
+from kernel_rlm.thinking import visible_response
+
 CHILD_SYSTEM = (
     "You are a CUDA programming assistant. Answer the requested subtask directly. "
     "You have no REPL, tools, or child models. Do not claim to execute or test code."
@@ -66,12 +68,21 @@ def turn_budget(turn, max_turns, feedback_used, child_used, enabled):
 
 
 class BoundedSubcalls:
-    def __init__(self, client, model, count_tokens, records, timeout_s=SUBCALL_TIMEOUT_S):
+    def __init__(
+        self,
+        client,
+        model,
+        count_tokens,
+        records,
+        timeout_s=SUBCALL_TIMEOUT_S,
+        enable_thinking=False,
+    ):
         self.client = client
         self.model = model
         self.count_tokens = count_tokens
         self.records = records
         self.timeout_s = timeout_s
+        self.enable_thinking = enable_thinking
         self.used = False
 
     async def query(self, prompt, state=None):
@@ -87,16 +98,19 @@ class BoundedSubcalls:
         started = time.monotonic()
         try:
             async with asyncio.timeout(self.timeout_s):
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
+                request_args = {
+                    "model": self.model,
+                    "messages": [
                         {"role": "system", "content": CHILD_SYSTEM},
                         {"role": "user", "content": prompt},
                     ],
-                    max_tokens=2048,
-                )
+                    "max_tokens": 2048,
+                }
+                if self.enable_thinking:
+                    request_args["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
+                response = await self.client.chat.completions.create(**request_args)
             choice = response.choices[0]
-            content = choice.message.content or ""
+            content = visible_response(choice.message.content or "")
             if not content.strip() or getattr(choice.message, "tool_calls", None):
                 raise ValueError(
                     "Child must return text advice, not an empty response or tool call"

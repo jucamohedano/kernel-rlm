@@ -50,6 +50,26 @@ def test_budget_and_trace(subcalls):
     client.chat.completions.create.assert_awaited_once()
 
 
+def test_thinking_is_requested_for_child_without_storing_reasoning(subcalls):
+    client = fake_client()
+    records = []
+    child = subcalls(client, "same-model", len, records, enable_thinking=True)
+
+    assert asyncio.run(child.query("derive the output index")) == "CUDA advice"
+    request = client.chat.completions.create.call_args.kwargs
+    assert request["extra_body"] == {"chat_template_kwargs": {"enable_thinking": True}}
+    assert "reasoning_content" not in records[0]
+
+
+def test_private_reasoning_markup_is_not_returned_to_parent(subcalls, monkeypatch):
+    root = Path(__file__).parents[1] / "training/environments/kernel_rlm"
+    monkeypatch.syspath_prepend(str(root))
+    from kernel_rlm.thinking import visible_response
+
+    assert visible_response("<think>private plan</think>Visible answer") == "Visible answer"
+    assert visible_response("Before <think>private</think> after") == "Before  after"
+
+
 def test_oversized_input_does_not_call_model(subcalls):
     client = fake_client()
     child = subcalls(client, "same-model", len, [])

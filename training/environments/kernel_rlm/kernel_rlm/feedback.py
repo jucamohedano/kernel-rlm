@@ -11,6 +11,7 @@ def build_local_feedback_bootstrap(
     *,
     max_calls: int = 2,
     timeout_s: float = 120.0,
+    details_path: str | None = None,
 ) -> str:
     """Build worker code that runs the verifier in the worker's CUDA environment."""
     if max_calls < 1:
@@ -18,9 +19,14 @@ def build_local_feedback_bootstrap(
     return textwrap.dedent(
         f"""
         import json as _kernel_feedback_json
-        from kernel_rlm.verifier import verify_cuda as _kernel_feedback_verify
+        from pathlib import Path as _kernel_feedback_path
+        from kernel_rlm.verifier import (
+            summarize_verification_error as _kernel_feedback_summarize,
+            verify_cuda as _kernel_feedback_verify,
+        )
 
         _kernel_feedback_reference = {json.dumps(reference_code)}
+        _kernel_feedback_details_path = {details_path!r}
         _kernel_feedback_calls = 0
 
         def cuda_feedback(source):
@@ -62,6 +68,13 @@ def build_local_feedback_bootstrap(
                 "feedback_calls_used": _kernel_feedback_calls,
                 "feedback_calls_remaining": {max_calls} - _kernel_feedback_calls,
             }}
+            if _kernel_feedback_details_path:
+                _kernel_feedback_path(_kernel_feedback_details_path).parent.mkdir(
+                    parents=True, exist_ok=True
+                )
+                with open(_kernel_feedback_details_path, "a", encoding="utf-8") as _details:
+                    _details.write(_kernel_feedback_json.dumps(result, sort_keys=True) + "\\n")
+            result["error"] = _kernel_feedback_summarize(str(result.get("error") or ""))
             print("CUDA feedback: " + _kernel_feedback_json.dumps(result, sort_keys=True))
             return result
         """

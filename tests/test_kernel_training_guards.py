@@ -77,9 +77,19 @@ def test_launch_deadlines_and_no_retry():
         for keyword in node.keywords
         if keyword.arg == "timeout"
     ]
-    assert waits == [3300, 30, 10]
+    assert waits == [30, 10]
     assert sum(waits) < options["timeout"]
     assert options["timeout"] + options["startup_timeout"] < 3600
+
+
+def test_kernel_loop_requests_thinking_without_replaying_reasoning():
+    program = (ROOT / "kernel_rlm_v1/program.py").read_text()
+    compile(program, "kernel-rlm-program", "exec")
+    assert '"chat_template_kwargs": {"enable_thinking": True}' in program
+    assert 'assistant_message["reasoning_content"]' not in program
+    assert '"reasoning_tokens": completion_details.get("reasoning_tokens", 0)' in program
+    assert '"prompt_chars": prompt_chars' in program
+    assert '"elapsed_seconds": time.monotonic() - request_started' in program
 
 
 @pytest.mark.parametrize("outcome", ["success", "failure", "terminate", "kill"])
@@ -94,12 +104,18 @@ def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome):
     process.wait.side_effect = {
         "success": [0],
         "failure": [1],
-        "terminate": [timeout, -15],
-        "kill": [timeout, timeout, -9],
+        "terminate": [-15],
+        "kill": [timeout, -9],
     }[outcome]
     popen = Mock(return_value=process)
     killpg = Mock()
     traces = Mock()
+    gpu_monitor = Mock(
+        return_value={
+            "returncode": {"success": 0, "failure": 1}.get(outcome),
+            "timed_out": outcome in {"terminate", "kill"},
+        }
+    )
     namespace = {
         "Path": lambda value: tmp_path / value.lstrip("/"),
         "patch_prime_laguna_config": Mock(),
@@ -111,6 +127,7 @@ def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome):
         "json": json,
         "shlex": shlex,
         "traces": traces,
+        "wait_with_gpu_sampling": gpu_monitor,
         "MODEL_ID": "test-model",
         "REVISION": "test-revision",
         "PRIME_REVISION": "test-prime",
@@ -123,6 +140,9 @@ def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome):
         with pytest.raises(RuntimeError):
             namespace["train"]("test-run")
     report = json.loads((tmp_path / "traces/live-grpo/test-run/report.json").read_text())
+    assert report["gpu_stats_path"].endswith("gpu_stats.jsonl")
+    gpu_monitor.assert_called_once()
+    assert gpu_monitor.call_args.kwargs["timeout_s"] == 3300
     assert (
         report["status"]
         == {

@@ -4,6 +4,8 @@ import asyncio
 import json
 import os
 import sys
+import time
+import uuid
 from pathlib import Path
 
 from kernel_rlm.actions import (
@@ -23,6 +25,7 @@ from kernel_rlm.subcalls import (
     BoundedSubcalls,
     turn_budget,
 )
+from kernel_rlm.thinking import visible_response
 from openai import AsyncOpenAI
 from rlm.utils.prompts import (
     QueryMetadata,
@@ -72,6 +75,11 @@ async def run(task: dict) -> None:
         "model_calls": [],
         "subcalls": [],
     }
+    feedback_log_path = None
+    feedback_log_dir = os.environ.get("KERNEL_FEEDBACK_LOG_DIR")
+    if feedback_log_dir:
+        feedback_log_path = str(Path(feedback_log_dir) / f"feedback-{uuid.uuid4().hex}.jsonl")
+        record["feedback_log_path"] = feedback_log_path
     try:
         os.environ["RLM_TRAIN_EXEC_TIMEOUT_S"] = str(REPL_TIMEOUT_S + subcall_timeout)
         os.environ["RLM_TRAIN_READONLY_CONTEXT"] = "1"
@@ -87,6 +95,7 @@ async def run(task: dict) -> None:
                 os.environ["KERNEL_MODEL"],
                 lambda prompt: len(tokenizer.encode(prompt, add_special_tokens=False)),
                 record["subcalls"],
+                enable_thinking=bool(limits.get("enable_thinking")),
             )
             proxy = SubLLMProxy()
             proxy.register(
@@ -107,7 +116,10 @@ async def run(task: dict) -> None:
         await backend.load_context(task["context"])
         await backend.bootstrap(
             build_local_feedback_bootstrap(
-                task["context"], max_calls=FEEDBACK_MAX_CALLS, timeout_s=FEEDBACK_TIMEOUT_S
+                task["context"],
+                max_calls=FEEDBACK_MAX_CALLS,
+                timeout_s=FEEDBACK_TIMEOUT_S,
+                details_path=feedback_log_path,
             )
         )
         for turn in range(limits["max_turns"]):
@@ -129,17 +141,38 @@ async def run(task: dict) -> None:
                 messages[-1]["content"] += "\n\n" + turn_prompt["content"]
             else:
                 messages.append(turn_prompt)
-            response = await client.chat.completions.create(
-                model=os.environ["KERNEL_MODEL"],
-                messages=messages,
-                max_tokens=limits["max_tokens"],
-                tools=[REPL_TOOL],
-                tool_choice="auto",
-            )
+            request_args = {
+                "model": os.environ["KERNEL_MODEL"],
+                "messages": messages,
+                "max_tokens": limits["max_tokens"],
+                "tools": [REPL_TOOL],
+                "tool_choice": "auto",
+            }
+            if limits.get("enable_thinking"):
+                request_args["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
+            request_started = time.monotonic()
+            prompt_chars = len(json.dumps(messages, ensure_ascii=False))
+            try:
+                response = await client.chat.completions.create(**request_args)
+            except Exception as error:
+                record["model_calls"].append(
+                    {
+                        "turn": turn + 1,
+                        "status": "timeout"
+                        if "timeout" in type(error).__name__.lower()
+                        else "error",
+                        "elapsed_seconds": time.monotonic() - request_started,
+                        "prompt_message_count": len(messages),
+                        "prompt_chars": prompt_chars,
+                        "error_type": type(error).__name__,
+                        "error": str(error)[:500],
+                    }
+                )
+                raise
             choice = response.choices[0]
             raw_message = choice.message.model_dump(exclude_none=True)
             codes, action_errors = repl_actions(raw_message, choice.finish_reason)
-            content = choice.message.content or ""
+            content = visible_response(choice.message.content or "")
             assistant_message = {"role": "assistant", "content": content}
             structured_calls = raw_message.get("tool_calls") or []
             repl_calls = []
@@ -176,17 +209,20 @@ async def run(task: dict) -> None:
             structured_action = bool(repl_calls) and len(repl_calls) == len(codes)
             if structured_action:
                 assistant_message["tool_calls"] = repl_calls
-            reasoning = raw_message.get("reasoning_content") or raw_message.get("reasoning")
-            if isinstance(reasoning, str) and reasoning:
-                assistant_message["reasoning_content"] = reasoning
             messages.append(assistant_message)
+            usage = response.usage.model_dump() if getattr(response, "usage", None) else {}
+            completion_details = usage.get("completion_tokens_details") or {}
             record["model_calls"].append(
                 {
+                    "turn": turn + 1,
+                    "status": "ok",
+                    "elapsed_seconds": time.monotonic() - request_started,
+                    "prompt_message_count": len(messages) - 1,
+                    "prompt_chars": prompt_chars,
                     "finish_reason": choice.finish_reason,
                     "action_errors": action_errors,
-                    "usage": response.usage.model_dump()
-                    if getattr(response, "usage", None)
-                    else {},
+                    "reasoning_tokens": completion_details.get("reasoning_tokens", 0),
+                    "usage": usage,
                 }
             )
             record["turns"] += 1

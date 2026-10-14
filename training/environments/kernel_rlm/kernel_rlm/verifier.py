@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 from pathlib import Path
 from typing import Any
 
@@ -20,9 +21,20 @@ _RUNNER = textwrap.dedent(
     import json
     import statistics
     import sys
+    import time
+    from pathlib import Path
 
     import torch
     import torch.utils.cpp_extension
+
+    status_path = Path(sys.argv[7])
+    runner_started = time.monotonic()
+
+    def mark_phase(phase):
+        status_path.write_text(json.dumps({
+            "phase": phase,
+            "elapsed_seconds": time.monotonic() - runner_started,
+        }))
 
     def load_module(path, name):
         spec = importlib.util.spec_from_file_location(name, path)
@@ -94,6 +106,7 @@ _RUNNER = textwrap.dedent(
     original_load_inline = torch.utils.cpp_extension.load_inline
 
     def tracked_load_inline(*args, **kwargs):
+        mark_phase("extension_compile")
         module = original_load_inline(*args, **kwargs)
         extension_builds.append(getattr(module, "__name__", "anonymous"))
         return TrackedExtension(module)
@@ -101,6 +114,7 @@ _RUNNER = textwrap.dedent(
     torch.utils.cpp_extension.load_inline = tracked_load_inline
 
     try:
+        mark_phase("load_reference_and_submission")
         reference = load_module(reference_path, "kernel_rlm_reference")
         submission = load_module(submission_path, "kernel_rlm_submission")
         if not isinstance(getattr(submission, "CPP_SOURCE", None), str):
@@ -120,7 +134,8 @@ _RUNNER = textwrap.dedent(
     max_diff = 0.0
     correct = True
     try:
-        for _ in range(trials):
+        for trial in range(trials):
+            mark_phase(f"correctness_trial_{trial + 1}")
             model = model_class(*get_init_inputs()).to(device)
             model.eval()
             inputs = [move_to_device(value, device) for value in get_inputs()]
@@ -169,6 +184,7 @@ _RUNNER = textwrap.dedent(
 
     if correct and benchmark_enabled:
         try:
+            mark_phase("benchmark")
             inputs = [move_to_device(value, device) for value in get_inputs()]
             model = model_class(*get_init_inputs()).to(device).eval()
             reference_ms = benchmark(lambda: model(*inputs))
@@ -180,6 +196,7 @@ _RUNNER = textwrap.dedent(
             result["error"] = f"benchmark failed: {type(error).__name__}: {error}"
 
     result["peak_allocated_gib"] = torch.cuda.max_memory_allocated() / (1024 ** 3)
+    mark_phase("complete")
     print(json.dumps(result))
     """
 )
@@ -211,12 +228,15 @@ def verify_cuda(
         "trials": n_trials,
         "device": "?",
     }
+    timings: dict[str, float] = {}
+    phase = "verifier_slot_queue"
 
     with tempfile.TemporaryDirectory() as temporary_directory:
         directory = Path(temporary_directory)
         reference_path = directory / "reference.py"
         submission_path = directory / "submission.py"
         runner_path = directory / "runner.py"
+        status_path = directory / "phase.json"
         reference_path.write_text(reference_code, encoding="utf-8")
         submission_path.write_text(submission_code, encoding="utf-8")
         runner_path.write_text(_RUNNER, encoding="utf-8")
@@ -229,32 +249,91 @@ def verify_cuda(
             repr(float(atol)),
             repr(float(rtol)),
             "1" if benchmark else "0",
+            str(status_path),
         ]
+        queue_started = time.monotonic()
         try:
             with verifier_slot(timeout_s) as remaining:
-                with paused_inference(remaining) as execution_budget:
-                    process = subprocess.run(
-                        command,
-                        capture_output=True,
-                        text=True,
-                        timeout=execution_budget,
-                        cwd=cwd,
-                        env={**os.environ, "CUDA_VISIBLE_DEVICES": "0"}
-                        if os.environ.get("KERNEL_INFERENCE_ADMIN_URL")
-                        else None,
-                    )
+                timings["verifier_queue_wait_seconds"] = time.monotonic() - queue_started
+                phase = "pause_inference"
+                pause_started = time.monotonic()
+                try:
+                    with paused_inference(remaining) as execution_budget:
+                        phase = "runner_startup"
+                        runner_started = time.monotonic()
+                        try:
+                            process = subprocess.run(
+                                command,
+                                capture_output=True,
+                                text=True,
+                                timeout=execution_budget,
+                                cwd=cwd,
+                                env={**os.environ, "CUDA_VISIBLE_DEVICES": "0"}
+                                if os.environ.get("KERNEL_INFERENCE_ADMIN_URL")
+                                else None,
+                            )
+                        finally:
+                            timings["runner_elapsed_seconds"] = time.monotonic() - runner_started
+                        phase = "result_parse"
+                finally:
+                    timings["inference_paused_seconds"] = time.monotonic() - pause_started
         except (subprocess.TimeoutExpired, TimeoutError) as error:
+            timings.setdefault("verifier_queue_wait_seconds", time.monotonic() - queue_started)
+            phase_details = _read_phase(status_path)
+            phase = phase_details.get("phase", phase)
             failure["error"] = (
                 f"verification timed out within {timeout_s}s (queue + execution): {error}"
             )
+            failure["timeout_phase"] = phase
+            failure["timeout_phase_elapsed_seconds"] = phase_details.get("elapsed_seconds")
+            failure["timings"] = timings
             return failure
         if process.returncode != 0:
             failure["error"] = (
                 f"verifier crashed (rc={process.returncode}): {(process.stderr or '')[-1500:]}"
             )
+            failure["timings"] = timings
+            phase_details = _read_phase(status_path)
+            failure["verifier_phase"] = phase_details.get("phase")
+            failure["verifier_phase_elapsed_seconds"] = phase_details.get("elapsed_seconds")
             return failure
         try:
-            return json.loads(process.stdout.strip().splitlines()[-1])
+            result = json.loads(process.stdout.strip().splitlines()[-1])
+            result["timings"] = timings
+            phase_details = _read_phase(status_path)
+            result["verifier_phase"] = phase_details.get("phase")
+            result["verifier_phase_elapsed_seconds"] = phase_details.get("elapsed_seconds")
+            return result
         except (IndexError, json.JSONDecodeError):
             failure["error"] = f"unparseable verifier output: {(process.stdout or '')[-500:]}"
+            failure["timings"] = timings
+            phase_details = _read_phase(status_path)
+            failure["verifier_phase"] = phase_details.get("phase")
+            failure["verifier_phase_elapsed_seconds"] = phase_details.get("elapsed_seconds")
             return failure
+
+
+def _read_phase(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def summarize_verification_error(error: str, *, max_chars: int = 1400) -> str:
+    """Keep actionable compiler diagnostics without flooding the model context."""
+    lines = [line.strip() for line in error.splitlines() if line.strip()]
+    timeout_line = next((line for line in lines if "verification timed out" in line.lower()), None)
+    if timeout_line:
+        return timeout_line.split("Command:", 1)[0].strip()[:max_chars]
+    diagnostic_lines = [
+        line
+        for line in lines
+        if any(
+            marker in line.lower()
+            for marker in ("error:", "fatal error:", "undefined reference", "ninja: build stopped")
+        )
+    ]
+    selected = diagnostic_lines[-5:] if diagnostic_lines else lines[-5:]
+    summary = "\n".join(selected)
+    return summary[-max_chars:]

@@ -37,11 +37,13 @@ def test_training_matches_probe_generation_and_bounds_concurrency():
     assert harness["max_turns"] == 5
     assert harness["enable_subcall"] is True
     assert harness["subcall_probe"] is False
-    assert orchestrator["renderer"]["enable_thinking"] is False
+    assert orchestrator["renderer"]["enable_thinking"] is True
+    assert harness["enable_thinking"] is True
     assert orchestrator["concurrency"] == {"initial_inflight": 4, "max_inflight": 4}
     assert orchestrator["concurrency"]["max_inflight"] >= orchestrator["group_size"]
     assert config["seq_len"] == config["inference"]["vllm"]["max_model_len"] == 8192
     assert config["inference"]["vllm"]["gpu_memory_utilization"] == 0.86
+    assert config["inference"]["vllm"]["reasoning_parser"] == "poolside_v1"
     assert (
         config["inference"]["vllm"]["lora_target_modules"]
         == config["trainer"]["model"]["lora"]["target_modules"]

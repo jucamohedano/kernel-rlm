@@ -14,6 +14,7 @@ from uuid import uuid4
 import modal
 
 from .attention_lora import MODEL_ID, PRIME_REVISION, REVISION, models
+from .gpu_telemetry import wait_with_gpu_sampling
 from .native_lora_smoke import PRIME_SOURCE
 from .rollout_smoke import traces
 
@@ -170,6 +171,7 @@ def train(run_id: str) -> dict[str, object]:
     os.environ["KERNEL_INFERENCE_ADMIN_URL"] = "http://127.0.0.1:8100"
     output_dir = Path("/traces/live-grpo") / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["KERNEL_FEEDBACK_LOG_DIR"] = str(output_dir / "feedback")
     patch_prime_laguna_config()
     command = [
         "python",
@@ -186,17 +188,17 @@ def train(run_id: str) -> dict[str, object]:
         "--no-dashboard",
     ]
     log_path = output_dir / "prime.log"
+    gpu_stats_path = output_dir / "gpu_stats.jsonl"
     pipeline = f"{shlex.join(command)} 2>&1 | tee {shlex.quote(str(log_path))}"
     process = subprocess.Popen(
         ["/bin/bash", "-o", "pipefail", "-c", pipeline],
         cwd="/root",
         start_new_session=True,
     )
-    timed_out = False
-    try:
-        returncode = process.wait(timeout=3300)
-    except subprocess.TimeoutExpired:
-        timed_out = True
+    monitor = wait_with_gpu_sampling(process, gpu_stats_path, timeout_s=3300)
+    timed_out = bool(monitor["timed_out"])
+    returncode = monitor["returncode"]
+    if timed_out:
         try:
             os.killpg(process.pid, signal.SIGTERM)
         except ProcessLookupError:
@@ -224,6 +226,7 @@ def train(run_id: str) -> dict[str, object]:
         "command": command,
         "returncode": returncode,
         "log_path": str(log_path),
+        "gpu_stats_path": str(gpu_stats_path),
         "output_path": f"/traces/outputs/{run_id}",
     }
     (output_dir / "report.json").write_text(json.dumps(report, indent=2))

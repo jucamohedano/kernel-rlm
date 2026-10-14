@@ -60,6 +60,7 @@ env.taskset.speed_reward_weight = 0.1
 env.agent.harness.id = "kernel_rlm_v1"
 env.agent.harness.max_turns = 5
 env.agent.harness.max_tokens = 2048
+env.agent.harness.enable_thinking = true
 env.agent.harness.enable_subcall = true
 env.agent.harness.subcall_probe = false
 env.agent.runtime.type = "subprocess"
@@ -91,7 +92,7 @@ alpha = 16
 
 [orchestrator.renderer]
 name = "laguna-xs.2"
-enable_thinking = false
+enable_thinking = true
 
 [inference.vllm]
 enable_lora = true
@@ -100,3 +101,4 @@ gpu_memory_utilization = 0.86
 max_model_len = 8192
 max_num_batched_tokens = 1024
 max_num_seqs = 8
+reasoning_parser = "poolside_v1"
