@@ -1,14 +1,12 @@
 """Coordinate verification and Prime weight updates in one container."""
 
-import asyncio
-import fcntl
 import os
 import time
 import urllib.request
 from contextlib import contextmanager
 from functools import wraps
 
-from kernel_rlm.verifier_slot import LOCK_PATH
+from kernel_rlm.verifier_slot import LOCK_PATH, exclusive_inference_slot
 
 
 def exclusive_weight_update(function):
@@ -16,20 +14,8 @@ def exclusive_weight_update(function):
     async def wrapped(*args, **kwargs):
         if not os.environ.get("KERNEL_INFERENCE_ADMIN_URL"):
             return await function(*args, **kwargs)
-        deadline = time.monotonic() + 240
-        with LOCK_PATH.open("a") as lock:
-            while True:
-                try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    if time.monotonic() >= deadline:
-                        raise TimeoutError("Weight update timed out waiting for verifier") from None
-                    await asyncio.sleep(0.05)
-            try:
-                return await function(*args, **kwargs)
-            finally:
-                fcntl.flock(lock, fcntl.LOCK_UN)
+        async with exclusive_inference_slot(240, path=LOCK_PATH):
+            return await function(*args, **kwargs)
 
     return wrapped
 

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from kernel_rlm.gpu_sharing import paused_inference
-from kernel_rlm.verifier_slot import verifier_slot
+from kernel_rlm.verifier_slot import compile_slot, verifier_slot
 
 
 def _run_verifier_process(
@@ -47,17 +47,23 @@ _RUNNER = textwrap.dedent(
     import time
     from pathlib import Path
 
+    runner_started = time.monotonic()
     import torch
     import torch.utils.cpp_extension
 
     status_path = Path(sys.argv[7])
-    runner_started = time.monotonic()
+    phase_events = []
 
     def mark_phase(phase):
-        status_path.write_text(json.dumps({
+        event = {
             "phase": phase,
             "elapsed_seconds": time.monotonic() - runner_started,
-        }))
+            "monotonic_seconds": time.monotonic(),
+        }
+        phase_events.append(event)
+        status_path.write_text(json.dumps(event))
+
+    mark_phase("torch_imported")
 
     def load_module(path, name):
         spec = importlib.util.spec_from_file_location(name, path)
@@ -88,6 +94,7 @@ _RUNNER = textwrap.dedent(
     atol = float(sys.argv[4])
     rtol = float(sys.argv[5])
     benchmark_enabled = sys.argv[6] == "1"
+    mode = sys.argv[8]
     result = {
         "compiled": False,
         "extension_used": False,
@@ -99,17 +106,21 @@ _RUNNER = textwrap.dedent(
         "error": "",
         "trials": trials,
         "device": "cuda",
+        "phase_events": phase_events,
     }
+    if mode == "compile":
+        result["device"] = "compile_only"
 
-    if not torch.cuda.is_available():
+    if mode == "verify" and not torch.cuda.is_available():
         result["error"] = "CUDA is required for kernel_rlm verification"
         print(json.dumps(result))
         raise SystemExit(0)
 
     extension_builds = []
     extension_calls = []
-    result["free_memory_before_gib"] = torch.cuda.mem_get_info()[0] / (1024 ** 3)
-    torch.cuda.reset_peak_memory_stats()
+    if mode == "verify":
+        result["free_memory_before_gib"] = torch.cuda.mem_get_info()[0] / (1024 ** 3)
+        torch.cuda.reset_peak_memory_stats()
 
     class TrackedExtension:
         def __init__(self, module):
@@ -137,6 +148,25 @@ _RUNNER = textwrap.dedent(
     torch.utils.cpp_extension.load_inline = tracked_load_inline
 
     try:
+        if mode == "compile":
+            mark_phase("load_candidate_for_compile")
+            submission = load_module(submission_path, "kernel_rlm_submission")
+            if not isinstance(getattr(submission, "CPP_SOURCE", None), str):
+                raise ValueError("submission must define CPP_SOURCE")
+            if not isinstance(getattr(submission, "CUDA_SOURCE", None), str):
+                raise ValueError("submission must define CUDA_SOURCE")
+            if not extension_builds:
+                raise ValueError("submission must build a CUDA extension with load_inline")
+            result.update(
+                compiled=True,
+                extension_used=None,
+                correct=None,
+                verification_status="compile_completed",
+            )
+            mark_phase("compile_complete")
+            print(json.dumps(result))
+            raise SystemExit(0)
+
         mark_phase("load_reference_and_submission")
         reference = load_module(reference_path, "kernel_rlm_reference")
         submission = load_module(submission_path, "kernel_rlm_submission")
@@ -150,6 +180,15 @@ _RUNNER = textwrap.dedent(
         get_init_inputs = getattr(reference, "get_init_inputs", lambda: [])
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
+        if mode == "compile":
+            result.update(
+                compiled=bool(extension_builds),
+                extension_used=None,
+                correct=None,
+                verification_status="compile_failed",
+            )
+        else:
+            result["verification_status"] = "runner_error"
         print(json.dumps(result))
         raise SystemExit(0)
 
@@ -236,6 +275,7 @@ def verify_cuda(
     python: str | None = None,
     cwd: str | None = None,
     benchmark: bool = True,
+    collect_phase_events: bool = False,
 ) -> dict[str, Any]:
     """Compile, run, and benchmark a CUDA submission in a subprocess."""
     python = python or os.environ.get("KERNEL_VERIFY_PYTHON") or sys.executable
@@ -253,6 +293,7 @@ def verify_cuda(
     }
     timings: dict[str, float] = {}
     phase = "verifier_slot_queue"
+    verification_started = time.monotonic()
 
     with tempfile.TemporaryDirectory() as temporary_directory:
         directory = Path(temporary_directory)
@@ -260,10 +301,11 @@ def verify_cuda(
         submission_path = directory / "submission.py"
         runner_path = directory / "runner.py"
         status_path = directory / "phase.json"
+        compile_status_path = directory / "compile-phase.json"
         reference_path.write_text(reference_code, encoding="utf-8")
         submission_path.write_text(submission_code, encoding="utf-8")
         runner_path.write_text(_RUNNER, encoding="utf-8")
-        command = [
+        command_prefix = [
             python,
             str(runner_path),
             str(reference_path),
@@ -271,12 +313,94 @@ def verify_cuda(
             str(n_trials),
             repr(float(atol)),
             repr(float(rtol)),
+        ]
+        compile_budget = min(90.0, timeout_s * 0.75)
+        compile_queue_started = time.monotonic()
+        compile_command = [
+            *command_prefix,
+            "0",
+            str(compile_status_path),
+            "compile",
+        ]
+        try:
+            with compile_slot(compile_budget) as compile_remaining:
+                timings["compile_queue_wait_seconds"] = (
+                    time.monotonic() - compile_queue_started
+                )
+                compile_started = time.monotonic()
+                compile_process = _run_verifier_process(
+                    compile_command,
+                    timeout_s=compile_remaining,
+                    cwd=cwd,
+                    env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
+                )
+                timings["compile_elapsed_seconds"] = time.monotonic() - compile_started
+        except (subprocess.TimeoutExpired, TimeoutError) as error:
+            phase_details = _read_phase(compile_status_path)
+            failure.update(
+                compiled=None,
+                extension_used=None,
+                correct=None,
+                verification_status="timeout",
+                timeout_phase=phase_details.get("phase", "extension_compile"),
+                timeout_phase_elapsed_seconds=phase_details.get("elapsed_seconds"),
+                timings=timings,
+                error=f"extension compile exceeded its {compile_budget:g}s budget: {error}",
+            )
+            return failure
+        if compile_process.returncode != 0:
+            failure.update(
+                compiled=None,
+                extension_used=None,
+                correct=None,
+                verification_status="compile_runner_crash",
+                error=f"compile runner crashed (rc={compile_process.returncode}): "
+                f"{(compile_process.stderr or '')[-1500:]}",
+                timings=timings,
+            )
+            return failure
+        try:
+            compile_result = json.loads(compile_process.stdout.strip().splitlines()[-1])
+            if not collect_phase_events:
+                compile_result.pop("phase_events", None)
+        except (IndexError, json.JSONDecodeError):
+            failure.update(
+                compiled=None,
+                extension_used=None,
+                correct=None,
+                verification_status="invalid_compile_output",
+                error=f"unparseable compile output: {(compile_process.stdout or '')[-500:]}",
+                timings=timings,
+            )
+            return failure
+        if not compile_result.get("compiled"):
+            compile_result["verification_status"] = "compile_failed"
+            compile_result["timings"] = timings
+            compile_phase = _read_phase(compile_status_path)
+            compile_result["verifier_phase"] = compile_phase.get("phase")
+            return compile_result
+        timings["total_compile_seconds"] = time.monotonic() - verification_started
+        remaining_total = timeout_s - (time.monotonic() - verification_started)
+        if remaining_total <= 0:
+            failure.update(
+                compiled=True,
+                extension_used=None,
+                correct=None,
+                verification_status="timeout",
+                timeout_phase="gpu_verification_budget",
+                timings=timings,
+                error="no verifier budget remained after extension compilation",
+            )
+            return failure
+        command = [
+            *command_prefix,
             "1" if benchmark else "0",
             str(status_path),
+            "verify",
         ]
         queue_started = time.monotonic()
         try:
-            with verifier_slot(timeout_s) as remaining:
+            with verifier_slot(remaining_total) as remaining:
                 timings["verifier_queue_wait_seconds"] = time.monotonic() - queue_started
                 phase = "pause_inference"
                 pause_started = time.monotonic()
@@ -297,19 +421,23 @@ def verify_cuda(
                             timings["runner_elapsed_seconds"] = time.monotonic() - runner_started
                         phase = "result_parse"
                 finally:
-                    timings["inference_paused_seconds"] = time.monotonic() - pause_started
+                    timings["inference_paused_seconds"] = (
+                        time.monotonic() - pause_started
+                        if os.environ.get("KERNEL_INFERENCE_ADMIN_URL")
+                        else 0.0
+                    )
         except (subprocess.TimeoutExpired, TimeoutError) as error:
             timings.setdefault("verifier_queue_wait_seconds", time.monotonic() - queue_started)
             phase_details = _read_phase(status_path)
             phase = phase_details.get("phase", phase)
             failure.update(
-                compiled=None,
+                compiled=True,
                 extension_used=None,
                 correct=None,
                 verification_status="timeout",
             )
             failure["error"] = (
-                f"verification timed out within {timeout_s}s (queue + execution): {error}"
+                f"verification timed out within {timeout_s}s (compile + queue + execution): {error}"
             )
             failure["timeout_phase"] = phase
             failure["timeout_phase_elapsed_seconds"] = phase_details.get("elapsed_seconds")
@@ -317,7 +445,7 @@ def verify_cuda(
             return failure
         if process.returncode != 0:
             failure.update(
-                compiled=None,
+                compiled=True,
                 extension_used=None,
                 correct=None,
                 verification_status="runner_crash",
@@ -332,7 +460,9 @@ def verify_cuda(
             return failure
         try:
             result = json.loads(process.stdout.strip().splitlines()[-1])
-            result["timings"] = timings
+            if not collect_phase_events:
+                result.pop("phase_events", None)
+            result["timings"] = {**timings, **(result.get("timings") or {})}
             result["verification_status"] = "completed"
             phase_details = _read_phase(status_path)
             result["verifier_phase"] = phase_details.get("phase")
@@ -340,7 +470,7 @@ def verify_cuda(
             return result
         except (IndexError, json.JSONDecodeError):
             failure.update(
-                compiled=None,
+                compiled=True,
                 extension_used=None,
                 correct=None,
                 verification_status="invalid_runner_output",

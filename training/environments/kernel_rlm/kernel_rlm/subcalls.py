@@ -1,9 +1,11 @@
 """One-shot child completions through the same intercepted V1 client."""
 
 import asyncio
+import os
 import time
 
 from kernel_rlm.thinking import visible_response
+from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_request_slot
 
 CHILD_SYSTEM = (
     "You are a CUDA programming assistant. Answer the requested subtask directly. "
@@ -105,18 +107,25 @@ class BoundedSubcalls:
         self.records.append(entry)
         started = time.monotonic()
         try:
-            async with asyncio.timeout(self.timeout_s):
-                request_args = {
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": CHILD_SYSTEM},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "max_tokens": 2048,
-                }
-                if self.enable_thinking:
-                    request_args["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
-                response = await self.client.chat.completions.create(**request_args)
+            async with inference_request_slot(
+                INFERENCE_ADMISSION_TIMEOUT_S,
+                enabled=bool(os.environ.get("KERNEL_INFERENCE_ADMIN_URL")),
+            ) as admission_wait:
+                entry["admission_wait_seconds"] = admission_wait
+                async with asyncio.timeout(self.timeout_s):
+                    request_args = {
+                        "model": self.model,
+                        "messages": [
+                            {"role": "system", "content": CHILD_SYSTEM},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "max_tokens": 2048,
+                    }
+                    if self.enable_thinking:
+                        request_args["extra_body"] = {
+                            "chat_template_kwargs": {"enable_thinking": True}
+                        }
+                    response = await self.client.chat.completions.create(**request_args)
             choice = response.choices[0]
             content = visible_response(choice.message.content or "")
             if not content.strip() or getattr(choice.message, "tool_calls", None):

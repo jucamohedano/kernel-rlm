@@ -451,11 +451,12 @@ model compliance. Thinking remains disabled pending a separate validation.
 
 ### Verifier concurrency guard
 
-Intermediate feedback and final scoring share one container-wide Linux file lock.
-Only one verifier subprocess runs at a time. Queue waiting and execution share
-the existing timeout; a queue timeout does not start CUDA and returns an explicit
-verification failure. This can lower rewards under overload, so inspect timeout
-errors before interpreting a failed group as a model failure.
+Extension compilation uses a separate CPU lock and runs with CUDA devices hidden.
+It does not block inference. Intermediate feedback and final scoring share one
+container-wide GPU lock. Model requests use shared admission; verifier and weight
+update requests take exclusive admission. Queue waiting and execution share the
+existing timeout; a queue timeout does not start CUDA. Inspect timeout errors
+before interpreting a failed group as a model failure.
 
 The training launcher also sets `KERNEL_INFERENCE_ADMIN_URL` to the local engine
 on port 8100, not the client-facing router on port 8000. While holding the lock,
@@ -475,9 +476,37 @@ Queue and model timeouts remain possible under load. A passing one-GPU stress
 probe is not proof that all 50 tasks or an eight-trajectory training group fit.
 Run `../../../.venv/bin/modal run -m modal_app.shared_gpu_probe --cpu-only` for
 configuration validation. Without `--cpu-only`, the probe uses one A100 with a
-720-second cap: pause/resume, a large known kernel, then one thinking-enabled
-trajectory. It never performs optimizer updates. Reports and traces are saved
+1,260-second cap and up to four concurrent frozen vector-add trajectories.
+It never performs optimizer updates. Reports and traces are saved
 under `kernel-rlm-traces:shared-gpu-probe`.
+
+### Deterministic verifier overlap test
+
+Run `../../../.venv/bin/modal run -m modal_app.verifier_overlap_probe --live`.
+Omit `--live` to measure only the verifier. The CPU-only preflight compiles fixed
+vector-add and softplus fixtures into a Torch-versioned A100 extension cache.
+The one-A100 function tests both fixtures alone before loading Laguna once.
+It then repeats inference-only, paused-correctness, and overlapping-correctness
+conditions in forward/reverse order. Every condition uses eight 256-token
+requests, with two concurrent callers. Speed benchmarks run only in the
+standalone phase. GPU runtime is capped at 30 minutes with no automatic retry.
+
+Run `20261015T121237Z-d0d04c78` passed all eight shared correctness checks.
+Average combined time fell from 10.92 to 8.50 seconds for vector addition and
+from 12.24 to 8.71 seconds for curriculum softplus (`lvl1-seed42-0011`). Token
+streaming continued during overlapping correctness checks and stopped during
+paused checks. Softplus peaked at 3.02 GiB of tensor allocation. These results
+cover two fixed fixtures and short synthetic inference requests, not the full
+curriculum or GRPO training. Training still pauses verification by default.
+
+Artifacts live in `kernel-rlm-traces:verifier-overlap-probe/<run_id>`; downloaded
+reports go under `logs/verifier-overlap-probe`. They include per-phase timings,
+stream timestamps, standalone speed measurements, and sampled GPU telemetry.
+Use `collect_phase_events=True` when explicitly requesting detailed verifier
+telemetry; default feedback omits these events to keep model context concise.
+The initial live report's `inference_paused_seconds` field also counted runner
+time in overlap/standalone conditions. Use the condition's `mode` and phase
+timestamps for that report; the field now reports zero when no pause is requested.
 
 Thinking is enabled for training inference. The custom loop drops returned
 thinking text before it builds the next prompt, while preserving the response,

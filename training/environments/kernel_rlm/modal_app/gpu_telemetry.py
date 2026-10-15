@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import json
 import subprocess
@@ -46,6 +47,21 @@ def sample_gpu_stats() -> dict[str, Any]:
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         sample["error"] = f"{type(error).__name__}: {error}"
     return sample
+
+
+async def sample_gpu_stats_to_file(
+    output_path: Path, stop_event: asyncio.Event, *, interval_s: float = 5.0
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    while not stop_event.is_set():
+        sample = await asyncio.to_thread(sample_gpu_stats)
+        with output_path.open("a", encoding="utf-8") as output:
+            output.write(json.dumps(sample, sort_keys=True) + "\n")
+            output.flush()
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_s)
+        except TimeoutError:
+            continue
 
 
 def _number(value: str) -> float | None:

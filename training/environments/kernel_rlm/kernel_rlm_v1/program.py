@@ -26,6 +26,7 @@ from kernel_rlm.subcalls import (
     turn_budget,
 )
 from kernel_rlm.thinking import visible_response
+from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_request_slot
 from openai import AsyncOpenAI
 from rlm.utils.prompts import (
     QueryMetadata,
@@ -156,18 +157,33 @@ async def run(task: dict) -> None:
             }
             if limits.get("enable_thinking"):
                 request_args["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
-            request_started = time.monotonic()
+            admission_started = time.monotonic()
+            request_started = None
+            admission_wait = None
             prompt_chars = len(json.dumps(messages, ensure_ascii=False))
             try:
-                response = await client.chat.completions.create(**request_args)
+                async with inference_request_slot(
+                    INFERENCE_ADMISSION_TIMEOUT_S,
+                    enabled=bool(os.environ.get("KERNEL_INFERENCE_ADMIN_URL")),
+                ) as admission_wait:
+                    request_started = time.monotonic()
+                    response = await client.chat.completions.create(**request_args)
             except Exception as error:
+                elapsed_seconds = time.monotonic() - (
+                    request_started if request_started is not None else admission_started
+                )
                 record["model_calls"].append(
                     {
                         "turn": turn + 1,
-                        "status": "timeout"
+                        "status": "admission_timeout"
+                        if request_started is None and isinstance(error, TimeoutError)
+                        else "timeout"
                         if "timeout" in type(error).__name__.lower()
                         else "error",
-                        "elapsed_seconds": time.monotonic() - request_started,
+                        "elapsed_seconds": elapsed_seconds,
+                        "request_admission_wait_seconds": admission_wait
+                        if admission_wait is not None
+                        else elapsed_seconds,
                         "prompt_message_count": len(messages),
                         "prompt_chars": prompt_chars,
                         "error_type": type(error).__name__,
@@ -223,6 +239,7 @@ async def run(task: dict) -> None:
                     "turn": turn + 1,
                     "status": "ok",
                     "elapsed_seconds": time.monotonic() - request_started,
+                    "request_admission_wait_seconds": admission_wait,
                     "prompt_message_count": len(messages) - 1,
                     "prompt_chars": prompt_chars,
                     "finish_reason": choice.finish_reason,

@@ -1,3 +1,4 @@
+import asyncio
 import fcntl
 import subprocess
 import sys
@@ -52,9 +53,11 @@ def test_exception_releases_slot(slot_module, tmp_path):
         pass
 
 
-def test_verifier_uses_remaining_budget(slot_module, monkeypatch, tmp_path):
+@pytest.mark.parametrize("collect_phase_events", [False, True])
+def test_verifier_uses_remaining_budget(slot_module, monkeypatch, tmp_path, collect_phase_events):
     from kernel_rlm import verifier
 
+    monkeypatch.delenv("KERNEL_INFERENCE_ADMIN_URL", raising=False)
     original_slot = slot_module.verifier_slot
     monkeypatch.setattr(
         verifier, "verifier_slot", lambda timeout: original_slot(timeout, path=tmp_path / "slot")
@@ -62,17 +65,30 @@ def test_verifier_uses_remaining_budget(slot_module, monkeypatch, tmp_path):
 
     def run(command, *, timeout_s, cwd, env):
         assert 0 < timeout_s <= 5
-        Path(command[-1]).write_text('{"phase":"complete"}')
+        if command[-1] == "compile":
+            Path(command[-2]).write_text('{"phase":"compile_complete"}')
+            return SimpleNamespace(
+                returncode=0,
+                stdout='{"compiled":true,"verification_status":"compile_completed"}',
+                stderr="",
+            )
+        Path(command[-2]).write_text('{"phase":"complete"}')
         with pytest.raises(TimeoutError):
             with original_slot(0.01, path=tmp_path / "slot"):
                 pytest.fail("Subprocess must retain the slot")
-        return SimpleNamespace(returncode=0, stdout='{"correct": true}', stderr="")
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"compiled":true,"extension_used":true,"correct":true,"phase_events":[]}',
+            stderr="",
+        )
 
     monkeypatch.setattr(verifier, "_run_verifier_process", run)
-    result = verifier.verify_cuda("", "", timeout_s=5)
+    result = verifier.verify_cuda("", "", timeout_s=5, collect_phase_events=collect_phase_events)
     assert result["correct"]
     assert result["verifier_phase"] == "complete"
     assert "runner_elapsed_seconds" in result["timings"]
+    assert result["timings"]["inference_paused_seconds"] == 0
+    assert ("phase_events" in result) is collect_phase_events
 
 
 def test_verifier_runner_is_syntactically_valid(slot_module):
@@ -117,11 +133,19 @@ def test_queue_timeout_never_starts_cuda(slot_module, monkeypatch, tmp_path):
     monkeypatch.setattr(
         verifier, "verifier_slot", lambda timeout: slot_module.verifier_slot(timeout, path=path)
     )
-    monkeypatch.setattr(
-        verifier, "_run_verifier_process", lambda *args, **kwargs: pytest.fail("CUDA started")
-    )
+
+    def compile_only(command, **_kwargs):
+        assert command[-1] == "compile"
+        Path(command[-2]).write_text('{"phase":"compile_complete"}')
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"compiled":true,"verification_status":"compile_completed"}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(verifier, "_run_verifier_process", compile_only)
     with slot_module.verifier_slot(1, path=path):
-        result = verifier.verify_cuda("", "", timeout_s=0.01)
+        result = verifier.verify_cuda("", "", timeout_s=1)
     assert not result["correct"]
     assert "queue + execution" in result["error"]
     assert result["timeout_phase"] == "verifier_slot_queue"
@@ -138,11 +162,35 @@ def test_runner_timeout_reports_last_verifier_phase(slot_module, monkeypatch, tm
     )
 
     def run(command, *, timeout_s, cwd, env):
-        Path(command[-1]).write_text('{"phase":"extension_compile"}')
+        if command[-1] == "compile":
+            Path(command[-2]).write_text('{"phase":"compile_complete"}')
+            return SimpleNamespace(
+                returncode=0,
+                stdout='{"compiled":true,"verification_status":"compile_completed"}',
+                stderr="",
+            )
+        Path(command[-2]).write_text('{"phase":"correctness_trial_1"}')
         raise subprocess.TimeoutExpired(command, timeout_s)
 
     monkeypatch.setattr(verifier, "_run_verifier_process", run)
     result = verifier.verify_cuda("", "", timeout_s=5)
     assert not result["correct"]
-    assert result["timeout_phase"] == "extension_compile"
+    assert result["timeout_phase"] == "correctness_trial_1"
     assert result["timings"]["runner_elapsed_seconds"] >= 0
+
+
+def test_inference_request_waits_outside_vllm_while_verifier_holds_slot(slot_module, tmp_path):
+    path = tmp_path / "slot"
+
+    async def request():
+        async with slot_module.inference_request_slot(1, path=path) as waited:
+            return waited
+
+    async def check():
+        with slot_module.verifier_slot(1, path=path):
+            pending = asyncio.create_task(request())
+            await asyncio.sleep(0.06)
+            assert not pending.done()
+        return await asyncio.wait_for(pending, 1)
+
+    assert asyncio.run(check()) >= 0.05

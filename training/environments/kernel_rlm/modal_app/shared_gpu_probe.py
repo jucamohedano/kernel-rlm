@@ -1,6 +1,7 @@
-"""One-GPU resource gate followed by one thinking-enabled V1 trajectory."""
+"""One-GPU shared-verifier test with concurrent frozen-policy rollouts."""
 
 import json
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -9,6 +10,7 @@ import modal
 
 from .attention_lora import MODEL_ID, REVISION, models
 from .frozen_probe import inference_cache
+from .gpu_telemetry import sample_gpu_stats_to_file
 from .grpo_live_smoke import APP_ROOT, live_image
 from .inference_runtime import cache_environment, wait_for_inference
 from .rollout_smoke import traces
@@ -41,12 +43,12 @@ def preflight():
     gpu="A100-80GB",
     cpu=12,
     memory=98304,
-    timeout=720,
+    timeout=1260,
     startup_timeout=120,
     retries=0,
     max_containers=1,
 )
-async def probe(run_id: str):
+async def probe(run_id: str, rollouts: int = 4):
     import asyncio
     import os
     import signal
@@ -68,10 +70,11 @@ async def probe(run_id: str):
     directory.mkdir(parents=True, exist_ok=True)
     report = {
         "run_id": run_id,
-        "title": "Thinking enabled · read-only context and REPL recovery",
-        "scope": "One frozen-policy vector-add trajectory; no optimizer update",
+        "title": "Shared-A100 admission gate · four frozen vector-add rollouts",
+        "scope": f"{rollouts} concurrent frozen-policy vector-add rollouts; no optimizer update",
         "status": "running",
         "gpu_count": 1,
+        "rollout_count": rollouts,
         "optimizer_steps": 0,
         "model_id": MODEL_ID,
         "model_revision": REVISION,
@@ -79,9 +82,13 @@ async def probe(run_id: str):
     }
     started = time.monotonic()
     server = None
+    gpu_sampler_stop = asyncio.Event()
+    gpu_sampler = asyncio.create_task(
+        sample_gpu_stats_to_file(directory / "gpu_stats.jsonl", gpu_sampler_stop)
+    )
     client = AsyncOpenAI(base_url="http://127.0.0.1:8000/v1", api_key="local", max_retries=0)
     try:
-        async with asyncio.timeout(660):
+        async with asyncio.timeout(1200):
             snapshot = snapshot_download(MODEL_ID, revision=REVISION, local_files_only=True)
             config = {
                 "router": None,
@@ -89,6 +96,7 @@ async def probe(run_id: str):
                 "vllm": {
                     "model": snapshot,
                     "served_model_name": [MODEL_ID],
+                    "safetensors_load_strategy": "prefetch",
                     "gpu_memory_utilization": 0.86,
                     "max_model_len": 8192,
                     "max_num_seqs": 8,
@@ -124,10 +132,11 @@ async def probe(run_id: str):
                     env={**os.environ, **cache, "CUDA_VISIBLE_DEVICES": "0"},
                     start_new_session=True,
                 )
-            report["startup_seconds"] = await wait_for_inference(server, timeout_s=420)
+            report["startup_seconds"] = await wait_for_inference(server, timeout_s=700)
             os.environ["KERNEL_INFERENCE_ADMIN_URL"] = "http://127.0.0.1:8000"
             os.environ["PROBE_API_KEY"] = "local"
             os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0"
+            os.environ["KERNEL_FEEDBACK_LOG_DIR"] = str(directory / "feedback")
             with verifier_slot(20) as remaining:
                 with paused_inference(remaining):
                     pending = asyncio.create_task(
@@ -160,12 +169,13 @@ async def probe(run_id: str):
                             "id": "kernel_rlm_v1",
                             "max_turns": 7,
                             "max_tokens": 2048,
+                            "enable_thinking": True,
                             "enable_subcall": False,
                             "subcall_probe": False,
                         },
                         "runtime": {"type": "subprocess"},
                         "sampling": {"temperature": 1.0, "max_tokens": 2048},
-                        "timeout": {"rollout": 180, "scoring": 60},
+                        "timeout": {"rollout": 900, "scoring": 300},
                     },
                 }
             )
@@ -181,70 +191,149 @@ async def probe(run_id: str):
             environment = vf.load_environment(env_config)
             async with environment.serving():
                 task = next(iter(vf.load_taskset(env_config.taskset)))
-                episode = await environment.run_episode(task, context)
-                (directory / "traces.jsonl").write_text(episode.model_dump_json() + "\n")
-                if not episode.traces:
-                    raise RuntimeError(f"V1 episode returned no traces: {episode.errors}")
-                trace = episode.traces[0].model_dump(mode="json")
-                info = trace.get("info", {})
-                model_calls = info.get("kernel_model_calls", [])
-                tool_names = []
-                reasoning_chars = 0
-                for node in trace.get("nodes", []):
-                    message = node.get("message", {})
-                    reasoning_chars += len(message.get("reasoning_content") or "")
-                    for call in message.get("tool_calls") or []:
-                        function = call.get("function", call)
-                        tool_names.append(function.get("name", "unknown"))
-                verification = info.get("kernel_verify", {})
-                v1_scores = (trace.get("rewards") or {}).get("kernel_reward", {})
-                v1_reward = v1_scores.get("score") if isinstance(v1_scores, dict) else None
-                if v1_reward is None:
-                    v1_reward = info.get("kernel_reward")
-                reward = float(v1_reward) if isinstance(v1_reward, int | float) else None
-                submitted = bool(info.get("kernel_submission"))
-                correct = bool(verification.get("correct"))
-                report["episode_ok"] = episode.ok
-                report["reward"] = reward
-                report["reward_source"] = (
-                    "trace.rewards.kernel_reward.score"
-                    if v1_scores.get("score") is not None
-                    else "trace.info.kernel_reward"
-                    if info.get("kernel_reward") is not None
-                    else "not serialized"
+                episodes = await asyncio.gather(
+                    *(
+                        environment.run_episode(deepcopy(task), context)
+                        for _ in range(rollouts)
+                    ),
+                    return_exceptions=True,
                 )
-                report["termination"] = info.get("kernel_termination", "unknown")
+                (directory / "traces.jsonl").write_text(
+                    "\n".join(
+                        episode.model_dump_json()
+                        for episode in episodes
+                        if not isinstance(episode, Exception)
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                rollout_results = []
+                for episode in episodes:
+                    if isinstance(episode, Exception):
+                        rollout_results.append(
+                            {"episode_ok": False, "error": f"{type(episode).__name__}: {episode}"}
+                        )
+                        continue
+                    if not episode.traces:
+                        rollout_results.append(
+                            {"episode_ok": False, "trace_errors": episode.errors}
+                        )
+                        continue
+                    trace = episode.traces[0].model_dump(mode="json")
+                    info = trace.get("info", {})
+                    calls = info.get("kernel_model_calls", [])
+                    verification = info.get("kernel_verify", {})
+                    reward_record = (trace.get("rewards") or {}).get("kernel_reward", {})
+                    reward = reward_record.get("score") if isinstance(reward_record, dict) else None
+                    if reward is None:
+                        reward = info.get("kernel_reward")
+                    admission_waits = [
+                        float(call.get("request_admission_wait_seconds") or 0)
+                        for call in calls
+                    ]
+                    feedback_results = []
+                    for message in info.get("repl_transcript", []):
+                        content = message.get("content", "") if isinstance(message, dict) else ""
+                        marker = "CUDA feedback: "
+                        if marker in content:
+                            try:
+                                feedback_results.append(
+                                    json.loads(content.split(marker, 1)[1].split("\n", 1)[0])
+                                )
+                            except json.JSONDecodeError:
+                                pass
+                    verifications = [*feedback_results, verification]
+                    rollout_results.append(
+                        {
+                            "episode_ok": episode.ok,
+                            "reward": reward,
+                            "termination": info.get("kernel_termination", "unknown"),
+                            "model_calls": len(calls),
+                            "model_request_timeouts": sum(
+                                call.get("status") == "timeout" for call in calls
+                            ),
+                            "model_admission_timeouts": sum(
+                                call.get("status") == "admission_timeout" for call in calls
+                            ),
+                            "model_request_errors": sum(
+                                call.get("status") == "error" for call in calls
+                            ),
+                            "admission_wait_seconds": admission_waits,
+                            "verifier_statuses": [
+                                result.get("verification_status") for result in verifications
+                            ],
+                            "verifier_phases": [
+                                result.get("verifier_phase")
+                                or result.get("timeout_phase")
+                                for result in verifications
+                            ],
+                            "verifier_paused_seconds": sum(
+                                float(
+                                    (result.get("timings") or {}).get(
+                                        "inference_paused_seconds"
+                                    )
+                                    or 0
+                                )
+                                for result in verifications
+                            ),
+                            "compile_seconds": sum(
+                                float(
+                                    (result.get("timings") or {}).get("compile_elapsed_seconds")
+                                    or 0
+                                )
+                                for result in verifications
+                            ),
+                            "submitted": bool(info.get("kernel_submission")),
+                            "correct": verification.get("correct"),
+                            "max_diff": verification.get("max_diff"),
+                            "speedup": verification.get("speedup"),
+                            "trace_errors": trace.get("errors", []),
+                        }
+                    )
+                rewards = [
+                    result["reward"]
+                    for result in rollout_results
+                    if result.get("reward") is not None
+                ]
+                all_waits = [
+                    wait
+                    for result in rollout_results
+                    for wait in result.get("admission_wait_seconds", [])
+                ]
+                report["rollouts"] = rollout_results
                 report["groups"] = [
                     {
                         "task": "thinking-vector-add",
-                        "rewards": [reward] if reward is not None else [],
-                        "correct": int(correct),
-                        "submitted": int(submitted),
+                        "rewards": rewards,
+                        "submitted": sum(result.get("submitted", False) for result in rollout_results),
+                        "correct": sum(result.get("correct") is True for result in rollout_results),
                     }
                 ]
-                report["trajectory"] = {
-                    "model_calls": len(model_calls),
-                    "finish_reasons": [call.get("finish_reason") for call in model_calls],
-                    "action_errors": [
-                        error for call in model_calls for error in call.get("action_errors", [])
-                    ],
-                    "output_tokens": sum(
-                        (call.get("usage") or {}).get("completion_tokens", 0)
-                        for call in model_calls
-                    ),
-                    "reasoning_chars": reasoning_chars,
-                    "tool_names": tool_names,
-                    "repl_calls": info.get("repl_calls", 0),
-                    "feedback_calls": info.get("feedback_calls", 0),
-                    "child_calls": len(info.get("kernel_subcalls", [])),
-                    "submitted": submitted,
-                    "submission_chars": len(info.get("kernel_submission") or ""),
-                    "correct": correct,
-                    "max_diff": verification.get("max_diff"),
-                    "speedup": verification.get("speedup"),
-                    "verifier_error": verification.get("error"),
-                    "trace_errors": trace.get("errors", []),
-                }
+                report["request_admission_wait_seconds_max"] = max(all_waits, default=0.0)
+                report["model_request_timeouts"] = sum(
+                    result.get("model_request_timeouts", 0) for result in rollout_results
+                )
+                report["model_admission_timeouts"] = sum(
+                    result.get("model_admission_timeouts", 0) for result in rollout_results
+                )
+                report["model_request_errors"] = sum(
+                    result.get("model_request_errors", 0) for result in rollout_results
+                )
+                report["total_verifier_paused_seconds"] = sum(
+                    result.get("verifier_paused_seconds", 0) for result in rollout_results
+                )
+                report["total_compile_seconds"] = sum(
+                    result.get("compile_seconds", 0) for result in rollout_results
+                )
+                report["gpu_stats_path"] = str(directory / "gpu_stats.jsonl")
+                report["feedback_log_dir"] = str(directory / "feedback")
+                report["gate_passed"] = (
+                    len(rollout_results) == rollouts
+                    and all(result.get("episode_ok") for result in rollout_results)
+                    and report["model_request_timeouts"] == 0
+                    and report["model_admission_timeouts"] == 0
+                    and report["model_request_errors"] == 0
+                )
             report["status"] = "completed"
     except Exception as error:
         report["status"] = "failed"
@@ -258,6 +347,8 @@ async def probe(run_id: str):
             except subprocess.TimeoutExpired:
                 os.killpg(server.pid, signal.SIGKILL)
                 await asyncio.to_thread(server.wait, timeout=10)
+        gpu_sampler_stop.set()
+        await gpu_sampler
         report["elapsed_seconds"] = time.monotonic() - started
         (directory / "report.json").write_text(json.dumps(report, indent=2))
         traces.commit()
@@ -266,8 +357,10 @@ async def probe(run_id: str):
 
 
 @app.local_entrypoint()
-def main(cpu_only: bool = False):
+def main(rollouts: int = 4, cpu_only: bool = False):
+    if rollouts not in (2, 4):
+        raise ValueError("Use --rollouts 2 or --rollouts 4 for the shared-A100 gate test")
     print(json.dumps(preflight.remote(), indent=2))
     if not cpu_only:
         run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
-        print(json.dumps(probe.remote(run_id), indent=2))
+        print(json.dumps(probe.remote(run_id, rollouts), indent=2))
