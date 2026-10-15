@@ -39,6 +39,20 @@ def preflight():
 
 @app.function(
     image=image,
+    cpu=12,
+    memory=16384,
+    timeout=300,
+    retries=0,
+    volumes={"/inference-cache": inference_cache},
+)
+def prepare_guarded_feedback():
+    from .verifier_overlap_probe import compile_fixtures
+
+    return compile_fixtures()
+
+
+@app.function(
+    image=image,
     volumes={"/models": models, "/traces": traces, "/inference-cache": inference_cache},
     gpu="A100-80GB",
     cpu=12,
@@ -48,7 +62,7 @@ def preflight():
     retries=0,
     max_containers=1,
 )
-async def probe(run_id: str, rollouts: int = 4):
+async def probe(run_id: str, rollouts: int = 4, guarded_feedback: bool = False):
     import asyncio
     import os
     import signal
@@ -68,9 +82,13 @@ async def probe(run_id: str, rollouts: int = 4):
 
     directory = Path("/traces/shared-gpu-probe") / run_id
     directory.mkdir(parents=True, exist_ok=True)
+    if guarded_feedback:
+        from .verifier_overlap_probe import setup_extension_cache
+
+        setup_extension_cache()
     report = {
         "run_id": run_id,
-        "title": "Shared-A100 admission gate · four frozen vector-add rollouts",
+        "title": f"Shared-A100 guarded feedback · {rollouts} frozen vector-add rollouts",
         "scope": f"{rollouts} concurrent frozen-policy vector-add rollouts; no optimizer update",
         "status": "running",
         "gpu_count": 1,
@@ -79,6 +97,7 @@ async def probe(run_id: str, rollouts: int = 4):
         "model_id": MODEL_ID,
         "model_revision": REVISION,
         "thinking_enabled": True,
+        "guarded_feedback": guarded_feedback,
     }
     started = time.monotonic()
     server = None
@@ -86,6 +105,24 @@ async def probe(run_id: str, rollouts: int = 4):
     gpu_sampler = asyncio.create_task(
         sample_gpu_stats_to_file(directory / "gpu_stats.jsonl", gpu_sampler_stop)
     )
+
+    async def progress():
+        while True:
+            await asyncio.sleep(20)
+            log = directory / "inference.log"
+            tail = log.read_text(errors="replace").splitlines()[-1:] if log.exists() else []
+            print(
+                json.dumps(
+                    {
+                        "event": "progress",
+                        "elapsed_seconds": time.monotonic() - started,
+                        "inference_log_tail": tail,
+                    }
+                ),
+                flush=True,
+            )
+
+    heartbeat = asyncio.create_task(progress())
     client = AsyncOpenAI(base_url="http://127.0.0.1:8000/v1", api_key="local", max_retries=0)
     try:
         async with asyncio.timeout(1200):
@@ -152,6 +189,13 @@ async def probe(run_id: str, rollouts: int = 4):
             await asyncio.wait_for(pending, 30)
             report["pause_resume_passed"] = True
             reference = Path("/root/kernel_rlm/tasks/vector_add.py").read_text()
+            if guarded_feedback:
+                from .verifier_overlap_probe import check_guarded_feedback
+
+                os.environ["RLM_TRAIN_EXEC_TIMEOUT_S"] = "150"
+                report["guarded_feedback_checks"] = await check_guarded_feedback(
+                    client, reference, directory / "guarded-repl"
+                )
             report["shared_gpu_resource_gate_reused"] = {
                 "run_id": "20261013T101758Z",
                 "status": "passed",
@@ -192,10 +236,7 @@ async def probe(run_id: str, rollouts: int = 4):
             async with environment.serving():
                 task = next(iter(vf.load_taskset(env_config.taskset)))
                 episodes = await asyncio.gather(
-                    *(
-                        environment.run_episode(deepcopy(task), context)
-                        for _ in range(rollouts)
-                    ),
+                    *(environment.run_episode(deepcopy(task), context) for _ in range(rollouts)),
                     return_exceptions=True,
                 )
                 (directory / "traces.jsonl").write_text(
@@ -228,8 +269,7 @@ async def probe(run_id: str, rollouts: int = 4):
                     if reward is None:
                         reward = info.get("kernel_reward")
                     admission_waits = [
-                        float(call.get("request_admission_wait_seconds") or 0)
-                        for call in calls
+                        float(call.get("request_admission_wait_seconds") or 0) for call in calls
                     ]
                     feedback_results = []
                     for message in info.get("repl_transcript", []):
@@ -263,15 +303,12 @@ async def probe(run_id: str, rollouts: int = 4):
                                 result.get("verification_status") for result in verifications
                             ],
                             "verifier_phases": [
-                                result.get("verifier_phase")
-                                or result.get("timeout_phase")
+                                result.get("verifier_phase") or result.get("timeout_phase")
                                 for result in verifications
                             ],
                             "verifier_paused_seconds": sum(
                                 float(
-                                    (result.get("timings") or {}).get(
-                                        "inference_paused_seconds"
-                                    )
+                                    (result.get("timings") or {}).get("inference_paused_seconds")
                                     or 0
                                 )
                                 for result in verifications
@@ -285,6 +322,7 @@ async def probe(run_id: str, rollouts: int = 4):
                             ),
                             "submitted": bool(info.get("kernel_submission")),
                             "correct": verification.get("correct"),
+                            "final_scheduling": verification.get("scheduling"),
                             "max_diff": verification.get("max_diff"),
                             "speedup": verification.get("speedup"),
                             "trace_errors": trace.get("errors", []),
@@ -305,7 +343,9 @@ async def probe(run_id: str, rollouts: int = 4):
                     {
                         "task": "thinking-vector-add",
                         "rewards": rewards,
-                        "submitted": sum(result.get("submitted", False) for result in rollout_results),
+                        "submitted": sum(
+                            result.get("submitted", False) for result in rollout_results
+                        ),
                         "correct": sum(result.get("correct") is True for result in rollout_results),
                     }
                 ]
@@ -327,6 +367,16 @@ async def probe(run_id: str, rollouts: int = 4):
                 )
                 report["gpu_stats_path"] = str(directory / "gpu_stats.jsonl")
                 report["feedback_log_dir"] = str(directory / "feedback")
+                feedback_records = [
+                    json.loads(line)
+                    for path in (directory / "feedback").glob("*.jsonl")
+                    for line in path.read_text().splitlines()
+                    if line.strip()
+                ]
+                report["live_feedback_modes"] = [
+                    record.get("scheduling", {}).get("mode", "not_started")
+                    for record in feedback_records
+                ]
                 report["gate_passed"] = (
                     len(rollout_results) == rollouts
                     and all(result.get("episode_ok") for result in rollout_results)
@@ -339,6 +389,8 @@ async def probe(run_id: str, rollouts: int = 4):
         report["status"] = "failed"
         report["error"] = f"{type(error).__name__}: {error}"
     finally:
+        heartbeat.cancel()
+        await asyncio.gather(heartbeat, return_exceptions=True)
         await client.close()
         if server is not None and server.poll() is None:
             os.killpg(server.pid, signal.SIGTERM)
@@ -357,10 +409,25 @@ async def probe(run_id: str, rollouts: int = 4):
 
 
 @app.local_entrypoint()
-def main(rollouts: int = 4, cpu_only: bool = False):
+def main(rollouts: int = 4, cpu_only: bool = False, guarded_feedback: bool = False):
     if rollouts not in (2, 4):
         raise ValueError("Use --rollouts 2 or --rollouts 4 for the shared-A100 gate test")
     print(json.dumps(preflight.remote(), indent=2))
     if not cpu_only:
+        if guarded_feedback:
+            print(
+                json.dumps({"cpu_compile_preflight": prepare_guarded_feedback.remote()}), flush=True
+            )
         run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
-        print(json.dumps(probe.remote(run_id, rollouts), indent=2))
+        result = probe.remote(run_id, rollouts, guarded_feedback)
+        directory = Path("logs/shared-gpu-probe") / run_id
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "report.json").write_text(json.dumps(result, indent=2))
+        summary = {key: value for key, value in result.items() if key != "guarded_feedback_checks"}
+        summary["guarded_feedback_checks"] = [
+            {"name": check["name"], "result": check["result"]}
+            for check in result.get("guarded_feedback_checks", [])
+        ]
+        print(json.dumps(summary, indent=2))
+        if result["status"] != "completed":
+            raise RuntimeError(result.get("error", "Probe failed"))

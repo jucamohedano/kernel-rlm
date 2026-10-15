@@ -42,6 +42,7 @@ def build_local_feedback_bootstrap(
                         n_trials=1,
                         timeout_s={float(timeout_s)!r},
                         benchmark=False,
+                        allow_feedback_overlap=True,
                     )
                 except Exception as _kernel_feedback_error:
                     result = {{

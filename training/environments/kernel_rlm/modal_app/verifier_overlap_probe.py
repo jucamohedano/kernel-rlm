@@ -64,15 +64,7 @@ def setup_extension_cache() -> None:
     os.environ["MAX_JOBS"] = "2"
 
 
-@app.function(
-    image=image,
-    cpu=12,
-    memory=16384,
-    timeout=300,
-    retries=0,
-    volumes={"/inference-cache": inference_cache},
-)
-def compile_preflight() -> list[dict]:
+def compile_fixtures() -> list[dict]:
     import tempfile
 
     from kernel_rlm.verifier import _RUNNER, _run_verifier_process
@@ -109,6 +101,18 @@ def compile_preflight() -> list[dict]:
             results.append(result)
     inference_cache.commit()
     return results
+
+
+@app.function(
+    image=image,
+    cpu=12,
+    memory=16384,
+    timeout=300,
+    retries=0,
+    volumes={"/inference-cache": inference_cache},
+)
+def compile_preflight() -> list[dict]:
+    return compile_fixtures()
 
 
 async def verify_case(directory: Path, case: dict, *, paused: bool, benchmark: bool) -> dict:
@@ -204,6 +208,89 @@ async def inference_load(client, directory: Path, started_event: asyncio.Event, 
         "seconds": time.monotonic() - started,
         "completion_tokens": sum(record["completion_tokens"] for record in records),
     }
+
+
+async def check_guarded_feedback(client, reference: str, directory: Path) -> list[dict]:
+    from kernel_rlm.feedback import build_local_feedback_bootstrap
+
+    from rlm_train.repl.subprocess import SubprocessReplBackend
+
+    source = Path("/root/known_cuda.py").read_text()
+    oversized = source.replace(
+        "    return _module.vector_add(left, right)",
+        "    scratch = torch.empty(256 * 1024 * 1024, device='cuda')\n"
+        "    return _module.vector_add(left, right)",
+    )
+    if oversized == source:
+        raise RuntimeError("Allocation fixture was not inserted")
+    checks = []
+    for name, candidate, expected in (
+        ("qualified", source, "overlap"),
+        ("allocation_fallback", oversized, "exclusive"),
+    ):
+        stage = directory / name
+        stage.mkdir(parents=True, exist_ok=True)
+        backend = SubprocessReplBackend(request_timeout=160)
+        ready = asyncio.Event()
+        pressure = None
+        try:
+            await backend.start(proxy_url="http://127.0.0.1:1", rollout_id=name)
+            await backend.load_context(reference)
+            await backend.bootstrap(
+                build_local_feedback_bootstrap(
+                    reference, max_calls=1, details_path=str(stage / "feedback.jsonl")
+                )
+            )
+            pressure = asyncio.create_task(inference_load(client, stage, ready, gated=True))
+            await asyncio.wait_for(ready.wait(), 45)
+            code = f"cuda_feedback({candidate!r})"
+            execution = await backend.execute(code)
+            (stage / "repl.json").write_text(
+                json.dumps(
+                    {
+                        "code": code,
+                        "stdout": execution.stdout,
+                        "stderr": execution.stderr,
+                        "final_answer": execution.final_answer,
+                    },
+                    indent=2,
+                )
+            )
+            if execution.stderr:
+                raise RuntimeError(execution.stderr)
+            result = json.loads(
+                next(
+                    line.removeprefix("CUDA feedback: ")
+                    for line in execution.stdout.splitlines()
+                    if line.startswith("CUDA feedback: ")
+                )
+            )
+            if not result.get("correct") or result["scheduling"]["mode"] != expected:
+                raise RuntimeError(f"Guarded feedback check failed: {result}")
+            if name == "allocation_fallback":
+                assert result["scheduling"]["fallback_reason"] == "allocator_limit_or_oom"
+            assert result["feedback_calls_used"] == 1
+            assert "reward" not in result and execution.final_answer is None
+            load_result = await asyncio.wait_for(pressure, 150)
+            checks.append({"name": name, "result": result, "inference": load_result})
+            print(
+                json.dumps(
+                    {
+                        "event": "guarded_repl_check",
+                        "name": name,
+                        "mode": expected,
+                        "correct": result["correct"],
+                    }
+                ),
+                flush=True,
+            )
+        finally:
+            if pressure is not None:
+                if not pressure.done():
+                    pressure.cancel()
+                await asyncio.gather(pressure, return_exceptions=True)
+            await backend.stop()
+    return checks
 
 
 async def compare(client, directory: Path, case: dict, mode: str) -> dict:

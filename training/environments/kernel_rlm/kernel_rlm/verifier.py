@@ -10,11 +10,13 @@ import sys
 import tempfile
 import textwrap
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
+from kernel_rlm.feedback_overlap import RESERVE_BYTES, overlap_budget
 from kernel_rlm.gpu_sharing import paused_inference
-from kernel_rlm.verifier_slot import compile_slot, verifier_slot
+from kernel_rlm.verifier_slot import compile_slot, feedback_slot, verifier_slot
 
 
 def _run_verifier_process(
@@ -38,6 +40,7 @@ def _run_verifier_process(
         ) from timeout_error
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
+
 _RUNNER = textwrap.dedent(
     """
     import importlib.util
@@ -51,7 +54,8 @@ _RUNNER = textwrap.dedent(
     import torch
     import torch.utils.cpp_extension
 
-    status_path = Path(sys.argv[7])
+    status_path = Path(sys.argv[-2])
+    guard = json.loads(sys.argv[7]) if len(sys.argv) > 9 else {}
     phase_events = []
 
     def mark_phase(phase):
@@ -94,7 +98,7 @@ _RUNNER = textwrap.dedent(
     atol = float(sys.argv[4])
     rtol = float(sys.argv[5])
     benchmark_enabled = sys.argv[6] == "1"
-    mode = sys.argv[8]
+    mode = sys.argv[-1]
     result = {
         "compiled": False,
         "extension_used": False,
@@ -108,6 +112,14 @@ _RUNNER = textwrap.dedent(
         "device": "cuda",
         "phase_events": phase_events,
     }
+
+    def defer_overlap(reason):
+        result.update(compiled=True, correct=None, extension_used=None,
+                      verification_status="overlap_deferred", overlap_deferred=reason)
+        mark_phase("overlap_deferred")
+        print(json.dumps(result))
+        raise SystemExit(0)
+
     if mode == "compile":
         result["device"] = "compile_only"
 
@@ -119,7 +131,17 @@ _RUNNER = textwrap.dedent(
     extension_builds = []
     extension_calls = []
     if mode == "verify":
-        result["free_memory_before_gib"] = torch.cuda.mem_get_info()[0] / (1024 ** 3)
+        free_memory, total_memory = torch.cuda.mem_get_info()
+        result["free_memory_before_gib"] = free_memory / (1024 ** 3)
+        if guard:
+            if "A100" not in torch.cuda.get_device_name():
+                defer_overlap("unprofiled_gpu")
+            if free_memory < guard["allocator_limit_bytes"] + guard["reserve_bytes"]:
+                defer_overlap("insufficient_free_memory")
+            torch.cuda.set_per_process_memory_fraction(
+                guard["allocator_limit_bytes"] / total_memory, device=0
+            )
+            result["allocator_limit_gib"] = guard["allocator_limit_bytes"] / (1024 ** 3)
         torch.cuda.reset_peak_memory_stats()
 
     class TrackedExtension:
@@ -179,6 +201,8 @@ _RUNNER = textwrap.dedent(
         get_inputs = reference.get_inputs
         get_init_inputs = getattr(reference, "get_init_inputs", lambda: [])
     except Exception as error:
+        if guard and isinstance(error, torch.OutOfMemoryError):
+            defer_overlap("allocator_limit_or_oom")
         result["error"] = f"{type(error).__name__}: {error}"
         if mode == "compile":
             result.update(
@@ -236,6 +260,8 @@ _RUNNER = textwrap.dedent(
             if not correct:
                 break
     except Exception as error:
+        if guard and isinstance(error, torch.OutOfMemoryError):
+            defer_overlap("allocator_limit_or_oom")
         result["error"] = f"{type(error).__name__}: {error}"
         correct = False
 
@@ -276,6 +302,7 @@ def verify_cuda(
     cwd: str | None = None,
     benchmark: bool = True,
     collect_phase_events: bool = False,
+    allow_feedback_overlap: bool = False,
 ) -> dict[str, Any]:
     """Compile, run, and benchmark a CUDA submission in a subprocess."""
     python = python or os.environ.get("KERNEL_VERIFY_PYTHON") or sys.executable
@@ -294,6 +321,13 @@ def verify_cuda(
     timings: dict[str, float] = {}
     phase = "verifier_slot_queue"
     verification_started = time.monotonic()
+    shared_gpu = bool(os.environ.get("KERNEL_INFERENCE_ADMIN_URL"))
+    memory_limit = None
+    reason = "final_benchmark" if benchmark else "overlap_not_requested"
+    if allow_feedback_overlap and not benchmark and shared_gpu:
+        memory_limit, reason = overlap_budget(reference_code, submission_code)
+    scheduling = {"mode": "not_started", "reason": reason}
+    failure["scheduling"] = scheduling
 
     with tempfile.TemporaryDirectory() as temporary_directory:
         directory = Path(temporary_directory)
@@ -324,9 +358,7 @@ def verify_cuda(
         ]
         try:
             with compile_slot(compile_budget) as compile_remaining:
-                timings["compile_queue_wait_seconds"] = (
-                    time.monotonic() - compile_queue_started
-                )
+                timings["compile_queue_wait_seconds"] = time.monotonic() - compile_queue_started
                 compile_started = time.monotonic()
                 compile_process = _run_verifier_process(
                     compile_command,
@@ -400,32 +432,69 @@ def verify_cuda(
         ]
         queue_started = time.monotonic()
         try:
-            with verifier_slot(remaining_total) as remaining:
-                timings["verifier_queue_wait_seconds"] = time.monotonic() - queue_started
-                phase = "pause_inference"
-                pause_started = time.monotonic()
-                try:
-                    with paused_inference(remaining) as execution_budget:
-                        phase = "runner_startup"
-                        runner_started = time.monotonic()
-                        try:
-                            process = _run_verifier_process(
-                                command,
-                                timeout_s=execution_budget,
-                                cwd=cwd,
-                                env={**os.environ, "CUDA_VISIBLE_DEVICES": "0"}
-                                if os.environ.get("KERNEL_INFERENCE_ADMIN_URL")
-                                else None,
-                            )
-                        finally:
-                            timings["runner_elapsed_seconds"] = time.monotonic() - runner_started
-                        phase = "result_parse"
-                finally:
-                    timings["inference_paused_seconds"] = (
-                        time.monotonic() - pause_started
-                        if os.environ.get("KERNEL_INFERENCE_ADMIN_URL")
-                        else 0.0
+            for overlap in (True, False) if memory_limit else (False,):
+                phase = "verifier_slot_queue"
+                status_path.unlink(missing_ok=True)
+                remaining_total = timeout_s - (time.monotonic() - verification_started)
+                slot = feedback_slot if overlap else verifier_slot
+                queue_started = time.monotonic()
+                with slot(remaining_total) as remaining:
+                    timings["verifier_queue_wait_seconds"] = (
+                        timings.get("verifier_queue_wait_seconds", 0.0)
+                        + time.monotonic()
+                        - queue_started
                     )
+                    scheduling["mode"] = (
+                        "overlap" if overlap else ("exclusive" if shared_gpu else "dedicated")
+                    )
+                    phase = "pause_inference"
+                    pause_started = time.monotonic()
+                    try:
+                        access = nullcontext(remaining) if overlap else paused_inference(remaining)
+                        with access as execution_budget:
+                            phase = "runner_startup"
+                            runner_started = time.monotonic()
+                            run_command = command
+                            if overlap:
+                                guard = {
+                                    "allocator_limit_bytes": memory_limit,
+                                    "reserve_bytes": RESERVE_BYTES,
+                                }
+                                run_command = [*command[:-2], json.dumps(guard), *command[-2:]]
+                            try:
+                                process = _run_verifier_process(
+                                    run_command,
+                                    timeout_s=execution_budget,
+                                    cwd=cwd,
+                                    env={**os.environ, "CUDA_VISIBLE_DEVICES": "0"}
+                                    if shared_gpu
+                                    else None,
+                                )
+                            finally:
+                                timings["runner_elapsed_seconds"] = (
+                                    timings.get("runner_elapsed_seconds", 0.0)
+                                    + time.monotonic()
+                                    - runner_started
+                                )
+                            phase = "result_parse"
+                    finally:
+                        timings["inference_paused_seconds"] = timings.get(
+                            "inference_paused_seconds", 0.0
+                        ) + (
+                            time.monotonic() - pause_started if shared_gpu and not overlap else 0.0
+                        )
+                if overlap and process.returncode == 0:
+                    try:
+                        guard_result = json.loads(process.stdout.strip().splitlines()[-1])
+                    except (IndexError, json.JSONDecodeError):
+                        break
+                    if guard_result.get("overlap_deferred"):
+                        scheduling["fallback_reason"] = guard_result["overlap_deferred"]
+                        scheduling["guard_attempt"] = guard_result
+                        if not collect_phase_events:
+                            guard_result.pop("phase_events", None)
+                        continue
+                break
         except (subprocess.TimeoutExpired, TimeoutError) as error:
             timings.setdefault("verifier_queue_wait_seconds", time.monotonic() - queue_started)
             phase_details = _read_phase(status_path)
@@ -463,6 +532,7 @@ def verify_cuda(
             if not collect_phase_events:
                 result.pop("phase_events", None)
             result["timings"] = {**timings, **(result.get("timings") or {})}
+            result["scheduling"] = scheduling
             result["verification_status"] = "completed"
             phase_details = _read_phase(status_path)
             result["verifier_phase"] = phase_details.get("phase")
@@ -490,9 +560,7 @@ def _read_phase(path: Path) -> dict[str, Any]:
         return {}
 
 
-def _terminate_process_group(
-    process: subprocess.Popen, *, grace_s: float = 5.0
-) -> tuple[str, str]:
+def _terminate_process_group(process: subprocess.Popen, *, grace_s: float = 5.0) -> tuple[str, str]:
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:

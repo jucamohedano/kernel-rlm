@@ -452,15 +452,16 @@ model compliance. Thinking remains disabled pending a separate validation.
 ### Verifier concurrency guard
 
 Extension compilation uses a separate CPU lock and runs with CUDA devices hidden.
-It does not block inference. Intermediate feedback and final scoring share one
-container-wide GPU lock. Model requests use shared admission; verifier and weight
-update requests take exclusive admission. Queue waiting and execution share the
-existing timeout; a queue timeout does not start CUDA. Inspect timeout errors
-before interpreting a failed group as a model failure.
+It does not block inference. Model requests use shared admission; final scoring
+and weight updates take exclusive admission. Qualified intermediate feedback also
+uses shared admission, with a separate mutex allowing one feedback verifier at a
+time. Queue waiting and execution share the existing timeout; a queue timeout does
+not start CUDA. Inspect timeout errors before interpreting a failed group as a
+model failure.
 
 The training launcher also sets `KERNEL_INFERENCE_ADMIN_URL` to the local engine
 on port 8100, not the client-facing router on port 8000. While holding the lock,
-the verifier pauses generation, runs on GPU 0, and resumes in `finally`. The
+exclusive verifier pauses generation, runs on GPU 0, and resumes in `finally`. The
 pinned Prime weight-update and LoRA-reload functions acquire the same lock, so
 they cannot resume inference during a benchmark. Control failures do not start
 verification. This coordination is for one container, not multiple hosts.
@@ -497,7 +498,7 @@ from 12.24 to 8.71 seconds for curriculum softplus (`lvl1-seed42-0011`). Token
 streaming continued during overlapping correctness checks and stopped during
 paused checks. Softplus peaked at 3.02 GiB of tensor allocation. These results
 cover two fixed fixtures and short synthetic inference requests, not the full
-curriculum or GRPO training. Training still pauses verification by default.
+curriculum or GRPO training. Final scoring remains exclusive.
 
 Artifacts live in `kernel-rlm-traces:verifier-overlap-probe/<run_id>`; downloaded
 reports go under `logs/verifier-overlap-probe`. They include per-phase timings,
@@ -507,6 +508,50 @@ telemetry; default feedback omits these events to keep model context concise.
 The initial live report's `inference_paused_seconds` field also counted runner
 time in overlap/standalone conditions. Use the condition's `mode` and phase
 timestamps for that report; the field now reports zero when no pause is requested.
+
+### Guarded intermediate feedback
+
+`cuda_feedback(source)` requests guarded overlap automatically. `verify_cuda`
+keeps overlap disabled by default, and `benchmark=True` always forces the
+exclusive path. The initial profile allowlist hashes the exact reference source
+for vector addition (512 MiB allocator cap) and Level-1 softplus task
+`lvl1-seed42-0011` (4 GiB cap). Altered or unprofiled references use the paused
+path. The policy also excludes invalid submission contracts and common direct
+CUDA allocation or allocator-control APIs.
+
+Inside the shared lock, the verifier checks the device is an A100 and requires
+free memory of at least the cap plus 2 GiB. It applies PyTorch's per-process
+allocator cap before importing the reference or candidate. If free memory is
+insufficient, or a capped attempt raises an allocator OOM, that worker exits and
+the verifier retries exclusively using the original remaining deadline. This
+internal fallback consumes no extra agent feedback call. Other kernel failures
+are returned normally. Weight reloads and final benchmarks wait for feedback to
+finish; two overlapping feedback checks cannot execute at once.
+
+The cap covers PyTorch allocations, including normal extension tensor creation.
+It is not a hard GPU partition or a sandbox for arbitrary native CUDA allocations;
+the source exclusions are conservative heuristics, not a security boundary.
+Keep the profile list narrow until additional workloads are measured. Scheduling
+mode and fallback reason are saved with the verifier result; intermediate checks
+still return no reward and perform no speed benchmark.
+
+Run `../../../.venv/bin/modal run -m modal_app.shared_gpu_probe --rollouts 2 --guarded-feedback`
+to validate the actual REPL helper, an allocator-cap fallback during inference,
+and two concurrent frozen-model trajectories. It compiles fixtures on CPU first,
+uses one A100 with a 1,260-second function cap, and saves evidence under
+`logs/shared-gpu-probe` locally and the matching path in `kernel-rlm-traces`.
+
+Integration run `20261015T151058Z-ea6f583e` completed in 254 seconds, including
+112 seconds of inference startup. Both generated vector-add submissions were
+correct. All three agent feedback checks overlapped inference; both final speed
+evaluations stayed exclusive. The scripted REPL checks also verified the normal
+overlap path and a 1 GiB allocation falling back after the 512 MiB cap, within one
+feedback call. No model/API or admission timeout occurred. The longest admission
+wait was 2.94 seconds, and final scoring paused inference for 5.86 seconds total.
+This probe allowed seven turns: submissions took six and five turns, so it does
+not demonstrate that both finish under the current five-turn training limit.
+Only the vector-add integration was exercised here; softplus eligibility uses
+the preceding measured memory profile and CPU policy tests.
 
 Thinking is enabled for training inference. The custom loop drops returned
 thinking text before it builds the next prompt, while preserving the response,

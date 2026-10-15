@@ -139,6 +139,26 @@ def verifier_slot(timeout_s: float, *, path: Path = LOCK_PATH) -> Iterator[float
 
 
 @contextmanager
+def feedback_slot(timeout_s: float, *, path: Path = LOCK_PATH) -> Iterator[float]:
+    """Serialize feedback while sharing inference and excluding weight updates."""
+    deadline = time.monotonic() + timeout_s
+    mutex = path.with_name(f"{path.name}.feedback")
+    with compile_slot(timeout_s, path=mutex):
+        with _intent_path(path).open("a") as intent:
+            _acquire_sync(intent, fcntl.LOCK_SH, deadline, "Feedback admission timed out")
+            try:
+                with path.open("a") as lock:
+                    _acquire_sync(lock, fcntl.LOCK_SH, deadline, "Feedback admission timed out")
+                    fcntl.flock(intent, fcntl.LOCK_UN)
+                    try:
+                        yield max(0.0, deadline - time.monotonic())
+                    finally:
+                        fcntl.flock(lock, fcntl.LOCK_UN)
+            finally:
+                fcntl.flock(intent, fcntl.LOCK_UN)
+
+
+@contextmanager
 def compile_slot(timeout_s: float, *, path: Path = COMPILE_LOCK_PATH) -> Iterator[float]:
     """Serialize CPU extension builds without blocking inference requests."""
     deadline = time.monotonic() + timeout_s
