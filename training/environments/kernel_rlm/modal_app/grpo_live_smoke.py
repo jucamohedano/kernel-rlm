@@ -147,6 +147,7 @@ live_image = (
             "TOKENIZERS_PARALLELISM": "false",
             "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
             "MAX_JOBS": "2",
+            "TORCH_CUDA_ARCH_LIST": "8.0",
             "RLM_TRAIN_EXEC_TIMEOUT_S": "30",
         }
     )

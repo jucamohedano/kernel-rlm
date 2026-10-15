@@ -60,15 +60,15 @@ def test_verifier_uses_remaining_budget(slot_module, monkeypatch, tmp_path):
         verifier, "verifier_slot", lambda timeout: original_slot(timeout, path=tmp_path / "slot")
     )
 
-    def run(command, **kwargs):
-        assert 0 < kwargs["timeout"] <= 5
+    def run(command, *, timeout_s, cwd, env):
+        assert 0 < timeout_s <= 5
         Path(command[-1]).write_text('{"phase":"complete"}')
         with pytest.raises(TimeoutError):
             with original_slot(0.01, path=tmp_path / "slot"):
                 pytest.fail("Subprocess must retain the slot")
         return SimpleNamespace(returncode=0, stdout='{"correct": true}', stderr="")
 
-    monkeypatch.setattr(verifier.subprocess, "run", run)
+    monkeypatch.setattr(verifier, "_run_verifier_process", run)
     result = verifier.verify_cuda("", "", timeout_s=5)
     assert result["correct"]
     assert result["verifier_phase"] == "complete"
@@ -118,7 +118,7 @@ def test_queue_timeout_never_starts_cuda(slot_module, monkeypatch, tmp_path):
         verifier, "verifier_slot", lambda timeout: slot_module.verifier_slot(timeout, path=path)
     )
     monkeypatch.setattr(
-        verifier.subprocess, "run", lambda *args, **kwargs: pytest.fail("CUDA started")
+        verifier, "_run_verifier_process", lambda *args, **kwargs: pytest.fail("CUDA started")
     )
     with slot_module.verifier_slot(1, path=path):
         result = verifier.verify_cuda("", "", timeout_s=0.01)
@@ -137,11 +137,11 @@ def test_runner_timeout_reports_last_verifier_phase(slot_module, monkeypatch, tm
         lambda timeout: slot_module.verifier_slot(timeout, path=tmp_path / "slot"),
     )
 
-    def run(command, **kwargs):
+    def run(command, *, timeout_s, cwd, env):
         Path(command[-1]).write_text('{"phase":"extension_compile"}')
-        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        raise subprocess.TimeoutExpired(command, timeout_s)
 
-    monkeypatch.setattr(verifier.subprocess, "run", run)
+    monkeypatch.setattr(verifier, "_run_verifier_process", run)
     result = verifier.verify_cuda("", "", timeout_s=5)
     assert not result["correct"]
     assert result["timeout_phase"] == "extension_compile"

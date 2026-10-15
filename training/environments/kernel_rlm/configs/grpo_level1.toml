@@ -62,6 +62,7 @@ env.agent.harness.max_turns = 5
 env.agent.harness.max_tokens = 2048
 env.agent.harness.enable_thinking = true
 env.agent.harness.enable_subcall = true
+env.agent.harness.max_subcalls = 2
 env.agent.harness.subcall_probe = false
 env.agent.runtime.type = "subprocess"
 

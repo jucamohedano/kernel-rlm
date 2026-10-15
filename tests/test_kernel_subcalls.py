@@ -31,7 +31,7 @@ def fake_client(content="CUDA advice", finish="stop"):
 def test_budget_and_trace(subcalls):
     client = fake_client()
     records = []
-    child = subcalls(client, "same-model", len, records)
+    child = subcalls(client, "same-model", len, records, max_calls=1)
 
     async def check():
         assert await child.query("help") == "CUDA advice"
@@ -75,7 +75,7 @@ def test_oversized_input_does_not_call_model(subcalls):
     child = subcalls(client, "same-model", len, [])
     with pytest.raises(ValueError, match="token limit"):
         asyncio.run(child.query("x" * 2049))
-    assert child.used is False
+    assert child.calls_used == 0
     client.chat.completions.create.assert_not_called()
 
 
@@ -90,7 +90,7 @@ def test_timeout_consumes_budget_and_records_error(subcalls):
     child = subcalls(client, "same-model", len, records, timeout_s=0.01)
     with pytest.raises(TimeoutError):
         asyncio.run(child.query("help"))
-    assert child.used is True
+    assert child.calls_used == 1
     assert records[0]["status"] == "failed"
     assert "TimeoutError" in records[0]["error"]
 
@@ -114,7 +114,7 @@ def test_real_worker_proxy_single_and_batched_share_budget(subcalls):
 
     client = fake_client()
     records = []
-    child = subcalls(client, "same-model", len, records)
+    child = subcalls(client, "same-model", len, records, max_calls=1)
 
     async def check():
         proxy = SubLLMProxy()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,28 @@ from typing import Any
 
 from kernel_rlm.gpu_sharing import paused_inference
 from kernel_rlm.verifier_slot import verifier_slot
+
+
+def _run_verifier_process(
+    command: list[str], *, timeout_s: float, cwd: str | None, env: dict[str, str] | None
+) -> subprocess.CompletedProcess:
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=cwd,
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired as timeout_error:
+        stdout, stderr = _terminate_process_group(process)
+        raise subprocess.TimeoutExpired(
+            command, timeout_s, output=stdout, stderr=stderr
+        ) from timeout_error
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 _RUNNER = textwrap.dedent(
     """
@@ -262,11 +285,9 @@ def verify_cuda(
                         phase = "runner_startup"
                         runner_started = time.monotonic()
                         try:
-                            process = subprocess.run(
+                            process = _run_verifier_process(
                                 command,
-                                capture_output=True,
-                                text=True,
-                                timeout=execution_budget,
+                                timeout_s=execution_budget,
                                 cwd=cwd,
                                 env={**os.environ, "CUDA_VISIBLE_DEVICES": "0"}
                                 if os.environ.get("KERNEL_INFERENCE_ADMIN_URL")
@@ -281,6 +302,12 @@ def verify_cuda(
             timings.setdefault("verifier_queue_wait_seconds", time.monotonic() - queue_started)
             phase_details = _read_phase(status_path)
             phase = phase_details.get("phase", phase)
+            failure.update(
+                compiled=None,
+                extension_used=None,
+                correct=None,
+                verification_status="timeout",
+            )
             failure["error"] = (
                 f"verification timed out within {timeout_s}s (queue + execution): {error}"
             )
@@ -289,6 +316,12 @@ def verify_cuda(
             failure["timings"] = timings
             return failure
         if process.returncode != 0:
+            failure.update(
+                compiled=None,
+                extension_used=None,
+                correct=None,
+                verification_status="runner_crash",
+            )
             failure["error"] = (
                 f"verifier crashed (rc={process.returncode}): {(process.stderr or '')[-1500:]}"
             )
@@ -300,11 +333,18 @@ def verify_cuda(
         try:
             result = json.loads(process.stdout.strip().splitlines()[-1])
             result["timings"] = timings
+            result["verification_status"] = "completed"
             phase_details = _read_phase(status_path)
             result["verifier_phase"] = phase_details.get("phase")
             result["verifier_phase_elapsed_seconds"] = phase_details.get("elapsed_seconds")
             return result
         except (IndexError, json.JSONDecodeError):
+            failure.update(
+                compiled=None,
+                extension_used=None,
+                correct=None,
+                verification_status="invalid_runner_output",
+            )
             failure["error"] = f"unparseable verifier output: {(process.stdout or '')[-500:]}"
             failure["timings"] = timings
             phase_details = _read_phase(status_path)
@@ -318,6 +358,45 @@ def _read_phase(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def _terminate_process_group(
+    process: subprocess.Popen, *, grace_s: float = 5.0
+) -> tuple[str, str]:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        return process.communicate(timeout=grace_s)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        return process.communicate()
+
+
+def _run_verifier_process(
+    command: list[str], *, timeout_s: float, cwd: str | None, env: dict[str, str] | None
+) -> subprocess.CompletedProcess:
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=cwd,
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired as timeout_error:
+        stdout, stderr = _terminate_process_group(process)
+        raise subprocess.TimeoutExpired(
+            command, timeout_s, output=stdout, stderr=stderr
+        ) from timeout_error
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def summarize_verification_error(error: str, *, max_chars: int = 1400) -> str:

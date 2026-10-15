@@ -45,12 +45,16 @@ async def run(task: dict) -> None:
         max_retries=0,
         timeout=limits.get("model_timeout_s", 150),
     )
-    subcall_timeout = SUBCALL_TIMEOUT_S if limits.get("enable_subcall") else 0
+    max_child_calls = int(limits.get("max_subcalls", 1))
+    subcall_timeout = (
+        SUBCALL_TIMEOUT_S * max_child_calls if limits.get("enable_subcall") else 0
+    )
+    subcall_instruction = SUBCALL_INSTRUCTION.format(max_calls=max_child_calls)
     backend = SubprocessReplBackend(request_timeout=BACKEND_TIMEOUT_S + subcall_timeout)
     proxy = None
     task_prompt = task["prompt"]
     if limits.get("enable_subcall"):
-        task_prompt = task_prompt.replace("Do not delegate to sub-LLMs.", SUBCALL_INSTRUCTION)
+        task_prompt = task_prompt.replace("Do not delegate to sub-LLMs.", subcall_instruction)
         if limits.get("subcall_probe"):
             task_prompt += "\n" + PROBE_INSTRUCTION
     messages = build_rlm_system_prompt(
@@ -95,6 +99,7 @@ async def run(task: dict) -> None:
                 os.environ["KERNEL_MODEL"],
                 lambda prompt: len(tokenizer.encode(prompt, add_special_tokens=False)),
                 record["subcalls"],
+                max_calls=max_child_calls,
                 enable_thinking=bool(limits.get("enable_thinking")),
             )
             proxy = SubLLMProxy()
@@ -110,7 +115,7 @@ async def run(task: dict) -> None:
             await proxy.start()
             proxy_url = proxy.url
             messages[0]["content"] += (
-                "\nDeployment limits override general examples: " + SUBCALL_INSTRUCTION
+                "\nDeployment limits override general examples: " + subcall_instruction
             )
         await backend.start(proxy_url=proxy_url, rollout_id="bounded-v1")
         await backend.load_context(task["context"])
@@ -134,8 +139,9 @@ async def run(task: dict) -> None:
                 turn,
                 limits["max_turns"],
                 record["feedback_calls"],
-                bool(record["subcalls"]),
+                len(record["subcalls"]),
                 limits.get("enable_subcall", False),
+                max_child_calls,
             )
             if messages[-1]["role"] == "user":
                 messages[-1]["content"] += "\n\n" + turn_prompt["content"]

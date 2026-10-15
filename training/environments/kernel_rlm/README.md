@@ -308,10 +308,19 @@ does not execute twice. Unsupported/malformed calls produce feedback. Truncated
 responses execute no actions and receive a retry message.
 
 Local intermediate verification is limited to two calls of 120 seconds each.
-The enclosing REPL budget is 270 seconds (both calls plus overhead), and the
-backend watchdog is 300 seconds. Feedback always includes the same status,
+The base REPL budget is 270 seconds (both calls plus overhead), and the base
+backend watchdog is 300 seconds. Enabled child-call timeouts are added to both;
+two 90-second child calls raise those limits to 450 and 480 seconds. Feedback
+always includes the same status,
 error, timing, and call-budget fields, including on exhaustion. Saved records
 distinguish `submitted`, `turn_limit`, `truncated`, and `error` termination.
+
+If the verifier's timeout expires before measurement completes, its result marks
+compile, extension use, and correctness as unknown. A completed verifier run
+can report an actual compile or correctness failure. Timeout cleanup terminates
+the runner's process group so `nvcc` and `ninja` descendants do not survive it.
+Timing fields distinguish slot queueing, paused inference, and runner execution;
+phase markers locate extension compilation, correctness trials, and benchmarks.
 
 Intermediate `cuda_feedback` checks use `benchmark=False`; they do not award
 reward or submit the answer. Final scoring independently validates and verifies
@@ -325,9 +334,9 @@ success or validate Prime's complete distributed training path.
 ### Training checkpoints
 
 `configs/grpo_level1.toml` enables Prime's shared `[ckpt]` configuration with
-`interval = 2` and `keep_last = 2`. For the current three-step run this means
-an intermediate checkpoint at step 2 and a final checkpoint at step 3 on normal
-completion. The shared configuration applies to trainer and orchestrator.
+`interval = 2` and `keep_last = 2`. For the current six-step run this means
+checkpoints at steps 2, 4, and 6 on normal completion, retaining the latest two.
+The shared configuration applies to trainer and orchestrator.
 Artifacts live under `/traces/outputs/<run-name>/checkpoints` on the persistent
 `kernel-rlm-traces` Modal volume. No checkpoint is created by frozen probes.
 
@@ -359,7 +368,16 @@ The child training process has 780 seconds, then SIGTERM, a 30-second grace,
 and SIGKILL if needed, leaving time for reports and volume commit. No retries.
 This is a wall-clock guard, not a guaranteed dollar cap or checkpoint-on-signal
 implementation. A timed stop can lose work since the last completed checkpoint.
-Live stdout is now written directly to `prime.log`; W&B still receives metrics.
+Live stdout is written directly to `prime.log`; Prime sends its training and
+vLLM metrics to the file monitor and W&B. The Modal wrapper also samples each
+GPU's utilization, memory, temperature, and power every five seconds into
+`gpu_stats.jsonl`. This file is not automatically uploaded to W&B.
+
+The live Modal image pins CUDA extension builds to `TORCH_CUDA_ARCH_LIST=8.0`
+for its A100 GPUs. This avoids compiling every wheel-supported architecture
+during intermediate verification. Verifier timeouts now terminate the whole
+runner process group so `nvcc` and `ninja` children do not keep running after
+the parent times out.
 
 ### Frozen-probe cache details
 
@@ -392,8 +410,8 @@ and [Modal volume persistence](https://modal.com/docs/guide/volumes).
 
 ### Optional child-call probe
 
-The harness default is `enable_subcall = false`; `grpo_level1.toml` explicitly
-enables one optional child call without forcing delegation. To test the wiring
+The harness default is `enable_subcall = false`; `grpo_level1.toml` enables up
+to two optional child calls without forcing delegation. To test the wiring
 without an optimizer, run from this directory:
 
 ```bash
@@ -401,7 +419,8 @@ without an optimizer, run from this directory:
 ```
 
 - One vector-add trajectory; two A100s (inference and verification).
-- One child call per trajectory, including batched calls and aliases.
+- Up to two child calls per training trajectory, including batched calls and aliases.
+- The frozen wiring probe still forces one call to check the delegation path.
 - Child prompt: at most 2,048 tokenizer tokens, excluding the fixed system message.
 - Child output: at most 2,048 tokens. Truncation is reported to the parent.
 - Child timeout: 90 seconds, no retries. A failed request consumes the call budget.
@@ -411,6 +430,8 @@ without an optimizer, run from this directory:
 - Full child prompts, replies, usage, errors, and latency are saved in
   `trace.info.kernel_subcalls` and displayed in a closed dashboard section.
 
+The child returns focused text that can include a code fragment and explanation.
+The root stores the reply in the REPL and should inspect only the required parts.
 The probe explicitly asks for one child call. It checks wiring, not spontaneous
 delegation or a quality improvement. Only the final kernel receives reward.
 Scoring masks child branches before Prime assigns advantages. It preserves child
@@ -458,8 +479,8 @@ configuration validation. Without `--cpu-only`, the probe uses one A100 with a
 trajectory. It never performs optimizer updates. Reports and traces are saved
 under `kernel-rlm-traces:shared-gpu-probe`.
 
-Training thinking remains disabled until its probe is reviewed. The harness
-preserves returned reasoning in assistant history but executes only actual
-content/tool actions. Root sampled tokens, including reasoning, retain their
-loss mask. Child branches remain excluded; neither thoughts nor subcalls earn
-an extra reward.
+Thinking is enabled for training inference. The custom loop drops returned
+thinking text before it builds the next prompt, while preserving the response,
+tool call, and REPL feedback. The V1 trace may still contain sampled reasoning
+tokens, and the current loss mask does not exclude root thoughts. Child branches
+remain excluded; neither thoughts nor subcalls earn an extra reward.

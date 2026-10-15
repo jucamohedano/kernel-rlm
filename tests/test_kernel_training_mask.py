@@ -84,7 +84,7 @@ def test_delegation_and_final_turn_instructions(monkeypatch):
     assert "specific subproblem" in SUBCALL_INSTRUCTION
     assert "Never send bare context" in SUBCALL_INSTRUCTION
     assert "100k" not in KERNEL_SYSTEM + SUBCALL_INSTRUCTION
-    prompt = turn_budget(4, 5, 2, True, True)
+    prompt = turn_budget(4, 5, 2, 2, True, 2)
     assert "Feedback calls remaining: 0" in prompt
     assert "Child calls remaining: 0" in prompt
     assert "FINAL TURN" in prompt

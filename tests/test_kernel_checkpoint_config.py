@@ -36,6 +36,7 @@ def test_training_matches_probe_generation_and_bounds_concurrency():
     assert harness["max_tokens"] == 2048
     assert harness["max_turns"] == 5
     assert harness["enable_subcall"] is True
+    assert harness["max_subcalls"] == 2
     assert harness["subcall_probe"] is False
     assert orchestrator["renderer"]["enable_thinking"] is True
     assert harness["enable_thinking"] is True

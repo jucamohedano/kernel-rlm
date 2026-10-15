@@ -14,6 +14,7 @@ class KernelHarnessConfig(vf.HarnessConfig):
     model_timeout_s: float = Field(150, gt=0)
     enable_thinking: bool = False
     enable_subcall: bool = False
+    max_subcalls: int = Field(1, ge=0, le=4)
     subcall_probe: bool = False
 
 
@@ -48,6 +49,7 @@ class KernelHarness(vf.Harness[KernelHarnessConfig]):
                         "model_timeout_s": self.config.model_timeout_s,
                         "enable_thinking": self.config.enable_thinking,
                         "enable_subcall": self.config.enable_subcall,
+                        "max_subcalls": self.config.max_subcalls,
                         "subcall_probe": self.config.subcall_probe,
                     }
                 ),

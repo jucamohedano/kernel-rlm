@@ -10,17 +10,19 @@ CHILD_SYSTEM = (
     "You have no REPL, tools, or child models. Do not claim to execute or test code."
 )
 SUBCALL_TIMEOUT_S = 90
+SUBCALL_MAX_CALLS = 2
 SUBCALL_INSTRUCTION = (
-    "You may call llm_query(prompt) inside the REPL once per trajectory. "
+    "You may call llm_query(prompt) inside the REPL up to {max_calls} times per trajectory. "
     "The child is the same model with a fresh context, no REPL, and no further recursion. "
     "Its prompt limit is 2,048 tokens; its output limit is 2,048 tokens. "
     "Delegate a specific subproblem, not the entire kernel: indexing, synchronization, "
     "a compiler error, or a memory-access choice. Give an explicit question, the relevant "
-    "code, and the expected answer format. Never send bare context without a question. "
-    "For example: llm_query('Explain this indexing error; return a corrected expression "
-    "and a short explanation. Fragment: ' + fragment). Store and inspect the returned "
-    "text, then implement and verify the kernel yourself. Calling a child earns no reward. "
-    "Batched calls share the same single-call budget; rlm_query is only a one-shot alias."
+    "code, and the expected answer format. The child may return a code fragment with a brief "
+    "explanation or concise text. Never send bare context without a question. Store the reply "
+    "in a REPL variable and inspect only what you need; do not print long child responses into "
+    "the root conversation. You remain responsible for assembling and verifying the complete "
+    "kernel. Calling a child earns no reward. Batched calls share this {max_calls}-call budget; "
+    "rlm_query is only a one-shot alias."
 )
 PROBE_INSTRUCTION = (
     "For this subcall wiring probe, use llm_query exactly once from a REPL block before "
@@ -50,11 +52,14 @@ KERNEL_SYSTEM = (
 )
 
 
-def turn_budget(turn, max_turns, feedback_used, child_used, enabled):
+def turn_budget(
+    turn, max_turns, feedback_used, child_calls_used, enabled, max_child_calls=1
+):
     remaining = max(0, 2 - feedback_used)
+    child_calls_remaining = max(0, max_child_calls - child_calls_used) if enabled else 0
     message = (
         f"\nTurn {turn + 1}/{max_turns}. Feedback calls remaining: {remaining}. "
-        f"Child calls remaining: {int(enabled and not child_used)}."
+        f"Child calls remaining: {child_calls_remaining}."
     )
     if remaining == 0:
         message += " Do not call cuda_feedback again."
@@ -75,6 +80,7 @@ class BoundedSubcalls:
         count_tokens,
         records,
         timeout_s=SUBCALL_TIMEOUT_S,
+        max_calls=SUBCALL_MAX_CALLS,
         enable_thinking=False,
     ):
         self.client = client
@@ -82,18 +88,20 @@ class BoundedSubcalls:
         self.count_tokens = count_tokens
         self.records = records
         self.timeout_s = timeout_s
+        self.max_calls = max_calls
         self.enable_thinking = enable_thinking
-        self.used = False
+        self.calls_used = 0
 
     async def query(self, prompt, state=None):
-        if self.used:
-            raise ValueError("Subcall budget exhausted: one child call per trajectory")
+        if self.calls_used >= self.max_calls:
+            raise ValueError("Subcall budget exhausted for this trajectory")
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("Subcall prompt must be a non-empty string")
         if len(prompt.encode("utf-8")) > 32768 or self.count_tokens(prompt) > 2048:
             raise ValueError("Subcall prompt exceeds the 2,048-token limit; shorten it")
-        self.used = True
+        self.calls_used += 1
         entry = {"prompt": prompt, "model": self.model, "status": "running"}
+        entry["call_index"] = self.calls_used
         self.records.append(entry)
         started = time.monotonic()
         try:
