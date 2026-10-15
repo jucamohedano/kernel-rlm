@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -16,7 +18,22 @@ from typing import Any
 
 from kernel_rlm.feedback_overlap import RESERVE_BYTES, overlap_budget
 from kernel_rlm.gpu_sharing import paused_inference
-from kernel_rlm.verifier_slot import compile_slot, feedback_slot, verifier_slot
+from kernel_rlm.verifier_slot import COMPILE_LOCK_PATH, compile_slot, feedback_slot, verifier_slot
+
+
+def submission_extension_root(submission_code: str) -> Path:
+    root = Path(
+        os.environ.get(
+            "TORCH_EXTENSIONS_DIR", str(Path(tempfile.gettempdir()) / "torch_extensions")
+        )
+    )
+    digest = hashlib.sha256(submission_code.encode()).hexdigest()
+    return root / "kernel_rlm_candidates" / digest
+
+
+def submission_compile_lock(submission_code: str) -> Path:
+    digest = hashlib.sha256(submission_code.encode()).hexdigest()
+    return COMPILE_LOCK_PATH.with_name(f"{COMPILE_LOCK_PATH.name}-{digest}")
 
 
 def _run_verifier_process(
@@ -44,7 +61,9 @@ def _run_verifier_process(
 _RUNNER = textwrap.dedent(
     """
     import importlib.util
+    import hashlib
     import json
+    import os
     import statistics
     import sys
     import time
@@ -55,6 +74,7 @@ _RUNNER = textwrap.dedent(
     import torch.utils.cpp_extension
 
     status_path = Path(sys.argv[-2])
+    extension_root = Path(os.environ.get("KERNEL_RLM_EXTENSION_BUILD_ROOT", "/tmp/kernel-rlm-extensions"))
     guard = json.loads(sys.argv[7]) if len(sys.argv) > 9 else {}
     phase_events = []
 
@@ -163,6 +183,15 @@ _RUNNER = textwrap.dedent(
 
     def tracked_load_inline(*args, **kwargs):
         mark_phase("extension_compile")
+        extension_name = kwargs.get("name", args[0] if args else "anonymous")
+        build_options = {
+            key: value for key, value in kwargs.items() if key not in {"build_directory", "verbose"}
+        }
+        build_identity = repr((extension_name, args, build_options))
+        module_digest = hashlib.sha256(build_identity.encode()).hexdigest()
+        build_directory = extension_root / module_digest
+        build_directory.mkdir(parents=True, exist_ok=True)
+        kwargs["build_directory"] = str(build_directory)
         module = original_load_inline(*args, **kwargs)
         extension_builds.append(getattr(module, "__name__", "anonymous"))
         return TrackedExtension(module)
@@ -339,6 +368,7 @@ def verify_cuda(
         reference_path.write_text(reference_code, encoding="utf-8")
         submission_path.write_text(submission_code, encoding="utf-8")
         runner_path.write_text(_RUNNER, encoding="utf-8")
+        extension_root = submission_extension_root(submission_code)
         command_prefix = [
             python,
             str(runner_path),
@@ -349,6 +379,7 @@ def verify_cuda(
             repr(float(rtol)),
         ]
         compile_budget = min(90.0, timeout_s * 0.75)
+        compiler_lock = submission_compile_lock(submission_code)
         compile_queue_started = time.monotonic()
         compile_command = [
             *command_prefix,
@@ -357,15 +388,24 @@ def verify_cuda(
             "compile",
         ]
         try:
-            with compile_slot(compile_budget) as compile_remaining:
+            with compile_slot(compile_budget, path=compiler_lock) as compile_remaining:
                 timings["compile_queue_wait_seconds"] = time.monotonic() - compile_queue_started
                 compile_started = time.monotonic()
-                compile_process = _run_verifier_process(
-                    compile_command,
-                    timeout_s=compile_remaining,
-                    cwd=cwd,
-                    env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
-                )
+                compile_environment = {
+                    **os.environ,
+                    "CUDA_VISIBLE_DEVICES": "",
+                    "KERNEL_RLM_EXTENSION_BUILD_ROOT": str(extension_root),
+                }
+                try:
+                    compile_process = _run_verifier_process(
+                        compile_command,
+                        timeout_s=compile_remaining,
+                        cwd=cwd,
+                        env=compile_environment,
+                    )
+                except (subprocess.TimeoutExpired, TimeoutError):
+                    shutil.rmtree(extension_root, ignore_errors=True)
+                    raise
                 timings["compile_elapsed_seconds"] = time.monotonic() - compile_started
         except (subprocess.TimeoutExpired, TimeoutError) as error:
             phase_details = _read_phase(compile_status_path)
@@ -438,7 +478,10 @@ def verify_cuda(
                 remaining_total = timeout_s - (time.monotonic() - verification_started)
                 slot = feedback_slot if overlap else verifier_slot
                 queue_started = time.monotonic()
-                with slot(remaining_total) as remaining:
+                with (
+                    slot(remaining_total) as remaining,
+                    compile_slot(remaining_total, path=compiler_lock) as _compile_remaining,
+                ):
                     timings["verifier_queue_wait_seconds"] = (
                         timings.get("verifier_queue_wait_seconds", 0.0)
                         + time.monotonic()
@@ -466,9 +509,16 @@ def verify_cuda(
                                     run_command,
                                     timeout_s=execution_budget,
                                     cwd=cwd,
-                                    env={**os.environ, "CUDA_VISIBLE_DEVICES": "0"}
+                                    env={
+                                        **os.environ,
+                                        "CUDA_VISIBLE_DEVICES": "0",
+                                        "KERNEL_RLM_EXTENSION_BUILD_ROOT": str(extension_root),
+                                    }
                                     if shared_gpu
-                                    else None,
+                                    else {
+                                        **os.environ,
+                                        "KERNEL_RLM_EXTENSION_BUILD_ROOT": str(extension_root),
+                                    },
                                 )
                             finally:
                                 timings["runner_elapsed_seconds"] = (

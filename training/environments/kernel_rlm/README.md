@@ -317,6 +317,36 @@ rates, that bounds requested compute near $3.87 including the separate 2-minute
 startup allowance; image-build and other application overhead can add to the
 final bill. A timeout before step 1 completes may leave no checkpoint.
 
+The 15 October pilot (`20261015T153814Z-5ed78d4e`) was interrupted before its
+first optimizer update. Seven episode records were saved: six rewards were 0,
+one was 0.1, and the initial MaxPool3D group `[0, 0, 0, 0]` was rejected for zero
+variance. Prime's last log showed batch `0/4` with three groups buffered. No
+trainer checkpoint was written. Modal reported `ConflictError: workspace disabled`
+and the API did not explain why. It has no active tasks; the logs remain available
+locally under `logs/live-grpo/20261015T153814Z-5ed78d4e`.
+
+The run recorded 12 feedback calls: nine compiler timeouts, two missing shared
+extension `.so` imports, and one correctness pass. Different submissions used the
+same extension build directory. Build directories and compiler locks are now
+isolated by Python source; focused CPU tests pass. This cache fix has not yet had
+a live GPU check. Modal returned `ConflictError: workspace disabled` while
+recovering the preempted worker and stopped all tasks; it did not report why. The
+partial metrics contain 161 rows but no non-null optimizer step, loss, or reward.
+
+Twelve feedback calls produced nine extension compile timeouts, two failures to
+load `kernel_rlm_candidate.so`, and one passing correctness check. Compile queue
+waits and a common extension name/default cache contributed. Feedback compilation
+now locks by candidate source, and each `load_inline` build receives a directory
+derived from its actual module name, C++/CUDA sources, and flags. The disabled
+workspace prevented another Modal validation of this change. The saved error
+sidecars, seven episode traces, metrics, W&B files, and GPU samples remain under
+`logs/live-grpo/20261015T153814Z-5ed78d4e`.
+
+Several MaxPool3D episodes used all six turns and still ended truncated or with
+an execution error. One Conv2d attempt submitted but did not pass final checking.
+The successful frozen vector-add pilot therefore did not establish that this
+curriculum group fits the current context and feedback budgets.
+
 ### CPU-tested rollout contracts
 
 The V1 loop accepts fenced REPL blocks or structured `repl` calls. When both
@@ -468,8 +498,10 @@ model compliance. Thinking remains disabled pending a separate validation.
 
 ### Verifier concurrency guard
 
-Extension compilation uses a separate CPU lock and runs with CUDA devices hidden.
-It does not block inference. Model requests use shared admission; final scoring
+Extension compilation uses a per-candidate CPU lock and runs with CUDA devices
+hidden. Different submissions compile independently; each C++/CUDA source pair
+uses an isolated build directory. Compilation does not block inference. Model
+requests use shared admission; final scoring
 and weight updates take exclusive admission. Qualified intermediate feedback also
 uses shared admission, with a separate mutex allowing one feedback verifier at a
 time. Queue waiting and execution share the existing timeout; a queue timeout does

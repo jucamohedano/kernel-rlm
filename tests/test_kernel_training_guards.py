@@ -59,15 +59,20 @@ def test_actual_reward_includes_speed_for_correct_kernels():
 
 def test_launch_deadlines_and_no_retry():
     tree = ast.parse((ROOT / "modal_app/grpo_live_smoke.py").read_text())
-    train = next(
-        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "train"
-    )
-    options = {
-        item.arg: ast.literal_eval(item.value)
-        for item in train.decorator_list[0].keywords
-        if item.arg in {"timeout", "startup_timeout", "retries"}
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    def options(function):
+        return {
+            item.arg: ast.literal_eval(item.value)
+            for item in function.decorator_list[0].keywords
+            if item.arg in {"timeout", "startup_timeout", "retries"}
+        }
+    assert options(functions["train"]) == {"timeout": 3450, "startup_timeout": 120, "retries": 0}
+    assert options(functions["train_pilot"]) == {
+        "timeout": 1380,
+        "startup_timeout": 120,
+        "retries": 0,
     }
-    assert options == {"timeout": 3450, "startup_timeout": 120, "retries": 0}
+    train = functions["_train"]
     waits = [
         ast.literal_eval(keyword.value)
         for node in ast.walk(train)
@@ -78,8 +83,12 @@ def test_launch_deadlines_and_no_retry():
         if keyword.arg == "timeout"
     ]
     assert waits == [30, 10]
-    assert sum(waits) < options["timeout"]
-    assert options["timeout"] + options["startup_timeout"] < 3600
+    assert sum(waits) < options(functions["train"])["timeout"]
+    assert (
+        options(functions["train_pilot"])["timeout"]
+        + options(functions["train_pilot"])["startup_timeout"]
+        < 1800
+    )
 
 
 def test_kernel_loop_requests_thinking_without_replaying_reasoning():
@@ -93,12 +102,12 @@ def test_kernel_loop_requests_thinking_without_replaying_reasoning():
 
 
 @pytest.mark.parametrize("outcome", ["success", "failure", "terminate", "kill"])
-def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome):
+@pytest.mark.parametrize("pilot", [False, True])
+def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome, pilot):
     tree = ast.parse((ROOT / "modal_app/grpo_live_smoke.py").read_text())
     train = next(
-        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "train"
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_train"
     )
-    train.decorator_list = []
     process = Mock(pid=123)
     timeout = subprocess.TimeoutExpired("prime", 3300)
     process.wait.side_effect = {
@@ -132,17 +141,18 @@ def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome):
         "REVISION": "test-revision",
         "PRIME_REVISION": "test-prime",
         "CONFIG": "test-config",
+        "PILOT_CONFIG": "pilot-config",
     }
     exec(compile(ast.Module(body=[train], type_ignores=[]), "launch-test", "exec"), namespace)
     if outcome == "success":
-        namespace["train"]("test-run")
+        namespace["_train"]("test-run", pilot, 1200 if pilot else 3300, 1380 if pilot else 3450)
     else:
         with pytest.raises(RuntimeError):
-            namespace["train"]("test-run")
+            namespace["_train"]("test-run", pilot, 1200 if pilot else 3300, 1380 if pilot else 3450)
     report = json.loads((tmp_path / "traces/live-grpo/test-run/report.json").read_text())
     assert report["gpu_stats_path"].endswith("gpu_stats.jsonl")
     gpu_monitor.assert_called_once()
-    assert gpu_monitor.call_args.kwargs["timeout_s"] == 3300
+    assert gpu_monitor.call_args.kwargs["timeout_s"] == (1200 if pilot else 3300)
     assert (
         report["status"]
         == {

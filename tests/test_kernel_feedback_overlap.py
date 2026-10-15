@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import hashlib
 import io
 import json
 import sys
@@ -46,6 +47,76 @@ def test_only_measured_references_and_supported_allocations_overlap(modules, sou
     rows = [json.loads(line) for line in curriculum.read_text().splitlines()]
     softplus = next(row for row in rows if row["_task_id"] == "lvl1-seed42-0011")
     assert modules.policy.overlap_budget(softplus["code"], candidate)[0] == 4 * 1024**3
+
+
+def test_submission_compilation_caches_are_source_isolated(modules, monkeypatch, tmp_path):
+    monkeypatch.setenv("TORCH_EXTENSIONS_DIR", str(tmp_path))
+    first = modules.verifier.submission_extension_root("source one")
+    repeated = modules.verifier.submission_extension_root("source one")
+    second = modules.verifier.submission_extension_root("source two")
+    assert first == repeated
+    assert first != second
+
+
+def test_runner_assigns_distinct_build_directories_for_same_extension_name(
+    modules, monkeypatch, tmp_path
+):
+    from kernel_rlm.verifier import _RUNNER
+
+    torch = ModuleType("torch")
+    utils = ModuleType("torch.utils")
+    extension = ModuleType("torch.utils.cpp_extension")
+    utils.cpp_extension = extension
+    torch.utils = utils
+    build_directories = []
+
+    def load_inline(*args, **kwargs):
+        build_directories.append(Path(kwargs["build_directory"]))
+        return SimpleNamespace()
+
+    extension.load_inline = load_inline
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setitem(sys.modules, "torch.utils", utils)
+    monkeypatch.setitem(sys.modules, "torch.utils.cpp_extension", extension)
+    monkeypatch.setenv("KERNEL_RLM_EXTENSION_BUILD_ROOT", str(tmp_path / "extensions"))
+    reference = tmp_path / "reference.py"
+    reference.write_text("reference")
+    outputs = []
+    for code in ("one", "two", "one"):
+        submission = tmp_path / f"submission-{code}.py"
+        submission.write_text(
+            "import torch.utils.cpp_extension\n"
+            "CPP_SOURCE='cpp'\n"
+            f"CUDA_SOURCE={code!r}\n"
+            "module=torch.utils.cpp_extension.load_inline("
+            "name='kernel_rlm_candidate', cpp_sources=CPP_SOURCE, cuda_sources=CUDA_SOURCE)\n"
+        )
+        source_hash = hashlib.sha256(submission.read_bytes()).hexdigest()
+        monkeypatch.setenv(
+            "KERNEL_RLM_EXTENSION_BUILD_ROOT", str(tmp_path / "extensions" / source_hash)
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "runner",
+                str(reference),
+                str(submission),
+                "1",
+                "0.001",
+                "0.0001",
+                "0",
+                str(tmp_path / f"{code}.json"),
+                "compile",
+            ],
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), pytest.raises(SystemExit):
+            exec(compile(_RUNNER, "runner", "exec"), {})
+        outputs.append(json.loads(output.getvalue().splitlines()[-1])["compiled"])
+    assert outputs == [True, True, True]
+    assert build_directories[0] == build_directories[2]
+    assert build_directories[0] != build_directories[1]
 
 
 def test_feedback_shares_inference_but_serializes_verification_and_reload(
