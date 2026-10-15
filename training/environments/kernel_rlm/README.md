@@ -300,6 +300,23 @@ manifest path resolves to `/root/kernel_rlm/tasks/vector_add.jsonl` in that
 image. The renderer ID is the registered `laguna-xs.2` variant, not the
 human-readable checkpoint spelling.
 
+### One-step budget pilot
+
+`configs/grpo_pilot.toml` keeps the first-level 50-task curriculum, four-rollout
+GRPO group, Muon, and rank-8 attention LoRA. It limits training to one optimizer
+step, saves a checkpoint every step, and allows six turns. Six turns matches the
+longest recent successful vector-add trajectory; the preceding training setting
+allowed five. The sequence limit remains 8,192 tokens.
+
+Run `../../../.venv/bin/modal run -m modal_app.grpo_live_smoke --dry --pilot`
+to validate the exact pilot config without a GPU. Run
+`../../../.venv/bin/modal run -m modal_app.grpo_live_smoke --pilot` to launch it.
+The pilot's dedicated Modal function has a 20-minute training timeout, a 23-minute
+function timeout, and no retries. At the published three-A100, 16-core, 128-GiB
+rates, that bounds requested compute near $3.87 including the separate 2-minute
+startup allowance; image-build and other application overhead can add to the
+final bill. A timeout before step 1 completes may leave no checkpoint.
+
 ### CPU-tested rollout contracts
 
 The V1 loop accepts fenced REPL blocks or structured `repl` calls. When both

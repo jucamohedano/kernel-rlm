@@ -31,6 +31,7 @@ RLM_TRAIN_SOURCE = (
     else Path("/root/rlm_train")
 )
 CONFIG = APP_ROOT / "configs" / "grpo_level1.toml"
+PILOT_CONFIG = APP_ROOT / "configs" / "grpo_pilot.toml"
 CURRICULUM_LEVEL1 = PROJECT_ROOT / "notes" / "curriculum" / "lvl1_seed42.jsonl"
 
 
@@ -155,32 +156,20 @@ live_image = (
 app = modal.App("kernel-rlm-grpo-live-smoke")
 
 
-@app.function(
-    image=live_image,
-    secrets=[modal.Secret.from_name("wandb-secret")],
-    volumes={"/models": models, "/traces": traces},
-    gpu="A100-80GB:3",
-    cpu=16,
-    memory=131072,
-    timeout=3450,
-    startup_timeout=120,
-    retries=0,
-    max_containers=1,
-    scaledown_window=2,
-)
-def train(run_id: str) -> dict[str, object]:
+def _train(run_id: str, pilot: bool, training_timeout: int, modal_timeout: int) -> dict[str, object]:
     os.environ["KERNEL_INFERENCE_ADMIN_URL"] = "http://127.0.0.1:8100"
     output_dir = Path("/traces/live-grpo") / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
     os.environ["KERNEL_FEEDBACK_LOG_DIR"] = str(output_dir / "feedback")
     patch_prime_laguna_config()
+    config_path = "/root/configs/grpo_pilot.toml" if pilot else "/root/configs/grpo_level1.toml"
     command = [
         "python",
         "-u",
         "-m",
         "prime_rl.entrypoints.rl",
         "@",
-        "/root/configs/grpo_level1.toml",
+        config_path,
         "--run.name",
         run_id,
         "--output-dir",
@@ -196,7 +185,7 @@ def train(run_id: str) -> dict[str, object]:
         cwd="/root",
         start_new_session=True,
     )
-    monitor = wait_with_gpu_sampling(process, gpu_stats_path, timeout_s=3300)
+    monitor = wait_with_gpu_sampling(process, gpu_stats_path, timeout_s=training_timeout)
     timed_out = bool(monitor["timed_out"])
     returncode = monitor["returncode"]
     if timed_out:
@@ -214,16 +203,17 @@ def train(run_id: str) -> dict[str, object]:
             returncode = process.wait(timeout=10)
     report = {
         "status": "budget_timeout" if timed_out else ("passed" if returncode == 0 else "failed"),
-        "training_timeout_seconds": 3300,
-        "modal_timeout_seconds": 3450,
+        "training_timeout_seconds": training_timeout,
+        "modal_timeout_seconds": modal_timeout,
         "startup_timeout_seconds": 120,
-        "total_wall_clock_cap_seconds": 3570,
+        "total_wall_clock_cap_seconds": modal_timeout + 120,
         "run_id": run_id,
         "model_id": MODEL_ID,
         "model_revision": REVISION,
         "prime_revision": PRIME_REVISION,
         "gpu_topology": "1 inference A100 + 2 trainer A100s",
-        "config": str(CONFIG),
+        "pilot": pilot,
+        "config": str(PILOT_CONFIG if pilot else CONFIG),
         "command": command,
         "returncode": returncode,
         "log_path": str(log_path),
@@ -239,6 +229,40 @@ def train(run_id: str) -> dict[str, object]:
 
 @app.function(
     image=live_image,
+    secrets=[modal.Secret.from_name("wandb-secret")],
+    volumes={"/models": models, "/traces": traces},
+    gpu="A100-80GB:3",
+    cpu=16,
+    memory=131072,
+    timeout=3450,
+    startup_timeout=120,
+    retries=0,
+    max_containers=1,
+    scaledown_window=2,
+)
+def train(run_id: str) -> dict[str, object]:
+    return _train(run_id, pilot=False, training_timeout=3300, modal_timeout=3450)
+
+
+@app.function(
+    image=live_image,
+    secrets=[modal.Secret.from_name("wandb-secret")],
+    volumes={"/models": models, "/traces": traces},
+    gpu="A100-80GB:3",
+    cpu=16,
+    memory=131072,
+    timeout=1380,
+    startup_timeout=120,
+    retries=0,
+    max_containers=1,
+    scaledown_window=2,
+)
+def train_pilot(run_id: str) -> dict[str, object]:
+    return _train(run_id, pilot=True, training_timeout=1200, modal_timeout=1380)
+
+
+@app.function(
+    image=live_image,
     volumes={"/traces": traces},
     cpu=8,
     memory=32768,
@@ -247,16 +271,17 @@ def train(run_id: str) -> dict[str, object]:
     retries=0,
     max_containers=1,
 )
-def dry_run(run_id: str) -> dict[str, object]:
+def dry_run(run_id: str, pilot: bool = False) -> dict[str, object]:
     output_dir = Path("/traces/live-grpo") / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
     patch_prime_laguna_config()
+    config_path = "/root/configs/grpo_pilot.toml" if pilot else "/root/configs/grpo_level1.toml"
     command = [
         "python",
         "-m",
         "prime_rl.entrypoints.rl",
         "@",
-        "/root/configs/grpo_level1.toml",
+        config_path,
         "--run.name",
         run_id,
         "--output-dir",
@@ -269,7 +294,8 @@ def dry_run(run_id: str) -> dict[str, object]:
     report = {
         "status": "passed" if result.returncode == 0 else "failed",
         "run_id": run_id,
-        "config": str(CONFIG),
+        "pilot": pilot,
+        "config": str(PILOT_CONFIG if pilot else CONFIG),
         "command": command,
         "returncode": result.returncode,
         "stdout": result.stdout,
@@ -283,7 +309,13 @@ def dry_run(run_id: str) -> dict[str, object]:
 
 
 @app.local_entrypoint()
-def main(dry: bool = False) -> None:
+def main(dry: bool = False, pilot: bool = False) -> None:
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
-    result = dry_run.remote(run_id) if dry else train.remote(run_id)
+    result = (
+        dry_run.remote(run_id, pilot)
+        if dry
+        else train_pilot.remote(run_id)
+        if pilot
+        else train.remote(run_id)
+    )
     print(json.dumps(result, indent=2))
