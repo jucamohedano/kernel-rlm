@@ -15,8 +15,28 @@ samples are saved under `verifier-replay/<run-id>` in the trace volume.
 
 The one-step pilot uses a 12,288-token context for both inference and training.
 The previous 8,192-token context filled before several final submissions.
-The response limit remains 2,048 tokens, with six turns and four rollouts per
-group. One successful update must produce a checkpoint before a longer run.
+The response limit remains 2,048 tokens, with four rollouts per group. Submit by
+turn six; warnings start on turn four. The hard limit is eight turns, with the
+last two reserved for submission recovery. Recovery replies are capped at 512
+tokens and admitted only when the previous usage plus tokenizer-counted new
+messages and 256 framing tokens leaves at least 128 output tokens. The tokenizer
+is loaded from the existing model cache, not downloaded for recovery.
+Missing usage skips recovery. The context stays at 12,288 tokens; extra turns
+do not increase the context limit, inference memory reservation, or launch
+timeout. They can add latency and training work.
+
+Recovery code may only assign the stored source to `answer` and mark it ready.
+It cannot request feedback, delegate, import, or rebuild source. The V1 loop also
+rejects common direct `load_inline`/extension-loading calls, including imported
+aliases, before executing a REPL block. Candidate source strings remain allowed;
+compile them through `cuda_feedback`. This action guard is not a security sandbox.
+Trace info includes `kernel_recovery` and `kernel_action_rejections` so skipped
+recovery and blocked actions can be inspected. These changes have CPU tests;
+their new policy behavior still needs a live probe.
+
+The longer-run config now matches the tested 12,288-token pilot context. Its
+checkpoint schedule and full resume still need review before a longer launch.
+One successful update must produce a checkpoint before a longer run.
 
 After a pilot, use `modal run -m modal_app.grpo_live_smoke --checkpoint-run <run-id>`
 for a CPU-only durability check. It reads step progress and one initially-zero

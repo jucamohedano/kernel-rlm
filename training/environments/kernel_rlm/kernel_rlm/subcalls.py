@@ -4,6 +4,7 @@ import asyncio
 import os
 import time
 
+from kernel_rlm.actions import SUBMISSION_TURN
 from kernel_rlm.thinking import visible_response
 from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_request_slot
 
@@ -50,27 +51,46 @@ KERNEL_SYSTEM = (
     "correctness feedback. The REPL disables exec, eval, and compile; use ast.parse "
     "for syntax checks. Submit with answer['content'] = source and answer['ready'] = True "
     "inside the REPL. Do not submit just a variable name or prose. "
-    "Preserve the best source and reserve the final turn for submission."
+    "Preserve the best source and submit by turn six at the latest, or sooner if the "
+    "run has fewer turns. Keep the submission action short and reuse the stored source. "
+    "Any additional turns are for submission recovery, not more kernel development."
 )
 
 
-def turn_budget(
-    turn, max_turns, feedback_used, child_calls_used, enabled, max_child_calls=1
-):
+def turn_budget(turn, max_turns, feedback_used, child_calls_used, enabled, max_child_calls=1):
     remaining = max(0, 2 - feedback_used)
     child_calls_remaining = max(0, max_child_calls - child_calls_used) if enabled else 0
+    deadline = min(SUBMISSION_TURN, max_turns)
+    current = turn + 1
+    if current >= deadline:
+        remaining = 0
+        child_calls_remaining = 0
     message = (
-        f"\nTurn {turn + 1}/{max_turns}. Feedback calls remaining: {remaining}. "
-        f"Child calls remaining: {child_calls_remaining}."
+        f"\nTurn {current}/{max_turns}. Submit by turn {deadline} at the latest. "
+        f"Feedback calls remaining: {remaining}. Child calls remaining: {child_calls_remaining}."
     )
     if remaining == 0:
         message += " Do not call cuda_feedback again."
-    if turn + 1 == max_turns:
+    if current == deadline - 2:
+        message += " Only two turns remain before submission is due. Store your best source now."
+    if current == deadline - 1:
         message += (
-            " FINAL TURN: make any final repair and submit your best complete source now "
-            "with answer['content'] = source; answer['ready'] = True. "
-            "Do not request more feedback or delegation."
+            " NEXT TURN is the submission deadline. Reuse the stored source; avoid a full rewrite."
         )
+    if current == deadline:
+        message += (
+            " SUBMISSION DEADLINE: submit your best stored complete source now with "
+            "answer['content'] = source; answer['ready'] = True. "
+            "Do not request more feedback or delegation. Do not just print the source."
+        )
+    if current > deadline:
+        message += (
+            " RECOVERY ONLY: make a short submission using an existing source variable. "
+            "Only answer assignments are allowed; no imports, feedback, delegation, "
+            "or rebuilding the kernel."
+        )
+    if current == max_turns:
+        message += " FINAL TURN: set answer['content'] = source and answer['ready'] = True now."
     return message
 
 

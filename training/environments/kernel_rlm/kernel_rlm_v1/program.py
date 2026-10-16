@@ -14,6 +14,10 @@ from kernel_rlm.actions import (
     FEEDBACK_TIMEOUT_S,
     REPL_TIMEOUT_S,
     REPL_TOOL,
+    SUBMISSION_TURN,
+    load_token_counter,
+    preparation_error,
+    recovery_budget,
     repl_actions,
 )
 from kernel_rlm.feedback import build_local_feedback_bootstrap
@@ -35,6 +39,7 @@ from rlm.utils.prompts import (
 )
 
 from rlm_train.proxy import ClientHandle, SubLLMProxy
+from rlm_train.repl.base import ExecResult
 from rlm_train.repl.subprocess import SubprocessReplBackend
 
 
@@ -47,9 +52,7 @@ async def run(task: dict) -> None:
         timeout=limits.get("model_timeout_s", 150),
     )
     max_child_calls = int(limits.get("max_subcalls", 1))
-    subcall_timeout = (
-        SUBCALL_TIMEOUT_S * max_child_calls if limits.get("enable_subcall") else 0
-    )
+    subcall_timeout = SUBCALL_TIMEOUT_S * max_child_calls if limits.get("enable_subcall") else 0
     subcall_instruction = SUBCALL_INSTRUCTION.format(max_calls=max_child_calls)
     backend = SubprocessReplBackend(request_timeout=BACKEND_TIMEOUT_S + subcall_timeout)
     proxy = None
@@ -79,7 +82,13 @@ async def run(task: dict) -> None:
         "termination_reason": "turn_limit",
         "model_calls": [],
         "subcalls": [],
+        "recovery": [],
+        "action_rejections": [],
     }
+    last_usage = {}
+    last_usage_message_count = 0
+    compiler_names = {"load_inline"}
+    count_tokens = None
     feedback_log_path = None
     feedback_log_dir = os.environ.get("KERNEL_FEEDBACK_LOG_DIR")
     if feedback_log_dir:
@@ -90,15 +99,11 @@ async def run(task: dict) -> None:
         os.environ["RLM_TRAIN_READONLY_CONTEXT"] = "1"
         proxy_url = "http://127.0.0.1:1"
         if limits.get("enable_subcall"):
-            from transformers import AutoTokenizer
-
-            tokenizer = AutoTokenizer.from_pretrained(
-                os.environ["KERNEL_MODEL"], local_files_only=True
-            )
+            count_tokens = load_token_counter(os.environ["KERNEL_MODEL"])
             subcalls = BoundedSubcalls(
                 client,
                 os.environ["KERNEL_MODEL"],
-                lambda prompt: len(tokenizer.encode(prompt, add_special_tokens=False)),
+                count_tokens,
                 record["subcalls"],
                 max_calls=max_child_calls,
                 enable_thinking=bool(limits.get("enable_thinking")),
@@ -148,10 +153,49 @@ async def run(task: dict) -> None:
                 messages[-1]["content"] += "\n\n" + turn_prompt["content"]
             else:
                 messages.append(turn_prompt)
+            recovery = turn >= SUBMISSION_TURN
+            requested_tokens = limits["max_tokens"]
+            if recovery:
+                if count_tokens is None:
+                    count_tokens = load_token_counter(os.environ["KERNEL_MODEL"])
+                requested_tokens, estimated_prompt = recovery_budget(
+                    last_usage,
+                    messages[last_usage_message_count:],
+                    limits.get("max_context_tokens", 8192),
+                    limits["max_tokens"],
+                    count_tokens,
+                )
+                record["recovery"].append(
+                    {
+                        "turn": turn + 1,
+                        "status": "admitted" if requested_tokens else "skipped",
+                        "estimated_prompt_tokens": estimated_prompt,
+                        "max_tokens": requested_tokens,
+                        "reason": "missing_usage"
+                        if estimated_prompt is None
+                        else "headroom_available"
+                        if requested_tokens
+                        else "insufficient_context",
+                    }
+                )
+                if not requested_tokens:
+                    record["termination_reason"] = (
+                        "recovery_no_headroom"
+                        if estimated_prompt is not None
+                        else "recovery_usage_unavailable"
+                    )
+                    break
+            phase = (
+                "recovery"
+                if recovery
+                else "submission"
+                if turn + 1 == min(SUBMISSION_TURN, limits["max_turns"])
+                else "iteration"
+            )
             request_args = {
                 "model": os.environ["KERNEL_MODEL"],
                 "messages": messages,
-                "max_tokens": limits["max_tokens"],
+                "max_tokens": requested_tokens,
                 "tools": [REPL_TOOL],
                 "tool_choice": "auto",
             }
@@ -175,6 +219,8 @@ async def run(task: dict) -> None:
                 record["model_calls"].append(
                     {
                         "turn": turn + 1,
+                        "phase": phase,
+                        "requested_max_tokens": requested_tokens,
                         "status": "admission_timeout"
                         if request_started is None and isinstance(error, TimeoutError)
                         else "timeout"
@@ -233,10 +279,14 @@ async def run(task: dict) -> None:
                 assistant_message["tool_calls"] = repl_calls
             messages.append(assistant_message)
             usage = response.usage.model_dump() if getattr(response, "usage", None) else {}
+            last_usage = usage
+            last_usage_message_count = len(messages)
             completion_details = usage.get("completion_tokens_details") or {}
             record["model_calls"].append(
                 {
                     "turn": turn + 1,
+                    "phase": phase,
+                    "requested_max_tokens": requested_tokens,
                     "status": "ok",
                     "elapsed_seconds": time.monotonic() - request_started,
                     "request_admission_wait_seconds": admission_wait,
@@ -250,7 +300,12 @@ async def run(task: dict) -> None:
             )
             record["turns"] += 1
             for code_index, code in enumerate(codes):
-                result = await backend.execute(code)
+                rejection = preparation_error(code, compiler_names, recovery=recovery)
+                if rejection:
+                    record["action_rejections"].append({"turn": turn + 1, "error": rejection})
+                    result = ExecResult(stderr=rejection)
+                else:
+                    result = await backend.execute(code)
                 record["repl_calls"] += 1
                 observation = "REPL output:\n" + (result.stdout + result.stderr)[:20000]
                 for line in result.stdout.splitlines():
@@ -277,7 +332,11 @@ async def run(task: dict) -> None:
             if record["submission"]:
                 record["termination_reason"] = "submitted"
                 break
-        if not record["submission"] and record["model_calls"][-1]["finish_reason"] == "length":
+        if (
+            not record["submission"]
+            and record["termination_reason"] == "turn_limit"
+            and record["model_calls"][-1]["finish_reason"] == "length"
+        ):
             record["termination_reason"] = "truncated"
     except Exception as error:
         record["termination_reason"] = "error"
