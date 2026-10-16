@@ -60,12 +60,14 @@ def test_actual_reward_includes_speed_for_correct_kernels():
 def test_launch_deadlines_and_no_retry():
     tree = ast.parse((ROOT / "modal_app/grpo_live_smoke.py").read_text())
     functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+
     def options(function):
         return {
             item.arg: ast.literal_eval(item.value)
             for item in function.decorator_list[0].keywords
             if item.arg in {"timeout", "startup_timeout", "retries"}
         }
+
     assert options(functions["train"]) == {"timeout": 3450, "startup_timeout": 120, "retries": 0}
     assert options(functions["train_pilot"]) == {
         "timeout": 1380,
@@ -103,7 +105,8 @@ def test_kernel_loop_requests_thinking_without_replaying_reasoning():
 
 @pytest.mark.parametrize("outcome", ["success", "failure", "terminate", "kill"])
 @pytest.mark.parametrize("pilot", [False, True])
-def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome, pilot):
+@pytest.mark.parametrize("resume_run", ["", "previous-run"])
+def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome, pilot, resume_run):
     tree = ast.parse((ROOT / "modal_app/grpo_live_smoke.py").read_text())
     train = next(
         node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_train"
@@ -145,12 +148,24 @@ def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome, pi
     }
     exec(compile(ast.Module(body=[train], type_ignores=[]), "launch-test", "exec"), namespace)
     if outcome == "success":
-        namespace["_train"]("test-run", pilot, 1200 if pilot else 3300, 1380 if pilot else 3450)
+        namespace["_train"](
+            "test-run", pilot, 1200 if pilot else 3300, 1380 if pilot else 3450, resume_run
+        )
     else:
         with pytest.raises(RuntimeError):
-            namespace["_train"]("test-run", pilot, 1200 if pilot else 3300, 1380 if pilot else 3450)
+            namespace["_train"](
+                "test-run", pilot, 1200 if pilot else 3300, 1380 if pilot else 3450, resume_run
+            )
     report = json.loads((tmp_path / "traces/live-grpo/test-run/report.json").read_text())
     assert report["gpu_stats_path"].endswith("gpu_stats.jsonl")
+    assert ("--clean" in report["command"]) is not bool(resume_run)
+    if resume_run:
+        assert report["command"][-4:] == [
+            "--resume.dir",
+            "/traces/outputs/previous-run/checkpoints/step_1",
+            "--max-steps",
+            "2",
+        ]
     gpu_monitor.assert_called_once()
     assert gpu_monitor.call_args.kwargs["timeout_s"] == (1200 if pilot else 3300)
     assert (

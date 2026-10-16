@@ -14,6 +14,10 @@ from uuid import uuid4
 import modal
 
 from .attention_lora import MODEL_ID, PRIME_REVISION, REVISION, models
+from .compact_checkpoint import (
+    check_compact_checkpoint_roundtrip,
+    patch_compact_lora_checkpoints,
+)
 from .gpu_telemetry import wait_with_gpu_sampling
 from .native_lora_smoke import PRIME_SOURCE
 from .rollout_smoke import traces
@@ -154,12 +158,23 @@ live_image = (
         }
     )
     .run_function(patch_verifiers_sampling_caps)
+    .run_function(patch_compact_lora_checkpoints)
 )
 app = modal.App("kernel-rlm-grpo-live-smoke")
 
 
+@app.function(image=live_image, cpu=2, memory=8192, timeout=180, retries=0)
+def checkpoint_preflight() -> dict:
+    return check_compact_checkpoint_roundtrip()
+
+
 def _train(
-    run_id: str, pilot: bool, training_timeout: int, modal_timeout: int
+    run_id: str,
+    pilot: bool,
+    training_timeout: int,
+    modal_timeout: int,
+    resume_run: str = "",
+    resume_step: int = 1,
 ) -> dict[str, object]:
     os.environ["KERNEL_INFERENCE_ADMIN_URL"] = "http://127.0.0.1:8100"
     output_dir = Path("/traces/live-grpo") / run_id
@@ -178,9 +193,19 @@ def _train(
         run_id,
         "--output-dir",
         "/traces/outputs",
-        "--clean",
         "--no-dashboard",
     ]
+    if resume_run:
+        command.extend(
+            [
+                "--resume.dir",
+                f"/traces/outputs/{resume_run}/checkpoints/step_{resume_step}",
+                "--max-steps",
+                str(resume_step + 1),
+            ]
+        )
+    else:
+        command.append("--clean")
     log_path = output_dir / "prime.log"
     gpu_stats_path = output_dir / "gpu_stats.jsonl"
     pipeline = f"{shlex.join(command)} 2>&1 | tee {shlex.quote(str(log_path))}"
@@ -217,6 +242,9 @@ def _train(
         "prime_revision": PRIME_REVISION,
         "gpu_topology": "1 inference A100 + 2 trainer A100s",
         "pilot": pilot,
+        "resumed_from": resume_run or None,
+        "resume_step": resume_step if resume_run else None,
+        "checkpoint_format": "LoRA and optimizer DCP; frozen base parameters excluded",
         "config": str(PILOT_CONFIG if pilot else CONFIG),
         "command": command,
         "returncode": returncode,
@@ -261,8 +289,15 @@ def train(run_id: str) -> dict[str, object]:
     max_containers=1,
     scaledown_window=2,
 )
-def train_pilot(run_id: str) -> dict[str, object]:
-    return _train(run_id, pilot=True, training_timeout=1200, modal_timeout=1380)
+def train_pilot(run_id: str, resume_run: str = "", resume_step: int = 1) -> dict[str, object]:
+    return _train(
+        run_id,
+        pilot=True,
+        training_timeout=1200,
+        modal_timeout=1380,
+        resume_run=resume_run,
+        resume_step=resume_step,
+    )
 
 
 @app.function(
@@ -275,7 +310,9 @@ def train_pilot(run_id: str) -> dict[str, object]:
     retries=0,
     max_containers=1,
 )
-def dry_run(run_id: str, pilot: bool = False) -> dict[str, object]:
+def dry_run(
+    run_id: str, pilot: bool = False, resume_run: str = "", resume_step: int = 1
+) -> dict[str, object]:
     output_dir = Path("/traces/live-grpo") / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
     patch_prime_laguna_config()
@@ -290,10 +327,20 @@ def dry_run(run_id: str, pilot: bool = False) -> dict[str, object]:
         run_id,
         "--output-dir",
         "/traces/outputs",
-        "--clean",
         "--no-dashboard",
         "--dry-run",
     ]
+    if resume_run:
+        command.extend(
+            [
+                "--resume.dir",
+                f"/traces/outputs/{resume_run}/checkpoints/step_{resume_step}",
+                "--max-steps",
+                str(resume_step + 1),
+            ]
+        )
+    else:
+        command.append("--clean")
     result = subprocess.run(command, cwd="/root", text=True, capture_output=True, check=False)
     report = {
         "status": "passed" if result.returncode == 0 else "failed",
@@ -320,11 +367,11 @@ def dry_run(run_id: str, pilot: bool = False) -> dict[str, object]:
     timeout=180,
     retries=0,
 )
-def checkpoint_readback(run_id: str) -> dict[str, object]:
+def checkpoint_readback(run_id: str, step: int = 1) -> dict[str, object]:
     import torch
     from torch.distributed.checkpoint import FileSystemReader, load
 
-    path = Path("/traces/outputs") / run_id / "checkpoints/step_1/trainer"
+    path = Path("/traces/outputs") / run_id / f"checkpoints/step_{step}/trainer"
     metadata = FileSystemReader(str(path)).read_metadata()
     keys = list(metadata.state_dict_metadata)
     parameter = next(key for key in keys if key.startswith("app.model.") and "lora_B" in key)
@@ -352,7 +399,7 @@ def checkpoint_readback(run_id: str) -> dict[str, object]:
         "checkpoint_path": str(path.parent),
         "scope": "CPU read-back of progress and one adapter; no full trainer restart",
     }
-    if state["app"]["progress"]["step"] < 1 or not result["adapter_nonzero"]:
+    if state["app"]["progress"]["step"] != step or not result["adapter_nonzero"]:
         raise RuntimeError(f"Checkpoint does not contain a trained adapter: {result}")
     if not result["optimizer_keys"] or not result["scheduler_keys"]:
         raise RuntimeError(f"Checkpoint is missing optimizer or scheduler state: {result}")
@@ -360,9 +407,23 @@ def checkpoint_readback(run_id: str) -> dict[str, object]:
 
 
 @app.local_entrypoint()
-def main(dry: bool = False, pilot: bool = False, checkpoint_run: str = "") -> None:
+def main(
+    dry: bool = False,
+    pilot: bool = False,
+    checkpoint_run: str = "",
+    compact_check: bool = False,
+    resume_run: str = "",
+    checkpoint_step: int = 1,
+) -> None:
+    if checkpoint_step < 1:
+        raise ValueError("checkpoint_step must be positive")
+    if resume_run and not pilot:
+        raise ValueError("Use --pilot when resuming one additional optimizer step")
+    if compact_check:
+        print(json.dumps(checkpoint_preflight.remote(), indent=2))
+        return
     if checkpoint_run:
-        result = checkpoint_readback.remote(checkpoint_run)
+        result = checkpoint_readback.remote(checkpoint_run, checkpoint_step)
         directory = Path("logs/live-grpo") / checkpoint_run
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "checkpoint-check.json").write_text(json.dumps(result, indent=2))
@@ -370,9 +431,9 @@ def main(dry: bool = False, pilot: bool = False, checkpoint_run: str = "") -> No
         return
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
     result = (
-        dry_run.remote(run_id, pilot)
+        dry_run.remote(run_id, pilot, resume_run, checkpoint_step)
         if dry
-        else train_pilot.remote(run_id)
+        else train_pilot.remote(run_id, resume_run, checkpoint_step)
         if pilot
         else train.remote(run_id)
     )

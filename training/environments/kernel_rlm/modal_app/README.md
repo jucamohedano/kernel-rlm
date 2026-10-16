@@ -60,6 +60,26 @@ Keep this verified checkpoint; validate adapter-only saving and full resume
 before using this format for longer training. Future launches use checkpoint
 prefetching to reduce inference startup overhead.
 
+### Compact checkpoint and one-step resume gate
+
+The image now saves only trainable LoRA parameters, persistent buffers, optimizer,
+scheduler, and progress state for LoRA training. Non-LoRA checkpoints retain the
+default format. On LoRA resume, load the pretrained base first, then restore the
+saved training state. The DCP loader still requires every key in that compact
+template; allowing absent frozen model keys is not permission to omit adapters.
+
+Run `modal run -m modal_app.grpo_live_smoke --compact-check` for a real CPU DCP
+round trip, including equality of the next optimizer update and compatibility
+with the previous full checkpoint layout. This tiny-model test uses AdamW;
+Laguna/Muon distributed resume requires the GPU gate.
+
+Use `--dry --pilot --resume-run <old-run>` to validate the resume command, then
+`--pilot --resume-run <old-run>` for exactly one additional optimizer step.
+The default checkpoint is step 1; override `--checkpoint-step` for later steps.
+The new run has its own output directory, omits `--clean`, and targets step N+1.
+The source run and its checkpoint are preserved. Inspect a resulting step with
+`--checkpoint-run <new-run> --checkpoint-step <N+1>`.
+
 ## One frozen-model episode
 
 From `training/environments/kernel_rlm`:
