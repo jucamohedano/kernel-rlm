@@ -156,7 +156,9 @@ live_image = (
 app = modal.App("kernel-rlm-grpo-live-smoke")
 
 
-def _train(run_id: str, pilot: bool, training_timeout: int, modal_timeout: int) -> dict[str, object]:
+def _train(
+    run_id: str, pilot: bool, training_timeout: int, modal_timeout: int
+) -> dict[str, object]:
     os.environ["KERNEL_INFERENCE_ADMIN_URL"] = "http://127.0.0.1:8100"
     output_dir = Path("/traces/live-grpo") / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -308,8 +310,62 @@ def dry_run(run_id: str, pilot: bool = False) -> dict[str, object]:
     return report
 
 
+@app.function(
+    image=live_image,
+    volumes={"/traces": traces},
+    cpu=2,
+    memory=8192,
+    timeout=180,
+    retries=0,
+)
+def checkpoint_readback(run_id: str) -> dict[str, object]:
+    import torch
+    from torch.distributed.checkpoint import FileSystemReader, load
+
+    path = Path("/traces/outputs") / run_id / "checkpoints/step_1/trainer"
+    metadata = FileSystemReader(str(path)).read_metadata()
+    keys = list(metadata.state_dict_metadata)
+    parameter = next(key for key in keys if key.startswith("app.model.") and "lora_B" in key)
+    description = metadata.state_dict_metadata[parameter]
+    tensor = torch.empty(description.size, dtype=description.properties.dtype)
+    state = {
+        "app": {
+            "progress": {"step": 0, "total_tokens": 0, "total_samples": 0},
+            "model": {parameter.removeprefix("app.model."): tensor},
+        }
+    }
+    load(state, checkpoint_id=str(path))
+    result = {
+        "run_id": run_id,
+        "status": "passed",
+        "progress": state["app"]["progress"],
+        "checked_adapter": parameter,
+        "adapter_nonzero": int(torch.count_nonzero(tensor)),
+        "adapter_max_abs": tensor.abs().max().item(),
+        "optimizer_keys": sum(key.startswith("app.optimizers.") for key in keys),
+        "scheduler_keys": sum(key.startswith("app.scheduler.") for key in keys),
+        "checkpoint_bytes": sum(
+            file.stat().st_size for file in path.parent.rglob("*") if file.is_file()
+        ),
+        "checkpoint_path": str(path.parent),
+        "scope": "CPU read-back of progress and one adapter; no full trainer restart",
+    }
+    if state["app"]["progress"]["step"] < 1 or not result["adapter_nonzero"]:
+        raise RuntimeError(f"Checkpoint does not contain a trained adapter: {result}")
+    if not result["optimizer_keys"] or not result["scheduler_keys"]:
+        raise RuntimeError(f"Checkpoint is missing optimizer or scheduler state: {result}")
+    return result
+
+
 @app.local_entrypoint()
-def main(dry: bool = False, pilot: bool = False) -> None:
+def main(dry: bool = False, pilot: bool = False, checkpoint_run: str = "") -> None:
+    if checkpoint_run:
+        result = checkpoint_readback.remote(checkpoint_run)
+        directory = Path("logs/live-grpo") / checkpoint_run
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "checkpoint-check.json").write_text(json.dumps(result, indent=2))
+        print(json.dumps(result, indent=2))
+        return
     run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:8]
     result = (
         dry_run.remote(run_id, pilot)

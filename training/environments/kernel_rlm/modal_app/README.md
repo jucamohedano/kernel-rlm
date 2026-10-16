@@ -18,6 +18,20 @@ The previous 8,192-token context filled before several final submissions.
 The response limit remains 2,048 tokens, with six turns and four rollouts per
 group. One successful update must produce a checkpoint before a longer run.
 
+After a pilot, use `modal run -m modal_app.grpo_live_smoke --checkpoint-run <run-id>`
+for a CPU-only durability check. It reads step progress and one initially-zero
+LoRA B tensor from the saved DCP checkpoint, and checks optimizer and scheduler
+metadata. It does not allocate GPUs or restart the full trainer. The report is
+saved locally as `logs/live-grpo/<run-id>/checkpoint-check.json`.
+
+The 16 October pilot completed step 1. Its admitted rewards were
+`[0, 0.1, 0, 0.1]`: a submission signal, without correctness or speed signal.
+CPU read-back confirmed a nonzero trained adapter and saved progress at step 1.
+The current Prime checkpoint stores frozen base weights too: about 134 GB.
+Keep this verified checkpoint; validate adapter-only saving and full resume
+before using this format for longer training. Future launches use checkpoint
+prefetching to reduce inference startup overhead.
+
 ## One frozen-model episode
 
 From `training/environments/kernel_rlm`:
