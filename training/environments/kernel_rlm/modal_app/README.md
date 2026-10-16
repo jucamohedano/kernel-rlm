@@ -34,6 +34,14 @@ Trace info includes `kernel_recovery` and `kernel_action_rejections` so skipped
 recovery and blocked actions can be inspected. These changes have CPU tests;
 their new policy behavior still needs a live probe.
 
+Verifiers 0.3.1 normally replaces the program's output cap with the rollout-wide
+sampling cap. The image now applies a version-checked patch at build time:
+both chat request mediation and the training client keep the lower cap. A
+512-token recovery request therefore stays below the 2,048-token rollout cap;
+larger requests cannot raise that rollout cap. Temperature and other sampling
+settings remain framework-controlled. The patch is idempotent and fails if its
+source anchors change. CPU tests also exercised the actual pinned methods.
+
 The longer-run config now matches the tested 12,288-token pilot context. Its
 checkpoint schedule and full resume still need review before a longer launch.
 One successful update must produce a checkpoint before a longer run.

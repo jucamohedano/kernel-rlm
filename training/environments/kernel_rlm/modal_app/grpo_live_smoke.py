@@ -17,6 +17,7 @@ from .attention_lora import MODEL_ID, PRIME_REVISION, REVISION, models
 from .gpu_telemetry import wait_with_gpu_sampling
 from .native_lora_smoke import PRIME_SOURCE
 from .rollout_smoke import traces
+from .verifiers_sampling import patch_verifiers_sampling_caps
 
 _module_dir = Path(__file__).resolve().parent
 APP_ROOT = _module_dir.parent if (_module_dir.parent / "configs").exists() else Path("/root")
@@ -152,6 +153,7 @@ live_image = (
             "RLM_TRAIN_EXEC_TIMEOUT_S": "30",
         }
     )
+    .run_function(patch_verifiers_sampling_caps)
 )
 app = modal.App("kernel-rlm-grpo-live-smoke")
 
