@@ -94,6 +94,7 @@ name = "laguna-xs.2"
 enable_thinking = true
 
 [inference.vllm]
+safetensors_load_strategy = "prefetch"
 enable_lora = true
 lora_target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
 gpu_memory_utilization = 0.86
