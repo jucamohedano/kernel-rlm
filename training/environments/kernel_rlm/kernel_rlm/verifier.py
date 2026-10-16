@@ -653,6 +653,14 @@ def summarize_verification_error(error: str, *, max_chars: int = 1400) -> str:
     timeout_line = next((line for line in lines if "verification timed out" in line.lower()), None)
     if timeout_line:
         return timeout_line.split("Command:", 1)[0].strip()[:max_chars]
+    for index, line in enumerate(lines):
+        if "incompatible function arguments" in line.lower():
+            signature = []
+            for detail in lines[index:]:
+                if detail.startswith("Invoked with:"):
+                    break
+                signature.append(detail)
+            return "\n".join(signature)[:max_chars]
     diagnostic_lines = [
         line
         for line in lines

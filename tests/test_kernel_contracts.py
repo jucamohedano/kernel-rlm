@@ -130,7 +130,7 @@ def test_timeout_budget_includes_two_feedback_calls(modules):
     assert actions.REPL_TIMEOUT_S < actions.BACKEND_TIMEOUT_S
 
 
-def test_prompt_scaffold_assembles_source_without_loading_extension(modules):
+def test_prompt_scaffold_assembles_source_without_loading_extension(modules, capsys):
     import ast
 
     from kernel_rlm.submission_contract import (
@@ -140,12 +140,19 @@ def test_prompt_scaffold_assembles_source_without_loading_extension(modules):
     )
 
     received = []
+
+    def feedback(source):
+        received.append(source)
+        print('CUDA feedback: {"compiled": true}')
+        return {"compiled": True}
+
     namespace = {
         "cpp_declarations": "#include <torch/extension.h>\ntorch::Tensor launch(torch::Tensor x);",
         "cuda_implementation": "#include <torch/extension.h>\ntorch::Tensor launch(torch::Tensor x) { return x; }",
-        "cuda_feedback": lambda source: received.append(source),
+        "cuda_feedback": feedback,
     }
     exec(CUDA_ASSEMBLY_TEMPLATE, namespace)
+    assert capsys.readouterr().out.count("compiled") == 1
     assert received == [namespace["source"]]
     assert validate_submission_source(namespace["source"])[0]
     tree = ast.parse(namespace["source"])

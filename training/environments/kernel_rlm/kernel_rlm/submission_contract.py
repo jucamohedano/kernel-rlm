@@ -55,7 +55,6 @@ CUDA_ASSEMBLY_TEMPLATE = textwrap.dedent(
     import ast
     ast.parse(source, filename="<candidate>", mode="exec")
     result = cuda_feedback(source)
-    print(result)
     """
 ).strip()
 
@@ -91,7 +90,8 @@ CUDA_BUILD_GUIDE = textwrap.dedent(
        an extension directly in the REPL. Import ast and check Python syntax with
        ast.parse(source, filename="<candidate>", mode="exec") without executing it.
        The REPL disables compile, exec, and eval; do not call those builtins.
-       Then call cuda_feedback(source) and print the returned dictionary.
+       Then call cuda_feedback(source). It prints feedback automatically; store
+       the returned dictionary if needed, but do not print it a second time.
        There are exactly TWO feedback calls per trajectory. Inspect compiled,
        extension_used, correct, and error; max_diff alone does not prove success.
        Repair the reported error before spending the second call. If correct,

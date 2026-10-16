@@ -115,6 +115,26 @@ def test_timeout_summary_drops_unhelpful_subprocess_command(slot_module):
     assert summary == "verification timed out within 120s (queue + execution):"
 
 
+def test_argument_error_summary_keeps_required_signature_without_tensor_dump(slot_module):
+    from kernel_rlm.verifier import summarize_verification_error
+
+    error = (
+        "TypeError: launch(): incompatible function arguments. "
+        "The following argument types are supported:\n"
+        "    1. (arg0: torch.Tensor, arg1: collections.abc.Sequence[int], "
+        "arg2: collections.abc.Sequence[int]) -> torch.Tensor\n\n"
+        "Invoked with: tensor([" + "1.234, " * 2000 + "])"
+    )
+    summary = summarize_verification_error(error)
+    assert "arg0: torch.Tensor" in summary
+    assert "arg1: collections.abc.Sequence[int]" in summary
+    assert "arg2: collections.abc.Sequence[int]" in summary
+    assert "Invoked with:" not in summary
+    assert "1.234" not in summary
+    assert len(summary) <= 1400
+    assert len(summarize_verification_error(error, max_chars=80)) <= 80
+
+
 def test_feedback_bootstrap_compiles_with_raw_diagnostic_sidecar(slot_module, tmp_path):
     from kernel_rlm.feedback import build_local_feedback_bootstrap
 
