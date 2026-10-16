@@ -1,6 +1,6 @@
 # One checkpointed GRPO update on the real Level-1 curriculum.
 max_steps = 1
-seq_len = 8192
+seq_len = 12288
 output_dir = "/traces/outputs"
 
 [ckpt]
@@ -97,7 +97,7 @@ enable_thinking = true
 enable_lora = true
 lora_target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
 gpu_memory_utilization = 0.86
-max_model_len = 8192
+max_model_len = 12288
 max_num_batched_tokens = 1024
 max_num_seqs = 8
 reasoning_parser = "poolside_v1"

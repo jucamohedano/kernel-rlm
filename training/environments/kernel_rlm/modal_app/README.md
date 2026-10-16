@@ -1,5 +1,23 @@
 # Modal smoke test
 
+## Saved-candidate verifier replay
+
+Run `modal run -m modal_app.verifier_replay --trace-path <saved-traces.jsonl>`
+from `training/environments/kernel_rlm`. The recovery currently selects the two
+MaxPool candidates and partial submission from the interrupted 15 October pilot.
+It recovers source strings with static AST evaluation, without executing the
+saved REPL actions. CPU workers build distinct candidates concurrently in
+source-isolated caches. One A100 then checks the saved candidates alone and
+while vLLM serves requests. The real REPL feedback helper also tests guarded
+overlap and its allocation fallback. Saved incorrect candidates must remain
+incorrect; a compilation or verifier failure stops the gate. Reports and GPU
+samples are saved under `verifier-replay/<run-id>` in the trace volume.
+
+The one-step pilot uses a 12,288-token context for both inference and training.
+The previous 8,192-token context filled before several final submissions.
+The response limit remains 2,048 tokens, with six turns and four rollouts per
+group. One successful update must produce a checkpoint before a longer run.
+
 ## One frozen-model episode
 
 From `training/environments/kernel_rlm`:
