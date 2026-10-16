@@ -73,6 +73,14 @@ round trip, including equality of the next optimizer update and compatibility
 with the previous full checkpoint layout. This tiny-model test uses AdamW;
 Laguna/Muon distributed resume requires the GPU gate.
 
+Prime's LoRA wrapper renames `base_layer.weight` in its state-dict hooks.
+PyTorch's generic `ignore_frozen_params=True` does not account for that hook and
+raised a KeyError during the first GPU resume test. The compact save now gets
+the normal state dictionary, then removes frozen parameter keys using canonical
+FQNs and Prime's base-layer rename. Buffers and optimizer state remain included.
+The CPU gate now uses Prime's actual `MultiLoRALinear` wrapper, not a plain
+stand-in, and tests both compact and legacy checkpoint restore.
+
 Use `--dry --pilot --resume-run <old-run>` to validate the resume command, then
 `--pilot --resume-run <old-run>` for exactly one additional optimizer step.
 The default checkpoint is step 1; override `--checkpoint-step` for later steps.

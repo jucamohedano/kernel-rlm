@@ -9,23 +9,38 @@ def patch_compact_lora_checkpoints(prime_root: str = "/root/prime_rl") -> None:
     path = root / "trainer/ckpt.py"
     source = path.read_text()
     marker = "    def checkpoint_options(self):\n"
+    filter_marker = "        frozen_fqns = set()\n"
+    if marker in source and filter_marker not in source:
+        raise RuntimeError("Rebuild the image from pinned Prime source before upgrading this patch")
     if marker not in source:
         replacements = (
             (
                 "from torch.distributed.checkpoint.state_dict import get_state_dict, set_model_state_dict, set_state_dict",
-                "from torch.distributed.checkpoint.state_dict import StateDictOptions, get_state_dict, set_model_state_dict, set_state_dict",
+                "from torch.distributed.checkpoint.state_dict import StateDictOptions, _get_fqns, get_state_dict, set_model_state_dict, set_state_dict",
             ),
             (
                 "    def state_dict(self) -> dict[str, Any]:\n",
                 "    def checkpoint_options(self):\n"
                 "        compact = any('lora_' in name and parameter.requires_grad "
                 "for name, parameter in self.model.named_parameters())\n"
-                "        return StateDictOptions(ignore_frozen_params=compact, strict=not compact)\n\n"
+                "        return StateDictOptions(strict=not compact)\n\n"
                 "    def state_dict(self) -> dict[str, Any]:\n",
             ),
             (
                 "get_state_dict(self.model, checkpoint_optimizers)",
-                "get_state_dict(self.model, checkpoint_optimizers, options=self.checkpoint_options())",
+                "get_state_dict(self.model, checkpoint_optimizers, options=self.checkpoint_options())\n"
+                "        frozen_fqns = set()\n"
+                "        if not self.checkpoint_options().strict:\n"
+                "            for parameter_name, parameter in self.model.named_parameters():\n"
+                "                if not parameter.requires_grad:\n"
+                "                    frozen_fqns.update(\n"
+                "                        name.replace('.base_layer.', '.')\n"
+                "                        for name in _get_fqns(self.model, parameter_name)\n"
+                "                    )\n"
+                "            model_state_dict = {\n"
+                "                name: tensor for name, tensor in model_state_dict.items()\n"
+                "                if name not in frozen_fqns\n"
+                "            }",
             ),
             (
                 'set_model_state_dict(self.model, model_state_dict=state_dict["model"])',
@@ -64,24 +79,28 @@ def check_compact_checkpoint_roundtrip() -> dict:
 
     import torch
     from prime_rl.trainer.ckpt import AppState, Progress
+    from prime_rl.trainer.models.layers.lora.base import (
+        set_lora_num_tokens,
+        set_multilora_scaling,
+    )
+    from prime_rl.trainer.models.layers.lora.multi_linear import MultiLoRALinear
     from torch.distributed.checkpoint import FileSystemReader, load, save
     from torch.distributed.checkpoint.state_dict import get_state_dict
 
     class TinyLoRA(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.base = torch.nn.Linear(4, 4, bias=False)
-            self.base.requires_grad_(False)
-            self.lora_A = torch.nn.Parameter(torch.randn(2, 4))
-            self.lora_B = torch.nn.Parameter(torch.zeros(4, 2))
+            self.proj = MultiLoRALinear(
+                torch.nn.Linear(4, 4, bias=False), rank=2, n_adapters=1, use_grouped_mm=False
+            )
             self.register_buffer("counter", torch.ones(1))
 
         def forward(self, inputs):
-            return self.base(inputs) + (inputs @ self.lora_A.T) @ self.lora_B.T
+            return self.proj(inputs)
 
     def components(base):
         model = TinyLoRA()
-        model.base.load_state_dict(base)
+        model.proj.base_layer.load_state_dict(base)
         optimizer = torch.optim.AdamW(
             [parameter for parameter in model.parameters() if parameter.requires_grad], lr=0.01
         )
@@ -96,7 +115,9 @@ def check_compact_checkpoint_roundtrip() -> dict:
         scheduler.step()
 
     torch.manual_seed(42)
-    base = copy.deepcopy(TinyLoRA().base.state_dict())
+    set_lora_num_tokens(torch.tensor([4]), reset_reference=True)
+    set_multilora_scaling(torch.ones(1), reset_reference=True)
+    base = copy.deepcopy(TinyLoRA().proj.base_layer.state_dict())
     model, optimizer, scheduler, progress = components(base)
     inputs = torch.randn(4, 4)
     update(model, optimizer, scheduler, inputs)
@@ -120,7 +141,7 @@ def check_compact_checkpoint_roundtrip() -> dict:
             save(payload, checkpoint_id=str(directory))
             keys = list(FileSystemReader(str(directory)).read_metadata().state_dict_metadata)
             assert any("lora_B" in key for key in keys)
-            assert any("base.weight" in key for key in keys) is legacy
+            assert ("app.model.proj.weight" in keys) is legacy
             restored, restored_optimizer, restored_scheduler, restored_progress = components(base)
             load(
                 {
@@ -153,5 +174,5 @@ def check_compact_checkpoint_roundtrip() -> dict:
     return {
         "status": "passed",
         "roundtrips": results,
-        "scope": "Real CPU DCP save/load and next-update equivalence on a tiny LoRA model with AdamW; Laguna/Muon GPU resume still needs validation",
+        "scope": "Real CPU DCP save/load with Prime MultiLoRALinear key-remapping hooks and next-update equivalence with AdamW; Laguna/Muon GPU resume still needs validation",
     }
