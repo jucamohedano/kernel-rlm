@@ -4,6 +4,7 @@ import ast
 import asyncio
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -107,34 +108,41 @@ def compile_case(case: dict) -> dict:
         (directory / "runner.py").write_text(_RUNNER)
         (directory / "submission.py").write_text(case["submission"])
         with compile_slot(90, path=submission_compile_lock(case["submission"])) as remaining:
-            result = _run_verifier_process(
-                [
-                    sys.executable,
-                    str(directory / "runner.py"),
-                    "unused_reference.py",
-                    str(directory / "submission.py"),
-                    "1",
-                    "0.001",
-                    "0.0001",
-                    "0",
-                    str(directory / "phase.json"),
-                    "compile",
-                ],
-                timeout_s=remaining,
-                cwd=None,
-                env={
-                    **os.environ,
-                    "CUDA_VISIBLE_DEVICES": "",
-                    "MAX_JOBS": "1",
-                    "KERNEL_RLM_EXTENSION_BUILD_ROOT": str(
-                        submission_extension_root(case["submission"])
-                    ),
-                },
-            )
+            for stale_lock in submission_extension_root(case["submission"]).glob("*/lock"):
+                stale_lock.unlink()
+            try:
+                result = _run_verifier_process(
+                    [
+                        sys.executable,
+                        str(directory / "runner.py"),
+                        "unused_reference.py",
+                        str(directory / "submission.py"),
+                        "1",
+                        "0.001",
+                        "0.0001",
+                        "0",
+                        str(directory / "phase.json"),
+                        "compile",
+                    ],
+                    timeout_s=remaining,
+                    cwd=None,
+                    env={
+                        **os.environ,
+                        "CUDA_VISIBLE_DEVICES": "",
+                        "MAX_JOBS": "2",
+                        "KERNEL_RLM_EXTENSION_BUILD_ROOT": str(
+                            submission_extension_root(case["submission"])
+                        ),
+                    },
+                )
+            except subprocess.TimeoutExpired:
+                shutil.rmtree(submission_extension_root(case["submission"]), ignore_errors=True)
+                raise
         if result.returncode:
             raise RuntimeError(result.stderr[-2000:])
         record = json.loads(result.stdout.strip().splitlines()[-1])
         record.update(name=case["name"], seconds=time.monotonic() - started)
+        print(json.dumps({"event": "cpu_compile", **record}), flush=True)
         if not record.get("compiled"):
             raise RuntimeError(record)
         return record
@@ -157,10 +165,23 @@ def prepare(run_id: str, cases: list[dict]) -> dict:
     directory = Path("/traces/verifier-replay") / run_id
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "cases.json").write_text(json.dumps(cases, indent=2))
+
+    def attempt(case):
+        try:
+            return compile_case(case)
+        except Exception as error:
+            result = {"name": case["name"], "compiled": False, "error": str(error)}
+            print(json.dumps({"event": "cpu_compile_failed", **result}), flush=True)
+            return result
+
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(compile_case, cases + fixture_cases))
+        results = list(pool.map(attempt, cases + fixture_cases))
     inference_cache.commit()
-    report = {"run_id": run_id, "status": "passed", "cpu_compilation": results}
+    report = {
+        "run_id": run_id,
+        "status": "passed" if all(result.get("compiled") for result in results) else "failed",
+        "cpu_compilation": results,
+    }
     (directory / "compile-report.json").write_text(json.dumps(report, indent=2))
     traces.commit()
     return report
@@ -322,6 +343,8 @@ def main(trace_path: str):
     compiled = prepare.remote(run_id, cases)
     (directory / "compile-report.json").write_text(json.dumps(compiled, indent=2))
     print(json.dumps(compiled), flush=True)
+    if compiled["status"] != "passed":
+        raise RuntimeError("Saved-candidate CPU compilation failed; GPU replay was not started")
     report = replay.remote(run_id, cases)
     (directory / "report.json").write_text(json.dumps(report, indent=2))
     print(
