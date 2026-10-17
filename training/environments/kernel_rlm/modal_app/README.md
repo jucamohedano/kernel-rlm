@@ -1,5 +1,15 @@
 # Modal smoke test
 
+## Factory provenance gate
+
+Future GRPO launches require `--experiment <registered-id>` and clean project/RLM
+repositories. The local entrypoint captures code, config, dataset and notes before
+GPU dispatch. Remote mounted-input verification precedes the trainer subprocess.
+Use `python -m kernel_factory validate` or `python -m kernel_factory prepare`
+for local-only checks; neither allocates Modal resources. See
+`../kernel_factory/README.md` for the manifest, snapshots and remaining gaps.
+Checkpoint read-back and `--compact-check` remain CPU-only, without this launch gate.
+
 ## Saved-candidate verifier replay
 
 Run `modal run -m modal_app.verifier_replay --trace-path <saved-traces.jsonl>`
@@ -94,8 +104,9 @@ FQNs and Prime's base-layer rename. Buffers and optimizer state remain included.
 The CPU gate now uses Prime's actual `MultiLoRALinear` wrapper, not a plain
 stand-in, and tests both compact and legacy checkpoint restore.
 
-Use `--dry --pilot --resume-run <old-run>` to validate the resume command, then
-`--pilot --resume-run <old-run>` for exactly one additional optimizer step.
+Use `--experiment checkpoint-resume --dry --pilot --resume-run <old-run>` to
+validate the resume command, then
+`--experiment checkpoint-resume --pilot --resume-run <old-run>` for exactly one additional optimizer step.
 The default checkpoint is step 1; override `--checkpoint-step` for later steps.
 The new run has its own output directory, omits `--clean`, and targets step N+1.
 The source run and its checkpoint are preserved. Inspect a resulting step with

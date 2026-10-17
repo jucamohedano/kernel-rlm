@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import math
@@ -65,6 +66,21 @@ def discover_runs(root: Path) -> list[dict]:
         run = runs.setdefault(run_id, {"id": run_id, "root": metrics_path.parent, "report": {}})
         run["metrics_path"] = metrics_path
         run["metrics"] = read_metrics(metrics_path)
+    for manifest_path in root.rglob("provenance.json"):
+        manifest = read_json(manifest_path)
+        run_id = manifest.get("run_id")
+        if not run_id:
+            continue
+        run = runs.setdefault(run_id, {"id": run_id, "root": manifest_path.parent, "report": {}})
+        run["provenance"] = manifest
+        if not run["report"]:
+            events = read_jsonl(manifest_path.parent / "events.jsonl")
+            run["report"] = {
+                "run_id": run_id,
+                "status": events[-1]["event"] if events else "prepared",
+                "experiment_id": manifest.get("experiment_id"),
+                "model_id": manifest.get("pins", {}).get("model_id"),
+            }
     for trace_path in root.rglob("trace.json"):
         run_id = trace_path.parent.name
         run = runs.setdefault(run_id, {"id": run_id, "root": trace_path.parent, "report": {}})
@@ -354,6 +370,7 @@ def layout(title: str, body: str, active: str = "experiments") -> str:
             ("lineage", "Lineage", "/?view=lineage"),
             ("runs", "Run attempts", "/?view=runs"),
             ("configs", "Configs & compatibility", "/?view=configs"),
+            ("provenance", "Provenance", "/?view=provenance"),
             ("guide", "Learning report", "/guide"),
         )
     )
@@ -422,7 +439,11 @@ def render_run_table(runs: list[dict]) -> str:
 
 
 def render_experiment(experiment: dict, runs: list[dict]) -> str:
-    attempts = [run for run in runs if run["id"] in experiment["runs"]]
+    attempts = [
+        run
+        for run in runs
+        if run["id"] in experiment["runs"] or run["report"].get("experiment_id") == experiment["id"]
+    ]
     sections = "".join(
         f'<section class="research-section"><h2>{label}</h2><p>{text(experiment[key])}</p></section>'
         for key, label in (
@@ -463,6 +484,10 @@ def render_experiment(experiment: dict, runs: list[dict]) -> str:
             else '<p class="prepared-note">No run launched for this change. CPU checks are not model experiments.</p>'
         )
         + evidence
+        + folded(
+            "Traceability references · not historical input attestations",
+            experiment.get("provenance", {}),
+        )
     )
 
 
@@ -483,7 +508,8 @@ def render_index(root: Path, experiment_id: str = "", view: str = "overview") ->
     links = "".join(
         f'<a class="experiment-link {"selected" if selected == item else ""}" data-experiment '
         f'href="/?experiment={quote(item["id"])}"><span class="status-dot {text(item["status"])}"></span>'
-        f"<span><strong>{text(item['title'])}</strong><small>{text(item['status'])} · {len(item['runs'])} attempts</small></span></a>"
+        f"<span><strong>{text(item['title'])}</strong><small>{text(item['status'])} · "
+        f"{sum(run['id'] in item['runs'] or run['report'].get('experiment_id') == item['id'] for run in runs)} records</small></span></a>"
         for item in experiments
     )
     if selected:
@@ -599,6 +625,114 @@ def render_configs(root: Path) -> str:
         + "".join(rows)
         + "</tbody></table></div>",
         "configs",
+    )
+
+
+def render_provenance(root: Path, run_id: str = "") -> str:
+    runs = discover_runs(root)
+    run = next((item for item in runs if item["id"] == run_id), None)
+    heading = '<header><div><div class="eyebrow">Project-level factory</div><h1>Provenance</h1>'
+    heading += "<p>Code → dataset → config and prompt source → run → evidence and checkpoint. Hashes detect changed bytes; they are not trusted signatures.</p></div></header>"
+    if run_id:
+        manifest = (run or {}).get("provenance", {})
+        if not manifest:
+            return layout(
+                "Run provenance",
+                heading
+                + '<p class="prepared-note">Not captured before launch. No exact commit, dataset hash or prompt snapshot is inferred for this historical run.</p>',
+                "provenance",
+            )
+        rows = "".join(
+            f'<tr><td>{text(item["role"])}</td><td><a href="/?view=input&amp;run={quote(run_id)}&amp;asset={quote(item["path"])}">{text(item["path"])}</a></td>'
+            f"<td><code>{text(item['sha256'])}</code><small>{item['bytes']} bytes</small></td></tr>"
+            for item in manifest.get("inputs", [])
+        )
+        repositories = "".join(
+            f"<li><strong>{text(name)}</strong>: <code>{text(state.get('commit'))}</code> · "
+            f"{'dirty snapshot explicitly allowed' if state.get('dirty') else 'clean at capture'}</li>"
+            for name, state in manifest.get("repositories", {}).items()
+        )
+        return layout(
+            "Run provenance",
+            heading + f"<h2>{text(run_title(run))}</h2>"
+            f'<p>Experiment: <a href="/?experiment={quote(manifest["experiment_id"])}">{text(manifest["experiment_id"])}</a> · '
+            f"Captured: {text(manifest.get('created_at_utc'))}</p><ul>"
+            + repositories
+            + "</ul>"
+            + folded("Pinned model and framework", manifest.get("pins", {}))
+            + folded("Dataset identity and upstream provenance gaps", manifest.get("datasets", {}))
+            + folded("Configuration snapshot", manifest.get("config", {}))
+            + folded(
+                "Actual runtime versions · unavailable before execution",
+                read_json(run["root"] / "runtime.json"),
+            )
+            + folded("Append-only lifecycle events", read_jsonl(run["root"] / "events.jsonl"))
+            + folded(
+                "Checkpoint parent and declared artifact locations",
+                {
+                    "parent": manifest.get("parent"),
+                    "locations": manifest.get("artifacts", {}),
+                    "scope": "Locations are declared; existence is not checked by this offline viewer",
+                },
+            )
+            + "<h2>Captured inputs</h2><p>Open an exact saved input, not the current working file.</p>"
+            '<div class="table-scroll"><table><thead><tr><th>Role</th><th>Saved input</th><th>SHA-256</th></tr></thead><tbody>'
+            + rows
+            + "</tbody></table></div>",
+            "provenance",
+        )
+    registry = read_json(Path(__file__).with_name("experiments.json"))
+    dataset_cards = []
+    project = Path(__file__).resolve().parents[5]
+    for identity, definition in registry.get("datasets", {}).items():
+        path = (project / definition["path"]).resolve()
+        if path.is_relative_to(project) and path.is_file():
+            content = path.read_bytes()
+            dataset_cards.append(
+                f'<section class="research-section"><h2>{text(identity)}</h2>'
+                f"<p>{text(definition['source'])} · {len([line for line in content.splitlines() if line.strip()])} materialized tasks</p>"
+                f'<p><code>{text(definition["path"])}</code><br>SHA-256: <code class="digest">{hashlib.sha256(content).hexdigest()}</code></p>'
+                '<p class="muted">Current local bytes only, not an attestation of historical runs. Upstream revision was not recorded.</p></section>'
+            )
+    attempts = "".join(
+        f'<tr><td><a href="/?view=provenance&amp;run={quote(item["id"])}">{text(run_title(item))}</a></td>'
+        f"<td>{'Captured before launch' if item.get('provenance') else 'Not captured; historical gap'}</td></tr>"
+        for item in runs
+    )
+    return layout(
+        "Factory provenance",
+        heading
+        + "<h2>Registered datasets</h2>"
+        + "".join(dataset_cards)
+        + '<h2>Run provenance coverage</h2><div class="table-scroll"><table>'
+        "<thead><tr><th>Run / preparation</th><th>Coverage</th></tr></thead><tbody>"
+        + attempts
+        + '</tbody></table></div><p class="muted">Future GRPO launches require a registered experiment and matching input manifest. '
+        "Older probes are not retroactively certified. No compute can be launched from this viewer.</p>",
+        "provenance",
+    )
+
+
+def render_input(root: Path, run_id: str, asset: str) -> str:
+    run = next((item for item in discover_runs(root) if item["id"] == run_id), None)
+    manifest = (run or {}).get("provenance", {})
+    recorded = next((item for item in manifest.get("inputs", []) if item["path"] == asset), None)
+    if run is None or recorded is None:
+        return layout(
+            "Input unavailable", "<h1>Input not registered in this run</h1>", "provenance"
+        )
+    base = (run["root"] / "inputs").resolve()
+    path = (base / asset).resolve()
+    if not path.is_relative_to(base) or not path.is_file():
+        return layout("Input unavailable", "<h1>Snapshot not downloaded</h1>", "provenance")
+    content = path.read_bytes()
+    matched = hashlib.sha256(content).hexdigest() == recorded["sha256"]
+    return layout(
+        "Captured input",
+        f"<h1>{text(asset)}</h1><p>Snapshot checksum: "
+        f"{'matches manifest' if matched else 'MISMATCH — do not use as verified evidence'}.</p>"
+        + folded("Exact captured source / data / note", content.decode("utf-8")),
+        "provenance",
     )
 
 
@@ -865,6 +999,7 @@ def render_run(root: Path, run_id: str, trajectory: int = 0) -> str:
         f'<header class="run-header"><div><div class="eyebrow">Run attempt · {text(run_date(run))}</div>'
         f'<h1>{text(run_title(run))}</h1><p class="muted">Execution status is not a held-out quality result.</p></div>'
         '<a class="button-link" href="/?view=lineage">View lineage</a></header>'
+        f'<p><a href="/?view=provenance&amp;run={quote(run["id"])}">Code, dataset, notes and input provenance →</a></p>'
     )
     return layout(
         f"Kernel-RLM · {run_id}",
@@ -916,7 +1051,11 @@ def make_handler(root: Path):
             )
             view = query.get("view", ["overview"])[0]
             experiment = query.get("experiment", [""])[0]
-            if run_id:
+            if view == "provenance":
+                document = render_provenance(root, run_id)
+            elif view == "input":
+                document = render_input(root, run_id, query.get("asset", [""])[0])
+            elif run_id:
                 document = render_run(root, run_id, trajectory)
             elif view == "lineage":
                 document = render_lineage(root)

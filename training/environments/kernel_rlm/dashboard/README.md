@@ -25,12 +25,18 @@ inspired by Microsoft's pre-training article, inside the same navigation.
   order alone never creates a dependency. A failed restore is labelled requested.
 - `/?view=configs`: saved component revisions, separate from current config files.
 - `/guide`: the canonical root HTML report, rendered inside the workspace.
+- `/?view=provenance`: registered dataset identity and per-run capture coverage.
+  A run-specific view opens immutable input snapshots, code commits, notes,
+  configuration, declared artifact locations and actual runtime/lifecycle records.
 
 `experiments.json` stores curated research questions and decisions, not another
 copy of rollout metrics. Add related run IDs and explicit retry relationships
 there. Historical runs remain in the attempt library even before they are
 assigned to a curated experiment. Keep failed attempts in the same experiment.
 `run_labels.json` provides readable labels without changing original artifacts.
+Future GRPO launches capture provenance automatically through `kernel_factory`.
+Registry references to change commits/current code are not attestations of old
+run inputs. Local-only preparations are labelled prepared, not trained.
 
 Summaries normalize report groups, older trace files and Prime traces. Stable
 trace IDs prevent double-counting `all` and `effective` exports; admitted counts

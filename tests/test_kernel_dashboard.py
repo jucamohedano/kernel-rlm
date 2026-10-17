@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -279,3 +280,48 @@ def test_guide_shares_navigation_without_copying_document():
     assert "Train Laguna to write CUDA kernels" in page
     assert page.count("<!doctype html>") == 1
     assert "<math" in page
+
+
+def test_prepared_manifest_is_discoverable_and_snapshots_are_whitelisted(tmp_path):
+    directory = tmp_path / "20261017T120000Z-prepared"
+    directory.mkdir()
+    content = "<script>source, not executable HTML</script>"
+    manifest = {
+        "run_id": directory.name,
+        "experiment_id": "reply-budget",
+        "created_at_utc": "2026-10-17T12:00:00Z",
+        "pins": {"model_id": "test"},
+        "inputs": [
+            {
+                "path": "config.toml",
+                "role": "config",
+                "sha256": hashlib.sha256(content.encode()).hexdigest(),
+                "bytes": len(content),
+            }
+        ],
+    }
+    (directory / "provenance.json").write_text(json.dumps(manifest))
+    (directory / "inputs").mkdir()
+    (directory / "inputs/config.toml").write_text(content)
+    runs = dashboard.discover_runs(tmp_path)
+    assert runs[0]["report"]["status"] == "prepared"
+    assert "asset=config.toml" in dashboard.render_provenance(tmp_path, directory.name)
+    page = dashboard.render_input(tmp_path, directory.name, "config.toml")
+    assert "matches manifest" in page
+    assert "<script>source" not in page
+    assert "&lt;script&gt;source" in page
+    assert "Input not registered" in dashboard.render_input(
+        tmp_path, directory.name, "../../etc/passwd"
+    )
+    (directory / "inputs/config.toml").write_text("modified")
+    assert "MISMATCH" in dashboard.render_input(tmp_path, directory.name, "config.toml")
+    assert "Code, dataset" in dashboard.render_run(tmp_path, directory.name)
+
+
+def test_historical_runs_do_not_gain_fake_provenance(tmp_path):
+    directory = tmp_path / "20261016T120000Z-old"
+    directory.mkdir()
+    (directory / "report.json").write_text("{}")
+    page = dashboard.render_provenance(tmp_path, directory.name)
+    assert "Not captured before launch" in page
+    assert "No exact commit" in page

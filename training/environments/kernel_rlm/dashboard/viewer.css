@@ -77,6 +77,7 @@ svg text { fill:var(--muted); font:9px ui-monospace,monospace; } .plot-grid { fi
 .plot-legend { display:flex; gap:8px 14px; flex-wrap:wrap; font-size:10px; color:var(--muted); } .plot-legend i { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; }
 .plot-source { font-size:9px; overflow-wrap:anywhere; color:var(--muted); margin:12px 0 0; }
 .single-measurement { font:600 24px ui-monospace,monospace; color:var(--accent); } .single-measurement small { display:block; font:10px/1.6 system-ui,sans-serif; margin-top:8px; }
+.digest { overflow-wrap:anywhere; }
 #expand-charts { margin-bottom:16px; font-size:11px; } .workspace.wide-charts { grid-template-columns:190px minmax(0,1fr); } .workspace.wide-charts>section { display:none; } .workspace.wide-charts>.metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); gap:16px; } .workspace.wide-charts .metrics>h2,.workspace.wide-charts #expand-charts { grid-column:1/-1; } .workspace.wide-charts #expand-charts { justify-self:start; }
 .reward-row { display:grid; grid-template-columns:22px 1fr 40px; gap:8px; align-items:center; font:10px/1.9 ui-monospace,monospace; }
 meter { width:100%; accent-color:var(--accent); } footer { margin-top:35px; border-top:1px solid var(--line); padding-top:18px; font-size:11px; color:var(--muted); }

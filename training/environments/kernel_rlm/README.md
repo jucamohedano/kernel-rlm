@@ -2,6 +2,10 @@
 
 CUDA kernel tasks for the local RLM training loop.
 
+New GRPO runs follow the lightweight factory workflow in `kernel_factory/README.md`:
+registered experiment → pinned commits/input snapshots → bounded launch → saved
+events, metrics, trajectories and checkpoints. Local validation is CPU-only.
+
 The environment keeps Python as the persistent REPL language. A submission is Python source
 that defines CPP_SOURCE, CUDA_SOURCE, and cuda_forward(*tensors). The submission compiles
 the CUDA implementation through torch.utils.cpp_extension and calls the resulting extension.

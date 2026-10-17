@@ -140,6 +140,8 @@ def test_training_exit_preserves_report_and_commits_traces(tmp_path, outcome, pi
         "shlex": shlex,
         "traces": traces,
         "wait_with_gpu_sampling": gpu_monitor,
+        "start_run": Mock(),
+        "event": Mock(),
         "MODEL_ID": "test-model",
         "REVISION": "test-revision",
         "PRIME_REVISION": "test-prime",

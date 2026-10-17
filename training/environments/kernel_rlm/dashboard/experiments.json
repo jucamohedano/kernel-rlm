@@ -1,7 +1,47 @@
 {
+  "schema_version": 2,
+  "datasets": {
+    "ops6k-l1-seed42": {
+      "path": "notes/curriculum/lvl1_seed42.jsonl",
+      "remote_path": "/root/kernel_rlm/tasks/lvl1_seed42.jsonl",
+      "role": "training",
+      "source": "BytedTsinghua-SIA/CUDA-Agent-Ops-6K",
+      "upstream_revision": null,
+      "declared_split": "train",
+      "declared_level": 1,
+      "declared_seed": 42,
+      "builder": "scripts/curriculum_from_ops6k.py",
+      "notes": "notes/datasets.md",
+      "license_record": "CC-BY-4.0 as documented in notes/datasets.md; not re-audited here"
+    }
+  },
   "experiments": [
     {
+      "id": "factory-provenance",
+      "title": "Trace experiments from inputs to artifacts",
+      "status": "prepared",
+      "intent": "Require a registered research question and exact input evidence before future GRPO launches.",
+      "change": "Record both repository commits, dataset/config/source hashes, small snapshots, lifecycle events and checkpoint parents. Validate mounted inputs before the trainer starts.",
+      "conclusion": "Offline tests cover capture, mismatch rejection and provenance rendering. No new cloud training job has exercised the mounted-input gate.",
+      "decision": "Validate locally now; use the provenance gate on the next explicitly authorized bounded training run.",
+      "limitations": ["Older runs have no retrospective input attestation.", "Dataset upstream revision and immutable container image digest remain unknown.", "Initial automatic capture covers the GRPO launcher, not every historical probe."],
+      "runs": [],
+      "provenance": {
+        "dataset_ids": ["ops6k-l1-seed42"],
+        "code_paths": ["rlm/training/environments/kernel_rlm/kernel_factory/__init__.py", "rlm/training/environments/kernel_rlm/modal_app/grpo_live_smoke.py"],
+        "notes": ["rlm/training/environments/kernel_rlm/kernel_factory/README.md", "notes/datasets.md", "scripts/curriculum_from_ops6k.py"],
+        "historical_attestation": "New infrastructure; local prepared records do not imply GPU execution"
+      }
+    },
+    {
       "id": "checkpoint-resume",
+      "provenance": {
+        "dataset_ids": ["ops6k-l1-seed42"],
+        "code_paths": ["rlm/training/environments/kernel_rlm/modal_app/compact_checkpoint.py", "rlm/training/environments/kernel_rlm/modal_app/grpo_live_smoke.py"],
+        "notes": ["notes/results/20261016-resumed-grpo.json", "notes/datasets.md", "scripts/curriculum_from_ops6k.py"],
+        "documented_change_commits": ["c111df1", "10195f2"],
+        "historical_attestation": "Change references only; exact launch commit and input hashes were not captured for these old runs"
+      },
       "title": "Resume GRPO and save compact state",
       "status": "validated",
       "intent": "Restore step 1, complete one additional Muon update, and save only adapter and training state without losing resumability.",
@@ -15,6 +55,12 @@
     },
     {
       "id": "first-grpo-update",
+      "provenance": {
+        "dataset_ids": ["ops6k-l1-seed42"],
+        "code_paths": ["rlm/training/environments/kernel_rlm/kernel_rlm_v1/program.py", "rlm/training/environments/kernel_rlm/kernel_rlm_v1/taskset.py"],
+        "notes": ["notes/results/20261016-grpo-pilot.json", "notes/datasets.md", "scripts/curriculum_from_ops6k.py"],
+        "historical_attestation": "Exact launch commit and input hashes were not captured; current files must not be presented as historical snapshots"
+      },
       "title": "First saved GRPO update",
       "status": "validated",
       "intent": "Verify the real model can produce rollouts, supply a nonzero GRPO signal, update attention LoRA, and save training state.",
@@ -27,6 +73,13 @@
     },
     {
       "id": "reply-budget",
+      "provenance": {
+        "dataset_ids": ["ops6k-l1-seed42"],
+        "code_paths": ["rlm/training/environments/kernel_rlm/configs/grpo_pilot.toml", "rlm/training/environments/kernel_rlm/configs/grpo_level1.toml"],
+        "notes": ["PROJECT_TRACKER.html", "notes/datasets.md", "scripts/curriculum_from_ops6k.py"],
+        "documented_change_commits": ["090e1d0"],
+        "historical_attestation": "Prepared change; no live run exists"
+      },
       "title": "Give complete CUDA replies more room",
       "status": "prepared",
       "intent": "Reduce per-call truncations without expanding the context window or recovery budget.",
@@ -39,6 +92,13 @@
     },
     {
       "id": "subcall-guidance",
+      "provenance": {
+        "dataset_ids": ["ops6k-l1-seed42"],
+        "code_paths": ["rlm/training/environments/kernel_rlm/kernel_rlm/subcalls.py", "rlm/training/environments/kernel_rlm/kernel_rlm_v1/program.py"],
+        "notes": ["PROJECT_TRACKER.html", "notes/datasets.md", "scripts/curriculum_from_ops6k.py"],
+        "documented_change_commits": ["1ce55e4"],
+        "historical_attestation": "Prepared change; no live run exists"
+      },
       "title": "Make focused delegation easier",
       "status": "prepared",
       "intent": "Help the root delegate difficult kernel subproblems without requiring or rewarding unnecessary child calls.",
