@@ -80,6 +80,8 @@ def discover_runs(root: Path) -> list[dict]:
                 "status": events[-1]["event"] if events else "prepared",
                 "experiment_id": manifest.get("experiment_id"),
                 "model_id": manifest.get("pins", {}).get("model_id"),
+                "title": manifest.get("experiment", {}).get("title", "Registered experiment")
+                + " · input capture",
             }
     for trace_path in root.rglob("trace.json"):
         run_id = trace_path.parent.name
@@ -660,6 +662,7 @@ def render_provenance(root: Path, run_id: str = "") -> str:
             + repositories
             + "</ul>"
             + folded("Pinned model and framework", manifest.get("pins", {}))
+            + folded("Dependency source revisions", manifest.get("dependency_repositories", {}))
             + folded("Dataset identity and upstream provenance gaps", manifest.get("datasets", {}))
             + folded("Configuration snapshot", manifest.get("config", {}))
             + folded(

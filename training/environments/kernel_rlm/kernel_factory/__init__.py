@@ -134,6 +134,10 @@ def prepare_run(
     pins = launcher_pins(environment) if pins is None else pins
     if not all(pins.get(key) for key in ("model_id", "model_revision", "prime_revision")):
         raise ValueError("Pinned model and Prime revisions are required")
+    if any(
+        not re.fullmatch(r"[0-9a-f]{40}", pins[key]) for key in ("model_revision", "prime_revision")
+    ):
+        raise ValueError("Model and Prime pins must be full commit hashes, not moving branches")
     validation = validate_registry(project, environment)
     registry = load_registry(environment)
     experiment = next(

@@ -16,7 +16,7 @@ SPEC = importlib.util.spec_from_file_location(
 )
 factory = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(factory)
-PINS = {"model_id": "test-model", "model_revision": "model-pin", "prime_revision": "prime-pin"}
+PINS = {"model_id": "test-model", "model_revision": "a" * 40, "prime_revision": "b" * 40}
 
 
 @pytest.fixture
@@ -242,6 +242,10 @@ def test_remote_snapshot_payload_cannot_bypass_hashes(project, tmp_path, monkeyp
 
 def test_unregistered_experiment_and_model_mismatch_fail_before_capture(project):
     root, environment = project
+    with pytest.raises(ValueError, match="full commit hashes"):
+        factory.prepare_run(
+            root, environment, "review", "test", pins={**PINS, "model_revision": "main"}
+        )
     with pytest.raises(ValueError, match="registered experiment"):
         factory.prepare_run(root, environment, "missing", "test", pins=PINS)
     with pytest.raises(ValueError, match="Model pin"):
