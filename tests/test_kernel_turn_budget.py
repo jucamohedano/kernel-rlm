@@ -102,7 +102,7 @@ def run_program(monkeypatch, tmp_path, actions):
         monkeypatch.setenv("KERNEL_MODEL", "mock-model")
         monkeypatch.setenv(
             "KERNEL_LIMITS",
-            json.dumps({"max_turns": 8, "max_tokens": 2048, "max_context_tokens": 12288}),
+            json.dumps({"max_turns": 8, "max_tokens": 4096, "max_context_tokens": 12288}),
         )
         requests = []
         remaining_codes = iter(codes)
@@ -164,6 +164,7 @@ def test_missing_submission_can_recover_in_a_short_seventh_turn(run_program):
     )
     assert record["submission"] == "candidate"
     assert record["turns"] == 7
+    assert all(request["max_tokens"] == 4096 for request in requests[:6])
     assert requests[-1]["max_tokens"] == 512
     assert record["model_calls"][-1]["phase"] == "recovery"
     assert "Only two turns" in str(requests[3]["messages"])

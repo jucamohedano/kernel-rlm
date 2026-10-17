@@ -46,7 +46,7 @@ batch_size = 4
 group_size = 4
 
 [orchestrator.train.sampling]
-max_completion_tokens = 2048
+max_completion_tokens = 4096
 
 [orchestrator.concurrency]
 initial_inflight = 4
@@ -59,7 +59,7 @@ env.taskset.manifest_path = "/root/kernel_rlm/tasks/lvl1_seed42.jsonl"
 env.taskset.speed_reward_weight = 0.1
 env.agent.harness.id = "kernel_rlm_v1"
 env.agent.harness.max_turns = 8
-env.agent.harness.max_tokens = 2048
+env.agent.harness.max_tokens = 4096
 env.agent.harness.max_context_tokens = 12288
 env.agent.harness.enable_thinking = true
 env.agent.harness.enable_subcall = true

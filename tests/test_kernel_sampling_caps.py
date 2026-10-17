@@ -9,7 +9,9 @@ ROOT = Path(__file__).parents[1] / "training/environments/kernel_rlm/modal_app"
 
 @pytest.fixture
 def patched_package(tmp_path):
-    spec = importlib.util.spec_from_file_location("sampling_cap_patch", ROOT / "verifiers_sampling.py")
+    spec = importlib.util.spec_from_file_location(
+        "sampling_cap_patch", ROOT / "verifiers_sampling.py"
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     dialect = tmp_path / "v1/dialects/chat.py"
@@ -35,18 +37,21 @@ def patched_package(tmp_path):
     return module, tmp_path, dialect, client
 
 
-@pytest.mark.parametrize("requested", [128, 512, 2048, 4096])
+@pytest.mark.parametrize("rollout_cap", [2048, 4096])
+@pytest.mark.parametrize("requested", [128, 512, 2048, 4096, 8192])
 @pytest.mark.parametrize("field", ["max_tokens", "max_completion_tokens"])
-def test_request_cap_survives_both_interception_stages(patched_package, requested, field):
+def test_request_cap_survives_both_interception_stages(
+    patched_package, requested, field, rollout_cap
+):
     _module, _root, dialect, client = patched_package
     namespace = {}
     exec(compile(dialect.read_text(), str(dialect), "exec"), namespace)
     exec(compile(client.read_text(), str(client), "exec"), namespace)
-    sampling = SimpleNamespace(wire_args=lambda: {"max_tokens": 2048, "temperature": 1.0})
+    sampling = SimpleNamespace(wire_args=lambda: {"max_tokens": rollout_cap, "temperature": 1.0})
     body = namespace["ChatDialect"]().apply_overrides({field: requested}, "policy", sampling)
     parameters = namespace["TrainClient"]().parameters(body, sampling)
-    assert body["max_tokens"] == min(requested, 2048)
-    assert parameters["max_tokens"] == min(requested, 2048)
+    assert body["max_tokens"] == min(requested, rollout_cap)
+    assert parameters["max_tokens"] == min(requested, rollout_cap)
     assert parameters["temperature"] == 1.0
 
 

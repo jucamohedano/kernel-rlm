@@ -15,7 +15,11 @@ samples are saved under `verifier-replay/<run-id>` in the trace volume.
 
 The one-step pilot uses a 12,288-token context for both inference and training.
 The previous 8,192-token context filled before several final submissions.
-The response limit remains 2,048 tokens, with four rollouts per group. Submit by
+The pilot and Level-1 training response limit is 4,096 tokens, with four rollouts
+per group. This raises the output allowance, not the context window. Longer
+replies can increase latency, context use, and training memory; the new cap needs
+a bounded GPU validation before a longer run. Child calls keep their separate
+2,048-token output cap. Submit by
 turn six; warnings start on turn four. The hard limit is eight turns, with the
 last two reserved for submission recovery. Recovery replies are capped at 512
 tokens and admitted only when the previous usage plus tokenizer-counted new
@@ -37,7 +41,7 @@ their new policy behavior still needs a live probe.
 Verifiers 0.3.1 normally replaces the program's output cap with the rollout-wide
 sampling cap. The image now applies a version-checked patch at build time:
 both chat request mediation and the training client keep the lower cap. A
-512-token recovery request therefore stays below the 2,048-token rollout cap;
+512-token recovery request therefore stays below the 4,096-token rollout cap;
 larger requests cannot raise that rollout cap. Temperature and other sampling
 settings remain framework-controlled. The patch is idempotent and fails if its
 source anchors change. CPU tests also exercised the actual pinned methods.
