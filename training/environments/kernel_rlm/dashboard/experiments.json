@@ -1,0 +1,53 @@
+{
+  "experiments": [
+    {
+      "id": "checkpoint-resume",
+      "title": "Resume GRPO and save compact state",
+      "status": "validated",
+      "intent": "Restore step 1, complete one additional Muon update, and save only adapter and training state without losing resumability.",
+      "change": "Preload the pinned base before LoRA restore; exclude frozen base weights from new checkpoints. Keep the old checkpoint unchanged.",
+      "conclusion": "Distributed restore from the original full checkpoint and optimizer step 2 passed. The new 68 MB checkpoint passed CPU read-back. This does not establish better kernel generation.",
+      "decision": "Validate a distributed restart from the compact checkpoint before a longer run. Keep rank 8 and current hardware limits.",
+      "limitations": ["No distributed restart from the newly compact checkpoint yet.", "One admitted cummax group is not a held-out quality comparison.", "Recovery turns and child delegation were not exercised."],
+      "runs": ["20261016T160356Z-ae58574d", "20261016T161811Z-a40752ff"],
+      "evidence_file": "notes/results/20261016-resumed-grpo.json",
+      "relationships": [{"from": "20261016T160356Z-ae58574d", "to": "20261016T161811Z-a40752ff", "kind": "retry", "label": "Retry after checkpoint key fix; not a trained-checkpoint dependency"}]
+    },
+    {
+      "id": "first-grpo-update",
+      "title": "First saved GRPO update",
+      "status": "validated",
+      "intent": "Verify the real model can produce rollouts, supply a nonzero GRPO signal, update attention LoRA, and save training state.",
+      "change": "Three A100s: one for inference/verifier access and two for expert-parallel training. Rank-8 attention LoRA with Muon.",
+      "conclusion": "Step 1 and checkpoint read-back passed. Rewards [0, 0.1, 0, 0.1] supplied submission signal only; no admitted final kernel was correct.",
+      "decision": "Use the saved state to validate resume and improve submission reliability before scaling training.",
+      "limitations": ["Three of five saved episodes reached the turn limit.", "The original full checkpoint is about 134 GB; preserve it until compact resume is validated."],
+      "runs": ["20261016T110144Z-74f7d8b6"],
+      "evidence_file": "notes/results/20261016-grpo-pilot.json"
+    },
+    {
+      "id": "reply-budget",
+      "title": "Give complete CUDA replies more room",
+      "status": "prepared",
+      "intent": "Reduce per-call truncations without expanding the context window or recovery budget.",
+      "change": "Normal training reply cap: 2,048 → 4,096. Context remains 12,288; recovery 512; child output 2,048; four rollouts in flight.",
+      "conclusion": "40 focused CPU checks passed. No live model run has tested the larger reply cap.",
+      "decision": "Use a bounded validation before a longer training launch; inspect output lengths, context pressure and GPU memory.",
+      "limitations": ["Longer replies may increase latency and context consumption.", "No GPU memory or quality result at the new limit."],
+      "code_commit": "090e1d0",
+      "runs": []
+    },
+    {
+      "id": "subcall-guidance",
+      "title": "Make focused delegation easier",
+      "status": "prepared",
+      "intent": "Help the root delegate difficult kernel subproblems without requiring or rewarding unnecessary child calls.",
+      "change": "Optional semantics, indexing, algorithm and compiler reviews; a small executable llm_query example stores advice and prints a short slice.",
+      "conclusion": "11 CPU checks passed, including the example through the real worker/proxy with a mocked child. No live delegation benefit is measured.",
+      "decision": "Inspect optional child use on harder kernels. Judge correctness, tokens and time, not the number of child calls.",
+      "limitations": ["Children return untested text/code advice; they have no REPL or verifier.", "No live comparison for this prompt yet."],
+      "code_commit": "1ce55e4",
+      "runs": []
+    }
+  ]
+}

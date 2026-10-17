@@ -5,6 +5,9 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
+import re
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
@@ -54,7 +57,7 @@ def discover_runs(root: Path) -> list[dict]:
     runs: dict[str, dict] = {}
     for report_path in root.rglob("report.json"):
         report = read_json(report_path)
-        run_id = str(report.get("run_id") or report_path.parent.relative_to(root))
+        run_id = str(report.get("run_id") or report_path.parent.name)
         run = runs.setdefault(run_id, {"id": run_id, "root": report_path.parent, "report": {}})
         run["report"] = report
     for metrics_path in root.rglob("metrics.jsonl"):
@@ -77,7 +80,147 @@ def discover_runs(root: Path) -> list[dict]:
         )
         run = runs.setdefault(run_id, {"id": run_id, "root": rollout_path.parent, "report": {}})
         run.setdefault("rollouts", []).append(rollout_path)
-    return sorted(runs.values(), key=lambda run: run["id"], reverse=True)
+    return sorted(runs.values(), key=run_timestamp, reverse=True)
+
+
+def run_timestamp(run: dict) -> str:
+    match = re.search(r"\d{8}T\d{6}Z", run["id"])
+    return match.group() if match else ""
+
+
+def run_date(run: dict) -> str:
+    timestamp = run_timestamp(run)
+    if not timestamp:
+        return "Date unavailable"
+    return (
+        datetime.strptime(timestamp, "%Y%m%dT%H%M%SZ")
+        .replace(tzinfo=UTC)
+        .strftime("%d %b %Y · %H:%M UTC")
+    )
+
+
+def run_title(run: dict) -> str:
+    labels = read_json(Path(__file__).with_name("run_labels.json"))
+    report = run["report"]
+    return str(
+        report.get("title")
+        or labels.get(run["id"])
+        or report.get("scope")
+        or run["root"].parent.name.replace("-", " ").replace("_", " ").title()
+    )
+
+
+def trace_reward(trace: dict) -> float | None:
+    reward = trace.get("rewards", {}).get("kernel_reward", {}).get("score")
+    if reward is None:
+        reward = trace.get("info", {}).get("kernel_reward")
+    return reward if isinstance(reward, (int, float)) and math.isfinite(reward) else None
+
+
+def trace_submitted(trace: dict) -> bool:
+    info = trace.get("info", {})
+    return bool(info.get("kernel_submission")) or info.get("kernel_termination") == "submitted"
+
+
+def model_calls(trace: dict) -> list[dict]:
+    return trace.get("info", {}).get("kernel_model_calls", trace.get("calls", []))
+
+
+def gpu_samples(run: dict) -> list[dict]:
+    return read_jsonl(run["root"] / "gpu_stats.jsonl")
+
+
+def run_summary(run: dict) -> dict:
+    if "summary" in run:
+        return run["summary"]
+    traces = rollout_traces(run)
+    effective_paths = [path for path in run.get("rollouts", []) if "effective" in path.parts]
+    effective_ids = {
+        trace.get("id")
+        for path in effective_paths
+        for row in read_jsonl(path)
+        for trace in row.get("traces", [])
+        if trace.get("id")
+    }
+    groups = run["report"].get("groups", [])
+    groups = (
+        [group for group in groups if isinstance(group, dict)] if isinstance(groups, list) else []
+    )
+    legacy = [read_json(path) for path in run.get("traces", [])]
+    completed = (
+        len(traces)
+        if traces
+        else (sum(len(group.get("rewards", [])) for group in groups) if groups else len(legacy))
+    )
+    correct = (
+        sum(
+            trace.get("info", {}).get("kernel_verify", {}).get("correct") is True
+            for trace in traces
+        )
+        if traces
+        else (
+            sum(group.get("correct", 0) for group in groups)
+            if groups
+            else sum(value.get("verification", {}).get("correct") is True for value in legacy)
+        )
+    )
+    verification_known = (
+        any("kernel_verify" in trace.get("info", {}) for trace in traces)
+        or any("correct" in group for group in groups)
+        or any("correct" in value.get("verification", {}) for value in legacy)
+    )
+    rewards = [value for trace in traces if (value := trace_reward(trace)) is not None]
+    if not traces:
+        rewards = [
+            value
+            for group in groups
+            for value in group.get("rewards", [])
+            if isinstance(value, (int, float)) and math.isfinite(value)
+        ]
+    telemetry = gpu_samples(run)
+    duration = run["report"].get("elapsed_seconds")
+    duration_source = "Run report"
+    if not isinstance(duration, (int, float)) and len(telemetry) > 1:
+        duration = (
+            datetime.fromisoformat(telemetry[-1]["timestamp_utc"])
+            - datetime.fromisoformat(telemetry[0]["timestamp_utc"])
+        ).total_seconds()
+        duration_source = "GPU telemetry span; excludes queue time"
+    calls = [call for trace in traces for call in model_calls(trace)]
+    steps = [
+        row["step"]
+        for row in run.get("metrics", [])
+        if row.get("producer") == "trainer" and "loss/mean" in row and "step" in row
+    ]
+    run["summary"] = {
+        "traces": traces,
+        "completed": completed,
+        "correct": correct if verification_known else None,
+        "submitted": sum(trace_submitted(trace) for trace in traces) if traces else None,
+        "mean_reward": sum(rewards) / len(rewards) if rewards else None,
+        "admitted": len(effective_ids) if effective_paths else None,
+        "duration": duration,
+        "duration_source": duration_source,
+        "truncated_calls": sum(call.get("finish_reason") == "length" for call in calls),
+        "model_calls": len(calls),
+        "subcalls": sum(len(trace.get("info", {}).get("kernel_subcalls", [])) for trace in traces),
+        "optimizer_step": max(steps) if steps else None,
+    }
+    return run["summary"]
+
+
+def experiment_catalog() -> list[dict]:
+    return read_json(Path(__file__).with_name("experiments.json")).get("experiments", [])
+
+
+def execution_badge(run: dict) -> str:
+    status = str(run["report"].get("status", "artifacts")).replace("_", " ")
+    tone = (
+        "success"
+        if status in {"passed", "completed", "group passed", "trajectory passed"}
+        else ("failure" if "failed" in status or status == "interrupted" else "neutral")
+    )
+    return f'<span class="pill {tone}">{text(status)}</span>'
 
 
 def text(value: object) -> str:
@@ -92,42 +235,136 @@ def metric_value(metrics: list[dict], names: tuple[str, ...]) -> object:
     return "—"
 
 
-def chart_svg(metrics: list[dict], key_names: tuple[str, ...], color: str) -> str:
-    points: list[float] = []
-    for row in metrics:
-        value = metric_value([row], key_names)
-        if isinstance(value, int | float):
-            points.append(float(value))
-    if len(points) < 2:
-        return '<div class="empty">No series recorded yet.</div>'
-    low, high = min(points), max(points)
-    span = high - low or 1.0
-    coords = []
-    for index, value in enumerate(points):
-        x = 8 + index * 384 / max(len(points) - 1, 1)
-        y = 112 - (value - low) * 96 / span
-        coords.append(f"{x:.1f},{y:.1f}")
+def plot_svg(
+    series: dict[str, list[tuple[float, float]]],
+    x_label: str,
+    y_label: str,
+    source: str,
+    bounds: tuple[float, float] | None = None,
+) -> str:
+    points = [point for values in series.values() for point in values]
+    if not points:
+        return '<p class="empty">No series recorded in downloaded evidence.</p>'
+    x_min, x_max = min(point[0] for point in points), max(point[0] for point in points)
+    y_min, y_max = bounds or (min(point[1] for point in points), max(point[1] for point in points))
+    x_span, y_span = x_max - x_min or 1, y_max - y_min or 1
+    shapes = []
+    legend = []
+    colors = ("#6250cc", "#26785c", "#af713d")
+    for index, (name, values) in enumerate(series.items()):
+        color = colors[index % len(colors)]
+        coordinates = [
+            (52 + (position - x_min) * 328 / x_span, 144 - (value - y_min) * 116 / y_span)
+            for position, value in values
+        ]
+        if len(coordinates) > 1:
+            shapes.append(
+                f'<polyline points="{" ".join(f"{horizontal:.1f},{vertical:.1f}" for horizontal, vertical in coordinates)}" '
+                f'fill="none" stroke="{color}" stroke-width="2"/>'
+            )
+        elif coordinates:
+            shapes.append(
+                f'<circle cx="{coordinates[0][0]}" cy="{coordinates[0][1]}" r="4" fill="{color}"/>'
+            )
+        legend.append(f'<span><i style="background:{color}"></i>{text(name)}</span>')
+    if len(points) == 1:
+        legend.append("<span>One saved point; no trend established</span>")
     return (
-        f'<svg viewBox="0 0 400 120" role="img" aria-label="metric chart">'
-        f'<polyline points="{" ".join(coords)}" fill="none" stroke="{color}" stroke-width="3" />'
-        f'<text x="8" y="12">max {high:.3g}</text><text x="8" y="118">min {low:.3g}</text></svg>'
-        '<div class="muted">X: saved sample order · Y: metric value</div>'
+        f'<svg class="metric-plot" viewBox="0 0 400 190" role="img" aria-label="{text(y_label)} versus {text(x_label)}">'
+        f"<title>{text(y_label)} versus {text(x_label)}</title>"
+        '<path d="M52 28V144H380 M52 28H380 M52 86H380" class="plot-grid"/>'
+        + "".join(shapes)
+        + f'<text x="46" y="32" text-anchor="end">{y_max:.3g}</text>'
+        f'<text x="46" y="148" text-anchor="end">{y_min:.3g}</text>'
+        f'<text x="52" y="162">{x_min:.3g}</text><text x="380" y="162" text-anchor="end">{x_max:.3g}</text>'
+        f'<text x="216" y="183" text-anchor="middle">{text(x_label)}</text>'
+        f'<text x="12" y="86" text-anchor="middle" transform="rotate(-90 12 86)">{text(y_label)}</text></svg>'
+        '<div class="plot-legend">' + "".join(legend) + "</div>"
+        f'<p class="plot-source">{text(source)}</p>'
     )
 
 
-def layout(title: str, body: str) -> str:
+def chart_svg(metrics: list[dict], key_names: tuple[str, ...], label: str) -> str:
+    values = {}
+    for index, row in enumerate(metrics):
+        value = metric_value([row], key_names)
+        if isinstance(value, (int, float)) and math.isfinite(value):
+            values[row.get("step", index)] = float(value)
+    if len(values) == 1:
+        step, value = next(iter(values.items()))
+        return (
+            f'<div class="single-measurement">{value:.4g}<small>Optimizer step {text(step)}</small></div>'
+            '<p class="plot-source">One saved point; no trend established. Source: downloaded metrics.jsonl.</p>'
+        )
+    return plot_svg(
+        {label: sorted(values.items())},
+        "Optimizer step",
+        label,
+        "Source: downloaded metrics.jsonl; recorded steps only",
+    )
+
+
+def render_gpu_charts(run: dict) -> str:
+    samples = gpu_samples(run)
+    if not samples:
+        return '<p class="muted">GPU telemetry not downloaded. No usage is inferred.</p>'
+    start = datetime.fromisoformat(samples[0]["timestamp_utc"])
+    figures = []
+    for key, label, scale, bounds in (
+        ("memory_used_mib", "GPU memory (GiB)", 1024, (0, 80)),
+        ("gpu_utilization_percent", "GPU utilization (%)", 1, (0, 100)),
+    ):
+        series = {}
+        for sample in samples:
+            elapsed = (datetime.fromisoformat(sample["timestamp_utc"]) - start).total_seconds() / 60
+            for gpu in sample.get("gpus", []):
+                value = gpu.get(key)
+                if isinstance(value, (int, float)) and math.isfinite(value):
+                    series.setdefault(f"GPU {gpu['index']}", []).append((elapsed, value / scale))
+        if series:
+            memory_bounds = (
+                0,
+                max(gpu.get("memory_total_mib", 81920) for gpu in samples[0]["gpus"]) / 1024,
+            )
+            figures.append(
+                '<figure class="chart-card"><h3>'
+                + label
+                + "</h3>"
+                + plot_svg(
+                    series,
+                    "Minutes since first sample",
+                    label,
+                    f"Source: gpu_stats.jsonl · {samples[0]['timestamp_utc']} to {samples[-1]['timestamp_utc']}",
+                    memory_bounds if key == "memory_used_mib" else bounds,
+                )
+                + "</figure>"
+            )
+    return "".join(figures)
+
+
+def layout(title: str, body: str, active: str = "experiments") -> str:
     assets = Path(__file__).parent
     styles = (assets / "viewer.css").read_text()
     script = (assets / "viewer.js").read_text()
+    navigation = "".join(
+        f'<a href="{url}" {"aria-current=page" if active == key else ""}>{label}</a>'
+        for key, label, url in (
+            ("overview", "Overview", "/"),
+            ("experiments", "Experiments", "/?view=experiments"),
+            ("lineage", "Lineage", "/?view=lineage"),
+            ("runs", "Run attempts", "/?view=runs"),
+            ("configs", "Configs & compatibility", "/?view=configs"),
+            ("guide", "Learning report", "/guide"),
+        )
+    )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{text(title)}</title><style>{styles}</style></head>
-<body><nav><strong>Kernel<span style="color:var(--accent)">RLM</span> / experiments</strong>
-<a href="/">All runs</a><a href="/guide">Project guide</a></nav><main>{body}
-<footer>Local saved artifacts · No GPU jobs · Layout inspired by
-<a href="https://posttrainbench.com/traces/">PostTrainBench</a></footer>
-</main><script>{script}</script></body></html>"""
+<body><div class="app-frame"><aside class="app-nav"><a class="brand" href="/">Kernel<span>RLM</span><small>Research workspace</small></a>
+<nav aria-label="Workspace">{navigation}</nav><div class="local-note"><span class="status-dot"></span> Local artifacts only<br>No GPU jobs or API calls</div></aside>
+<main>{body}<footer>Saved evidence, not a live monitor. Missing measurements are not zero.
+ · <a href="/guide">Project guide</a></footer></main></div><script>{script}</script></body></html>"""
 
 
 def render_project_guide() -> str:
@@ -135,50 +372,234 @@ def render_project_guide() -> str:
     return path.read_text(encoding="utf-8")
 
 
-def render_index(root: Path) -> str:
-    runs = discover_runs(root)
-    labels = read_json(Path(__file__).with_name("run_labels.json"))
-    cards = []
+def render_guide_workspace() -> str:
+    document = render_project_guide()
+    article = document.split("<main>", 1)[1].split("</main>", 1)[0]
+    return layout(
+        "Kernel-RLM · Learning report", '<article class="guide">' + article + "</article>", "guide"
+    )
+
+
+def render_run_table(runs: list[dict]) -> str:
+    rows = []
     for run in runs:
         report = run["report"]
-        metrics = run.get("metrics", [])
-        status = report.get("status", "artifacts")
-        category = run["root"].parent.name.replace("-", " ").replace("_", " ").title()
-        title = report.get("title") or labels.get(run["id"]) or report.get("scope") or category
-        groups = report.get("groups", [])
-        groups = [group for group in groups if isinstance(group, dict)] if isinstance(groups, list) else []
-        completed = sum(len(group.get("rewards", [])) for group in groups)
-        correct = sum(group.get("correct", 0) for group in groups)
+        summary = run_summary(run)
         outcome = (
-            f"{correct}/{completed} correct final submissions"
-            if completed
-            else "No completed rollouts recorded"
+            f"{summary['correct']}/{summary['completed']} correct final submissions"
+            if (summary["correct"] is not None)
+            else "Outcome unavailable in downloaded evidence"
         )
-        duration = report.get("elapsed_seconds")
-        elapsed = f"{duration / 60:.1f} min" if isinstance(duration, int | float) else "Not recorded"
-        cards.append(
-            f'<article class="card run" data-run><div><span class="badge">{text(category)}</span>'
-            f'<h3><a href="/?run={quote(run["id"])}">{text(title)}</a></h3>'
-            f'<p>{text(outcome)} · Duration: {text(elapsed)}</p>'
-            f'<div class="muted">{text(report.get("model_id", "Model not recorded"))}</div>'
-            f'<details><summary>Run ID and recorded metrics</summary>{text(run["id"])}'
-            f' · {len(metrics)} metric rows</details></div>'
-            f'<span class="pill">{text(str(status).replace("_", " "))}</span></article>'
+        duration = summary["duration"]
+        elapsed = (
+            f"{duration / 60:.1f} min" if isinstance(duration, int | float) else "Not recorded"
         )
-    body = (
-        '<header><div><h1>Kernel-RLM Experiments</h1><div class="muted">Saved Modal artifacts · CPU-only viewer</div></div>'
-        f'<span class="pill">{len(runs)} runs</span></header>'
-        '<p>Newest first. Frozen probes test the workflow without updating model weights. '
-        'Correctness is not a speedup or a training improvement.</p>'
-        '<label for="run-search">Find an experiment</label> '
-        '<input id="run-search" type="search" placeholder="Search name, outcome, model or run ID">'
-        '<p id="run-count" aria-live="polite"></p><h2>Runs</h2>'
-        + (
-            "".join(cards)
-            or '<div class="card empty">No reports found. Download a Modal run directory into this root.</div>'
+        admitted = summary["admitted"]
+        rows.append(
+            f'<tr data-run><td><a class="run-title" href="/?run={quote(run["id"])}">{text(run_title(run))}</a>'
+            f"<small>{text(run_date(run))} · {text(run['root'].parent.name)}</small>"
+            f'<small class="run-id">{text(run["id"])}</small></td>'
+            f"<td>{execution_badge(run)}</td><td>{text(outcome)}"
+            + (
+                f"<small>{admitted} / {summary['completed']} admitted for training</small>"
+                if admitted is not None
+                else ""
+            )
+            + f"<small>{text(report.get('model_id', 'Model not recorded'))}</small></td>"
+            f'<td title="{text(summary["duration_source"])}">{elapsed}</td>'
+            f"<td>{summary['optimizer_step'] if summary['optimizer_step'] is not None else '—'}</td></tr>"
+        )
+    return (
+        '<div class="table-toolbar"><label for="run-search">Find a run</label>'
+        '<input id="run-search" type="search" placeholder="Search title, result, model or ID">'
+        '<label for="run-status">Execution</label><select id="run-status"><option value="">All</option>'
+        '<option value="success">Succeeded</option><option value="failure">Failed</option></select>'
+        '<span id="run-count" aria-live="polite"></span></div>'
+        '<div class="table-scroll"><table><caption>Downloaded run attempts · newest UTC timestamp first</caption>'
+        "<thead><tr><th>Run / recorded date</th><th>Execution</th><th>Saved evidence</th><th>Duration</th><th>Optimizer step</th></tr></thead>"
+        "<tbody>" + "".join(rows) + "</tbody></table></div>"
+    )
+
+
+def render_experiment(experiment: dict, runs: list[dict]) -> str:
+    attempts = [run for run in runs if run["id"] in experiment["runs"]]
+    sections = "".join(
+        f'<section class="research-section"><h2>{label}</h2><p>{text(experiment[key])}</p></section>'
+        for key, label in (
+            ("intent", "Intent"),
+            ("change", "What changed"),
+            ("conclusion", "Conclusion"),
+            ("decision", "Next decision"),
         )
     )
-    return layout("Kernel-RLM Experiments", body)
+    limitations = "".join(f"<li>{text(item)}</li>" for item in experiment["limitations"])
+    evidence = ""
+    evidence_file = experiment.get("evidence_file")
+    if evidence_file:
+        report = read_json(Path(__file__).resolve().parents[5] / evidence_file)
+        cost = report.get("approximate_compute_cost", {}).get("estimated_total_range_usd")
+        if cost:
+            evidence += f'<p class="cost-note">Approximate compute: ${cost[0]:.2f}–${cost[1]:.2f}. Includes failed resume attempt; excludes storage and earlier experiments. Not an invoice.</p>'
+        evidence += folded("Structured result evidence · " + evidence_file, report)
+    commit = experiment.get("code_commit")
+    return (
+        f'<header><div><div class="eyebrow">Experiment · {text(experiment["id"])}</div>'
+        f'<h1>{text(experiment["title"])}</h1></div><span class="pill {text(experiment["status"])}">'
+        f"{text(experiment['status'])}</span></header>"
+        '<div class="evidence-strip"><span>Execution ≠ validation ≠ model improvement</span>'
+        "<span>Held-out quality improvement: not established</span></div>"
+        + sections
+        + "<details><summary>Limitations and untested behavior</summary><ul>"
+        + limitations
+        + "</ul></details>"
+        + (
+            f'<p class="muted">Code revision: <code>{text(commit)}</code>. Prepared change; no live result yet.</p>'
+            if commit
+            else ""
+        )
+        + (
+            "<h2>Run attempts</h2>" + render_run_table(attempts)
+            if attempts
+            else '<p class="prepared-note">No run launched for this change. CPU checks are not model experiments.</p>'
+        )
+        + evidence
+    )
+
+
+def render_index(root: Path, experiment_id: str = "", view: str = "overview") -> str:
+    runs = discover_runs(root)
+    experiments = experiment_catalog()
+    if view == "runs":
+        return layout(
+            "Run attempts",
+            '<header><div><div class="eyebrow">Evidence library</div>'
+            "<h1>Run attempts</h1><p>Failures remain visible. Correctness and speed are separate from execution status.</p></div></header>"
+            + render_run_table(runs),
+            "runs",
+        )
+    selected = next((item for item in experiments if item["id"] == experiment_id), None)
+    if view == "experiments" and selected is None:
+        selected = experiments[0] if experiments else None
+    links = "".join(
+        f'<a class="experiment-link {"selected" if selected == item else ""}" data-experiment '
+        f'href="/?experiment={quote(item["id"])}"><span class="status-dot {text(item["status"])}"></span>'
+        f"<span><strong>{text(item['title'])}</strong><small>{text(item['status'])} · {len(item['runs'])} attempts</small></span></a>"
+        for item in experiments
+    )
+    if selected:
+        content = render_experiment(selected, runs)
+    else:
+        content = (
+            '<header><div><div class="eyebrow">Kernel generation · Laguna XS.2</div>'
+            '<h1>Research overview</h1><p class="lede">What works, what remains untested, and what to run next.</p></div></header>'
+            '<section class="hero-result"><span class="pill success">Latest verified milestone</span>'
+            "<h2>GRPO resumed. Step 2 is durable.</h2><p>Three of four admitted cummax kernels passed. "
+            "The compact checkpoint passed CPU read-back. These are workflow checks, not a held-out learning gain.</p>"
+            '<a href="/?experiment=checkpoint-resume">Read the evidence →</a></section>'
+            '<div class="decision-grid"><section><h2>Prepared, not tested live</h2><p>4,096-token normal replies and clearer optional subcall guidance. '
+            "Context, recovery limits and hardware are unchanged.</p></section>"
+            "<section><h2>Next validation</h2><p>Restart from the compact checkpoint before a longer run. "
+            "Measure end-to-end throughput and evaluate held-out tasks before claiming improvement.</p></section></div>"
+            "<h2>Downloaded run attempts</h2>" + render_run_table(runs)
+        )
+    return layout(
+        "Kernel-RLM Research",
+        '<div class="experiment-workspace"><aside class="experiment-list">'
+        '<h2>Experiments</h2><label class="sr-only" for="experiment-search">Search experiments</label>'
+        '<input id="experiment-search" type="search" placeholder="Search experiments…">'
+        + links
+        + '<p class="muted">An experiment is a question. A run is one attempt. A trajectory is one agent episode.</p>'
+        '</aside><div class="experiment-detail">' + content + "</div></div>",
+        "experiments" if selected else "overview",
+    )
+
+
+def render_lineage(root: Path) -> str:
+    runs = discover_runs(root)
+    by_id = {run["id"]: run for run in runs}
+    edges = []
+    for run in runs:
+        parent = run["report"].get("resumed_from")
+        if parent:
+            action = (
+                "Resumed from"
+                if run["report"].get("status") == "passed"
+                else "Resume requested from"
+            )
+            edges.append(
+                {
+                    "from": parent,
+                    "to": run["id"],
+                    "kind": "checkpoint",
+                    "label": f"{action} step {run['report'].get('resume_step', 'unknown')} checkpoint",
+                }
+            )
+    for experiment in experiment_catalog():
+        edges.extend(
+            edge
+            for edge in experiment.get("relationships", [])
+            if edge["from"] in by_id and edge["to"] in by_id
+        )
+    connections = []
+    for edge in edges:
+        parent = by_id.get(edge["from"])
+        child = by_id.get(edge["to"])
+        connections.append(
+            '<article class="lineage-edge">'
+            f'<a class="lineage-node" href="/?run={quote(edge["from"])}"><strong>{text(run_title(parent) if parent else edge["from"])}</strong>'
+            f"<small>{text(edge['from'])}</small></a>"
+            f'<div class="lineage-connector {text(edge["kind"])}"><span>{text(edge["label"])}</span><b aria-hidden="true">→</b></div>'
+            f'<a class="lineage-node" href="/?run={quote(edge["to"])}"><strong>{text(run_title(child) if child else edge["to"])}</strong>'
+            f"<small>{text(edge['to'])}</small></a></article>"
+        )
+    return layout(
+        "Experiment lineage",
+        '<header><div><div class="eyebrow">Recorded dependencies</div><h1>Lineage</h1>'
+        "<p>Solid links restore checkpoint state. Dashed links describe a retry, not inherited trained weights.</p></div></header>"
+        '<div class="lineage-board">' + "".join(connections) + "</div>"
+        '<p class="muted">Only explicit report or experiment relationships are shown. Chronological order does not create a dependency. '
+        "A repeated source node represents the same run, not a duplicated checkpoint.</p>",
+        "lineage",
+    )
+
+
+def render_configs(root: Path) -> str:
+    rows = []
+    for run in discover_runs(root):
+        report = run["report"]
+        if not any(report.get(key) for key in ("prime_revision", "model_revision")):
+            continue
+        rows.append(
+            f'<tr><td><a href="/?run={quote(run["id"])}">{text(run_title(run))}</a><small>{text(run_date(run))}</small></td>'
+            f"<td><code>{text(report.get('model_revision', 'Not recorded'))}</code></td>"
+            f"<td><code>{text(report.get('prime_revision', 'Not recorded'))}</code></td>"
+            f"<td>{execution_badge(run)}<small>Recorded run outcome only</small></td></tr>"
+        )
+    import tomllib
+
+    configs = {}
+    for name in ("grpo_pilot.toml", "grpo_level1.toml"):
+        config = tomllib.loads((Path(__file__).parent.parent / "configs" / name).read_text())
+        harness = config["orchestrator"]["train"]["source"][0]["env"]["agent"]["harness"]
+        configs[name] = {
+            "normal_reply_tokens": harness["max_tokens"],
+            "context_tokens": config["seq_len"],
+            "max_turns": harness["max_turns"],
+            "max_subcalls": harness["max_subcalls"],
+            "group_size": config["orchestrator"]["group_size"],
+            "lora_rank": config["trainer"]["model"]["lora"]["rank"],
+        }
+    return layout(
+        "Configs and compatibility",
+        '<header><div><div class="eyebrow">Provenance</div><h1>Configs & compatibility</h1>'
+        "<p>Historical revisions come from each saved report. Current files are shown separately; they do not describe older runs.</p></div></header>"
+        + folded("Current training configs · prepared settings, not historical results", configs)
+        + '<div class="table-scroll"><table><caption>Recorded component combinations; not an independent compatibility certification</caption>'
+        "<thead><tr><th>Run</th><th>Model revision</th><th>Prime revision</th><th>Execution</th></tr></thead><tbody>"
+        + "".join(rows)
+        + "</tbody></table></div>",
+        "configs",
+    )
 
 
 def render_trace(path: Path) -> str:
@@ -214,12 +635,14 @@ def render_trace(path: Path) -> str:
 
 
 def rollout_traces(run: dict) -> list[dict]:
-    return [
-        trace
-        for path in sorted(run.get("rollouts", []))
-        for row in read_jsonl(path)
-        for trace in row.get("traces", [])
-    ]
+    traces = {}
+    paths = sorted(run.get("rollouts", []), key=lambda path: ("effective" in path.parts, str(path)))
+    for path in paths:
+        for row_index, row in enumerate(read_jsonl(path)):
+            for trace_index, trace in enumerate(row.get("traces", [])):
+                identity = trace.get("id") or (str(path), row_index, trace_index)
+                traces.setdefault(identity, trace)
+    return list(traces.values())
 
 
 def folded(label: str, value: object) -> str:
@@ -273,8 +696,7 @@ def render_timeline(trace: dict) -> str:
         child_systems = [
             node["message"]
             for index, node in enumerate(trace.get("nodes", []))
-            if index > 0 and node.get("parent") is None
-            and node["message"].get("role") == "system"
+            if index > 0 and node.get("parent") is None and node["message"].get("role") == "system"
         ]
         if child_systems:
             events.append(folded("Child system instructions", child_systems))
@@ -285,32 +707,42 @@ def render_timeline(trace: dict) -> str:
 
 
 def render_run(root: Path, run_id: str, trajectory: int = 0) -> str:
-    run = next((candidate for candidate in discover_runs(root) if candidate["id"] == run_id), None)
+    run = next(
+        (
+            candidate
+            for candidate in discover_runs(root)
+            if candidate["id"] == run_id or candidate["id"] == run_id.rsplit("/", 1)[-1]
+        ),
+        None,
+    )
     if run is None:
         return layout("Not found", '<h1>Run not found</h1><a href="/">Back</a>')
     report = run["report"]
     metrics = run.get("metrics", [])
-    traces = rollout_traces(run)
-    submitted = sum(bool(trace.get("info", {}).get("kernel_submission")) for trace in traces)
-    rewards = [trace.get("rewards", {}).get("kernel_reward", {}).get("score") for trace in traces]
+    normalized = run_summary(run)
+    traces = normalized["traces"]
+    submitted = normalized["submitted"]
+    rewards = [trace_reward(trace) for trace in traces]
     numeric_rewards = [reward for reward in rewards if isinstance(reward, int | float)]
     mean_reward = f"{sum(numeric_rewards) / len(numeric_rewards):.3f}" if numeric_rewards else "—"
     trajectory = max(0, min(trajectory, len(traces) - 1))
     selected = traces[trajectory] if traces else {}
     tokens = {
         key: sum(
-            call.get("usage", {}).get(key, 0) for trace in traces for call in trace.get("calls", [])
+            (call.get("usage") or {}).get(key, 0) for trace in traces for call in model_calls(trace)
         )
         for key in ("prompt_tokens", "completion_tokens")
     }
     summary = (
-        '<aside class="sidebar"><a href="/">← Back to all runs</a><div class="card">'
+        '<aside class="sidebar"><a href="/?view=runs">← All run attempts</a><div class="card">'
         f"<h2>{text(report.get('model_id', 'Kernel-RLM'))}</h2>"
-        f'<span class="badge">{text(report.get("status", "saved artifacts"))}</span>'
+        f"{execution_badge(run)}"
         '<hr><div class="eyebrow">Mean saved kernel reward</div>'
         f'<div class="value">{mean_reward}</div><dl>'
         f"<dt>TRAJECTORIES</dt><dd>{len(traces)}</dd>"
         f"<dt>NONEMPTY SUBMISSIONS</dt><dd>{submitted} / {len(traces)}</dd>"
+        f"<dt>ADMITTED FOR TRAINING</dt><dd>{normalized['admitted'] if normalized['admitted'] is not None else 'Not recorded'}</dd>"
+        f"<dt>OPTIMIZER STEP</dt><dd>{normalized['optimizer_step'] if normalized['optimizer_step'] is not None else 'Not recorded'}</dd>"
         f"<dt>INPUT / OUTPUT TOKENS</dt><dd>{tokens['prompt_tokens']:,} / {tokens['completion_tokens']:,}</dd>"
         f"<dt>HARDWARE</dt><dd>{text(report.get('gpu_topology', 'Not recorded'))}</dd>"
         f"<dt>RUN ID</dt><dd>{text(run_id)}</dd></dl>"
@@ -332,8 +764,8 @@ def render_run(root: Path, run_id: str, trajectory: int = 0) -> str:
         else ""
     )
     info = selected.get("info", {})
-    has_submission = bool(info.get("kernel_submission"))
-    length_calls = sum(call.get("finish_reason") == "length" for call in selected.get("calls", []))
+    has_submission = trace_submitted(selected)
+    length_calls = sum(call.get("finish_reason") == "length" for call in model_calls(selected))
     evidence = (
         (
             f'<p><span class="badge">{"Submitted" if has_submission else "No final submission"}</span> '
@@ -353,6 +785,17 @@ def render_run(root: Path, run_id: str, trajectory: int = 0) -> str:
         (
             folded("Recorded reward", selected.get("rewards", {}))
             + folded("Final kernel submission", info.get("kernel_submission", ""))
+            + folded(
+                "Final verifier result · correctness and measured speed",
+                info.get("kernel_verify", {}),
+            )
+            + folded(
+                "Recovery and rejected actions",
+                {
+                    "recovery": info.get("kernel_recovery", []),
+                    "rejected_actions": info.get("kernel_action_rejections", []),
+                },
+            )
             + folded("Recorded errors", selected.get("errors", []))
             + folded("Task and reference", selected.get("task", {}))
             + '<p class="muted">Compilation feedback appears in the REPL observations. An empty submission never reached final kernel scoring.</p>'
@@ -378,20 +821,54 @@ def render_run(root: Path, run_id: str, trajectory: int = 0) -> str:
         + f'<div class="panel" id="verification" hidden>{verification}</div>'
         + f'<div class="panel" id="artifacts" hidden>{artifacts}</div></section>'
     )
-    curves = '<aside class="metrics"><h2 class="eyebrow">Saved metrics</h2>'
-    for label, keys, color in (
-        ("Reward", ("reward/mean", "reward", "train/reward"), "#ab694c"),
-        ("Loss", ("loss", "train/loss", "policy_loss"), "#8c803d"),
-        ("Entropy", ("entropy", "train/entropy"), "#6e8150"),
+    curves = (
+        '<aside class="metrics"><h2 class="eyebrow">Saved measurements</h2>'
+        '<button id="expand-charts" type="button" aria-expanded="false">Expand charts</button>'
+    )
+    for label, keys in (
+        (
+            "Admitted reward",
+            (
+                "train/agg/effective/agent/reward/mean",
+                "train/kernel-rlm-level1-pilot/effective/agent/reward/mean",
+                "reward/mean",
+                "reward",
+                "train/reward",
+            ),
+        ),
+        ("Loss", ("loss/mean", "loss", "train/loss", "policy_loss")),
+        ("Entropy (nats)", ("entropy/all/mean", "entropy", "train/entropy")),
     ):
-        curves += f'<div class="card"><h3>{label}</h3>' + chart_svg(metrics, keys, color) + "</div>"
-    curves += (
-        '<div class="card"><h3>GPU telemetry</h3><p class="muted">'
-        "Not connected in this viewer. No utilization or memory values are inferred from missing data."
-        "</p></div></aside>"
+        if any(isinstance(metric_value([row], keys), (int, float)) for row in metrics):
+            curves += (
+                f'<figure class="chart-card"><h3>{label}</h3>'
+                + chart_svg(metrics, keys, label)
+                + "</figure>"
+            )
+    if traces:
+        reward_bars = "".join(
+            f'<div class="reward-row"><span title="{text(trace.get("task", {}).get("data", {}).get("name", "unknown"))}">T{index + 1}</span>'
+            f'<meter min="0" max="1" value="{reward}">{reward:.3f}</meter><strong>{reward:.3f}</strong></div>'
+            for index, trace in enumerate(traces)
+            if (reward := trace_reward(trace)) is not None
+        )
+        curves += (
+            '<figure class="chart-card"><h3>Reward by saved trajectory</h3>'
+            + reward_bars
+            + (
+                '<p class="plot-source">Reward (0–1) · all unique saved trajectories, including filtered groups. '
+                "Source: traces.jsonl. Each T number matches the selector.</p></figure>"
+            )
+        )
+    curves += render_gpu_charts(run) + "</aside>"
+    heading = (
+        f'<header class="run-header"><div><div class="eyebrow">Run attempt · {text(run_date(run))}</div>'
+        f'<h1>{text(run_title(run))}</h1><p class="muted">Execution status is not a held-out quality result.</p></div>'
+        '<a class="button-link" href="/?view=lineage">View lineage</a></header>'
     )
     return layout(
-        f"Kernel-RLM · {run_id}", '<div class="workspace">' + summary + center + curves + "</div>"
+        f"Kernel-RLM · {run_id}",
+        heading + '<div class="workspace">' + summary + center + curves + "</div>",
     )
 
 
@@ -413,7 +890,11 @@ def make_handler(root: Path):
             if request.path in static_pages:
                 relative_path, media_type = static_pages[request.path]
                 try:
-                    document = (project_root / relative_path).read_text(encoding="utf-8")
+                    document = (
+                        render_guide_workspace()
+                        if request.path == "/guide"
+                        else (project_root / relative_path).read_text(encoding="utf-8")
+                    )
                 except OSError:
                     self.send_error(404, "Project document is unavailable")
                     return
@@ -433,7 +914,16 @@ def make_handler(root: Path):
                 if raw_trajectory.isdecimal() and len(raw_trajectory) < 10
                 else 0
             )
-            document = render_run(root, run_id, trajectory) if run_id else render_index(root)
+            view = query.get("view", ["overview"])[0]
+            experiment = query.get("experiment", [""])[0]
+            if run_id:
+                document = render_run(root, run_id, trajectory)
+            elif view == "lineage":
+                document = render_lineage(root)
+            elif view == "configs":
+                document = render_configs(root)
+            else:
+                document = render_index(root, experiment, view)
             payload = document.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")

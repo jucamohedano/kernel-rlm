@@ -47,7 +47,8 @@ def test_empty_run_and_out_of_range_selection(tmp_path):
     (run / "report.json").write_text('{"run_id":"empty"}')
     page = dashboard.render_run(tmp_path, "empty", 999)
     assert "No trajectory messages downloaded" in page
-    assert "No series recorded" in page
+    assert "GPU telemetry not downloaded" in page
+    assert "<polyline" not in page
     assert "Run not found" in dashboard.render_run(tmp_path, "missing")
 
 
@@ -113,10 +114,168 @@ def test_index_has_descriptive_labels_outcomes_and_search(tmp_path):
     assert "&lt;script&gt;unsafe&lt;/script&gt;" in page
     assert run.name in page
     (run / "report.json").write_text(json.dumps({"run_id": run.name, "groups": {"legacy": 4}}))
-    assert "No completed rollouts recorded" in dashboard.render_index(tmp_path)
+    assert "Outcome unavailable in downloaded evidence" in dashboard.render_index(tmp_path)
 
 
 def test_project_guide_is_available_from_dashboard():
     page = dashboard.render_project_guide()
     assert "Train Laguna to write CUDA kernels" in page
     assert "Project brief" in page
+
+
+def test_dates_sort_across_categories_and_legacy_ids_still_open(tmp_path):
+    older = tmp_path / "z-contract" / "20261007T120000Z-old"
+    newer = tmp_path / "a-training" / "20261016T120000Z-new"
+    for directory in (older, newer):
+        directory.mkdir(parents=True)
+        (directory / "report.json").write_text("{}")
+    runs = dashboard.discover_runs(tmp_path)
+    assert [run["id"] for run in runs] == [newer.name, older.name]
+    assert "16 Oct 2026" in dashboard.run_date(runs[0])
+    assert "Run not found" not in dashboard.render_run(tmp_path, f"a-training/{newer.name}")
+
+
+def test_prime_all_and_effective_are_deduplicated_with_separate_admission(tmp_path):
+    directory = tmp_path / "live-grpo" / "20261016T120000Z-test"
+    directory.mkdir(parents=True)
+    (directory / "report.json").write_text(json.dumps({"run_id": directory.name}))
+    traces = [
+        {
+            "id": f"episode-{index}",
+            "info": {
+                "kernel_termination": "submitted",
+                "kernel_reward": 0.9 if index >= 4 else 0.1,
+                "kernel_verify": {"correct": index >= 4},
+                "kernel_model_calls": [{"finish_reason": "length" if index == 0 else "stop"}],
+            },
+        }
+        for index in range(8)
+    ]
+    for cohort, values in (("all", traces), ("effective", traces[4:])):
+        path = directory / "rollouts/step_2/train" / cohort / "traces.jsonl"
+        path.parent.mkdir(parents=True)
+        path.write_text("\n".join(json.dumps({"traces": [trace]}) for trace in values))
+    summary = dashboard.run_summary(dashboard.discover_runs(tmp_path)[0])
+    assert summary["completed"] == summary["submitted"] == 8
+    assert summary["correct"] == summary["admitted"] == 4
+    assert summary["model_calls"] == 8
+    assert summary["truncated_calls"] == 1
+    page = dashboard.render_index(tmp_path, view="runs")
+    assert "4/8 correct final submissions" in page
+    assert "4 / 8 admitted for training" in page
+
+
+def test_legacy_trace_correctness_is_not_reported_as_missing(tmp_path):
+    directory = tmp_path / "model-rollout" / "20261001T120000Z-test"
+    directory.mkdir(parents=True)
+    (directory / "trace.json").write_text(json.dumps({"verification": {"correct": True}}))
+    summary = dashboard.run_summary(dashboard.discover_runs(tmp_path)[0])
+    assert summary["completed"] == summary["correct"] == 1
+
+
+def test_real_metric_names_and_single_point_do_not_invent_a_curve(tmp_path):
+    directory = tmp_path / "20261016T120000Z-test"
+    directory.mkdir()
+    (directory / "metrics.jsonl").write_text(
+        json.dumps(
+            {
+                "producer": "trainer",
+                "step": 2,
+                "loss/mean": -0.0023,
+                "entropy/all/mean": 0.13,
+            }
+        )
+        + "\n"
+    )
+    run = dashboard.discover_runs(tmp_path)[0]
+    assert dashboard.run_summary(run)["optimizer_step"] == 2
+    page = dashboard.render_run(tmp_path, directory.name)
+    assert "One saved point; no trend established" in page
+    assert "Optimizer step" in page
+    assert "-0.0023" in page
+    assert "<polyline" not in page
+    assert "Entropy (nats)" in page
+
+
+def test_gpu_telemetry_has_units_labels_and_duration_provenance(tmp_path):
+    directory = tmp_path / "20261016T120000Z-test"
+    directory.mkdir()
+    (directory / "report.json").write_text("{}")
+    samples = [
+        {
+            "timestamp_utc": timestamp,
+            "gpus": [
+                {
+                    "index": 0,
+                    "memory_used_mib": memory,
+                    "memory_total_mib": 81920,
+                    "gpu_utilization_percent": 25,
+                },
+            ],
+        }
+        for timestamp, memory in (("2026-10-16T12:00:00Z", 4096), ("2026-10-16T12:01:00Z", 8192))
+    ]
+    (directory / "gpu_stats.jsonl").write_text("\n".join(json.dumps(sample) for sample in samples))
+    run = dashboard.discover_runs(tmp_path)[0]
+    summary = dashboard.run_summary(run)
+    assert summary["duration"] == 60
+    assert "excludes queue time" in summary["duration_source"]
+    page = dashboard.render_gpu_charts(run)
+    assert "GPU memory (GiB)" in page
+    assert "GPU utilization (%)" in page
+    assert "Minutes since first sample" in page
+    assert "GPU 0" in page
+    assert "gpu_stats.jsonl" in page
+
+
+def test_lineage_uses_explicit_resume_and_retry_relations_only(tmp_path, monkeypatch):
+    parent = "20261016T100000Z-parent"
+    failed = "20261016T110000Z-failed"
+    retry = "20261016T120000Z-retry"
+    unrelated = "20261016T130000Z-unrelated"
+    for identity in (parent, failed, retry, unrelated):
+        directory = tmp_path / identity
+        directory.mkdir()
+        report = {"run_id": identity, "title": identity}
+        if identity in (failed, retry):
+            report.update(resumed_from=parent, resume_step=1)
+        (directory / "report.json").write_text(json.dumps(report))
+    monkeypatch.setattr(
+        dashboard,
+        "experiment_catalog",
+        lambda: [
+            {
+                "relationships": [
+                    {
+                        "from": failed,
+                        "to": retry,
+                        "kind": "retry",
+                        "label": "Retry, not checkpoint inheritance",
+                    },
+                ]
+            }
+        ],
+    )
+    page = dashboard.render_lineage(tmp_path)
+    assert page.count('class="lineage-edge"') == 3
+    assert page.count("Resume requested from step 1 checkpoint") == 2
+    assert "Retry, not checkpoint inheritance" in page
+    assert unrelated not in page
+
+
+def test_prepared_experiment_has_no_invented_live_results(tmp_path):
+    page = dashboard.render_index(tmp_path, "reply-budget")
+    assert "prepared" in page
+    assert "4,096" in page
+    assert "No run launched for this change" in page
+    assert "not established" in page
+    assert "<details open" not in page
+
+
+def test_guide_shares_navigation_without_copying_document():
+    page = dashboard.render_guide_workspace()
+    assert 'class="app-frame"' in page
+    assert 'class="guide"' in page
+    assert "Train Laguna to write CUDA kernels" in page
+    assert page.count("<!doctype html>") == 1
+    assert "<math" in page
