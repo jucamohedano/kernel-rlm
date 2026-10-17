@@ -457,7 +457,8 @@ def test_program_with_real_cpu_worker(modules, monkeypatch, tmp_path, kind, expe
     client.close.assert_awaited_once()
 
 
-def test_enabled_subcall_through_program_and_worker(modules, monkeypatch, tmp_path):
+@pytest.mark.parametrize("subcall_probe", [False, True])
+def test_enabled_subcall_through_program_and_worker(modules, monkeypatch, tmp_path, subcall_probe):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(
         "KERNEL_LIMITS",
@@ -466,7 +467,7 @@ def test_enabled_subcall_through_program_and_worker(modules, monkeypatch, tmp_pa
                 "max_turns": 1,
                 "max_tokens": 2048,
                 "enable_subcall": True,
-                "subcall_probe": True,
+                "subcall_probe": subcall_probe,
             }
         ),
     )
@@ -521,6 +522,8 @@ def test_enabled_subcall_through_program_and_worker(modules, monkeypatch, tmp_pa
     assert "use threadIdx.x" in record["messages"][-1]["content"]
     assert "Do not delegate" not in str(record["messages"])
     assert "2,048" in record["messages"][0]["content"]
+    assert "Simple subcall example" in record["messages"][0]["content"]
+    assert "Delegation is optional" in record["messages"][0]["content"]
     assert "100k" not in str(record["messages"])
     assert "500K" not in str(record["messages"])
     assert "FINAL TURN" in str(record["messages"])

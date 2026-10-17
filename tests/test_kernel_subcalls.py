@@ -140,3 +140,42 @@ def test_real_worker_proxy_single_and_batched_share_budget(subcalls):
     asyncio.run(check())
     client.chat.completions.create.assert_awaited_once()
     assert len(records) == 1
+
+
+def test_prompt_example_runs_through_real_worker_and_proxy(subcalls):
+    from kernel_rlm.subcalls import SUBCALL_INSTRUCTION
+    from rlm_train.proxy import ClientHandle, SubLLMProxy
+    from rlm_train.repl.subprocess import SubprocessReplBackend
+
+    instruction = SUBCALL_INSTRUCTION.format(max_calls=2)
+    example = instruction.split("```repl\n", 1)[1].split("```", 1)[0]
+    client = fake_client(content="Check index < length before reading or writing.")
+    records = []
+    child = subcalls(client, "same-model", len, records, max_calls=2)
+
+    async def check():
+        proxy = SubLLMProxy()
+        proxy.register(
+            "example",
+            ClientHandle(client=None, model="same-model", fake_query=child.query, max_concurrent=1),
+        )
+        backend = SubprocessReplBackend(request_timeout=10)
+        await proxy.start()
+        try:
+            await backend.start(proxy.url, "example")
+            result = await backend.execute(example)
+            assert "Check index < length" in result.stdout
+            assert not result.stderr
+            stored = await backend.execute("print(child_advice)")
+            assert "Check index < length before reading or writing." in stored.stdout
+        finally:
+            await backend.stop()
+            await proxy.stop()
+
+    asyncio.run(check())
+    client.chat.completions.create.assert_awaited_once()
+    assert len(records) == 1
+    assert "thread-to-element mapping" in records[0]["prompt"]
+    assert "if (index < length)" in records[0]["prompt"]
+    assert "Delegation is optional" in instruction
+    assert "final verification measures speed" in instruction

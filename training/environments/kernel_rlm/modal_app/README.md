@@ -38,6 +38,15 @@ Trace info includes `kernel_recovery` and `kernel_action_rejections` so skipped
 recovery and blocked actions can be inspected. These changes have CPU tests;
 their new policy behavior still needs a live probe.
 
+The subcall prompt recommends optional, focused reviews after a first candidate:
+reference semantics, thread-to-element indexing and bounds, reductions/scans,
+numerical stability, synchronization, compiler errors, or memory access. It
+includes an executable vector-add indexing example that stores `llm_query(...)`
+in `child_advice` and prints only a short slice. Adapt that question and snippet
+to the actual task; it is not a kernel template. Children give untested text or
+code advice without tools. The root integrates changes and uses `cuda_feedback`
+and final verification. No reward is added for delegation and no call is required.
+
 Verifiers 0.3.1 normally replaces the program's output cap with the rollout-wide
 sampling cap. The image now applies a version-checked patch at build time:
 both chat request mediation and the training client keep the lower cap. A
