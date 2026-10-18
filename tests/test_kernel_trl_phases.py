@@ -53,6 +53,7 @@ def test_phase_probe_is_bounded_native_generation_not_custom_rollout():
     assert ast.literal_eval(settings["use_vllm"]) is False
     assert ast.literal_eval(settings["save_strategy"]) == "no"
     assert ast.literal_eval(settings["generation_kwargs"])["min_new_tokens"] == 8
+    assert ast.literal_eval(settings["chat_template_kwargs"]) == {"enable_thinking": True}
     assert not any(
         isinstance(node, ast.keyword) and node.arg == "rollout_func" for node in ast.walk(tree)
     )
@@ -60,4 +61,24 @@ def test_phase_probe_is_bounded_native_generation_not_custom_rollout():
         not name.name.startswith("_")
         for name in ast.walk(tree)
         if isinstance(name, ast.FunctionDef)
+    )
+
+
+def test_full_prompt_stays_structured_until_native_template_tokenization():
+    tree = ast.parse((ROOT / "kernel_trl/phase_probe.py").read_text())
+    builder = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "tokenizer_and_prompt"
+    )
+    assert not any(
+        isinstance(node, ast.Attribute) and node.attr == "apply_chat_template"
+        for node in ast.walk(builder)
+    )
+    assert any(
+        isinstance(node, ast.Return)
+        and isinstance(node.value, ast.Tuple)
+        and isinstance(node.value.elts[-1], ast.Name)
+        and node.value.elts[-1].id == "messages"
+        for node in ast.walk(builder)
     )

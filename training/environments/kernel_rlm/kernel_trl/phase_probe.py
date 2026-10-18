@@ -32,10 +32,7 @@ def tokenizer_and_prompt(checkpoint: Path | None):
         messages = [
             {"role": "user", "content": "Write the CUDA expression for a thread's global 1D index."}
         ]
-        prompt = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True, enable_thinking=True
-        )
-        return tokenizer, prompt
+        return tokenizer, messages
 
     from tokenizers import Tokenizer
     from tokenizers.models import WordLevel
@@ -117,6 +114,7 @@ def train_phases(model, mesh, checkpoint: Path | None, directory: Path) -> dict:
         max_steps=2,
         max_completion_length=8,
         generation_kwargs={"min_new_tokens": 8, "use_cache": True},
+        chat_template_kwargs={"enable_thinking": True},
         mask_truncated_completions=False,
         learning_rate=1e-5,
         weight_decay=0.01,

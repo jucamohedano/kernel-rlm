@@ -4,6 +4,17 @@ The next TRL maintenance gate uses native Transformers generation on the same
 FSDP2 policy used for training. It does not create a second inference model or
 install vLLM. This is a low-friction memory route, not a throughput claim.
 
+**18 October result:** tiny and full-model gates passed on both L40S ranks. The
+full gate completed native generation and two real Muon updates, including one
+CPU offload/reload roundtrip. Full-model PyTorch allocation fell from 31.19 GiB
+to 16.26 MiB while offloaded. All 320 adapter tensors, momentum and parameter
+identities survived; the second update worked. Peak allocation was 36.33 GiB.
+
+Generation remains slow in this short check: four parallel eight-token replies
+took up to 28.9 s initially and 23.6 s after reload. These include prefill and
+are not steady-state decode benchmarks. The full probe body took 172.1 s. This
+supports memory feasibility, not a long-context training-cost forecast.
+
 ## Calling flow
 
 ```text
@@ -52,6 +63,34 @@ policy-quality gain. There is no RLM REPL, CUDA verifier or child call in this
 probe. Exact changing-prefix credit, real context lengths and compact restart
 remain separate gates. vLLM sleep/weight sync also remain untested; native
 single-policy generation avoids that dependency rather than validating it.
+
+Native FSDP2 generation also couples participating ranks through collectives.
+Fixed equal decode lengths do not establish scheduling for independent RLM
+episodes with different turn counts or child calls. That adapter remains work.
+
+## Prompt correction after the GPU gate
+
+The saved full GPU trace revealed two leading BOS tokens. The diagnostic passed
+a preformatted chat string into TRL, whose plain-text tokenizer added BOS again.
+The code now passes structured messages and explicit `enable_thinking=True` to
+native TRL template preparation instead. The actual pinned CPU trainer verifies
+that its prompt IDs match direct template tokenization, contain one initial BOS,
+and end in the thinking marker. No GPU rerun was used for this correction.
+
+The completed GPU gate used source commit `0460823`; its exact pre-correction
+source and generated IDs remain saved. Therefore this is not a corrected-prompt
+CUDA-task quality evaluation. The tokenizer checker initially made an incorrect
+assumption that Transformers returned a list rather than `BatchEncoding`; the
+final checker reads explicit `input_ids`. Those CPU-only failures are preserved.
+The runtime also emits a Mistral-regex heuristic warning for this tokenizer. We
+keep the pinned author's tokenizer unchanged, rather than applying a regex change
+without model-specific parity evidence. Cross-engine tokenization parity remains
+an open check before a quality comparison.
+
+Evidence lives in the parent project's
+`notes/diagnostics/20261018-trl-phase-sharing/`. Continue TRL first, but close the
+per-turn RLM credit, faster inference and compact-resume gates before a curriculum
+run. Native generation alone should not be assumed economical for long replies.
 
 ## Invocation on the existing VM
 
