@@ -2,6 +2,11 @@ document.querySelectorAll('[data-tab]').forEach(button => {
   button.addEventListener('click', () => {
     document.querySelectorAll('[data-tab]').forEach(tab => tab.setAttribute('aria-selected', String(tab === button)));
     document.querySelectorAll('.panel').forEach(panel => { panel.hidden = panel.id !== button.dataset.tab; });
+    const url = new URL(location.href);
+    if (url.searchParams.has('run')) {
+      url.searchParams.set('tab', button.dataset.tab);
+      history.replaceState(null, '', url);
+    }
   });
 });
 document.querySelector('#trajectory')?.addEventListener('change', event => {

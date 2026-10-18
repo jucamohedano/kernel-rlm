@@ -17,17 +17,22 @@ inspired by Microsoft's pre-training article, inside the same navigation.
 
 ## Views and evidence
 
-- `/`: current milestone, next decision and all downloaded attempts.
-- `/?view=experiments`: curated experiments with intent, change, conclusion,
-  limitations and related runs. Search the experiment list independently.
-- `/?view=runs`: timestamp-sorted attempts with search and execution filters.
-- `/?view=lineage`: explicit checkpoint resume and retry links; chronological
-  order alone never creates a dependency. A failed restore is labelled requested.
-- `/?view=configs`: saved component revisions, separate from current config files.
+- `/`: current milestone and next decision.
+- `/?view=experiments`: searchable research questions with Intent and Conclusion
+  cards, next decisions and related runs. Preparations stay separate from executions.
+- `/?experiment=checkpoint-resume&section=lineage`: follow-up questions for this
+  experiment, with checkpoint and retry details folded below. A research follow-up
+  does not imply inherited weights; chronological order never creates a dependency.
+- `/?run=RUN_ID&tab=setup`: Inputs & setup for that execution: code, dataset,
+  model, settings, notes and captured small source files. Historical gaps stay explicit.
+- `/?run=RUN_ID&tab=artifacts`: Files & checkpoints. The viewer does not fetch weights.
 - `/guide`: the canonical root HTML report, rendered inside the workspace.
-- `/?view=provenance`: registered dataset identity and per-run capture coverage.
-  A run-specific view opens immutable input snapshots, code commits, notes,
-  configuration, declared artifact locations and actual runtime/lifecycle records.
+
+Main navigation has only Overview, Experiments and Learning report. Run attempts
+belong to their experiment. The optional `/?view=runs` cross-experiment index and
+old `view=lineage`, `view=configs` and `view=provenance` diagnostic URLs still work,
+but are not separate main navigation sections. Provenance means the saved record
+of where a result came from; this evidence now lives under Inputs & setup.
 
 `experiments.json` stores curated research questions and decisions, not another
 copy of rollout metrics. Add related run IDs and explicit retry relationships
@@ -46,7 +51,8 @@ instead of sorting by category-prefixed strings. Legacy deep links still work.
 
 The run view uses a three-column layout: run summary,
 trajectory timeline, and saved metrics. Select any saved Prime trajectory (not
-just the first twelve), then switch between Run trace, Verification, and Artifacts.
+just the first twelve), then switch between Run trace, Verification, Inputs & setup,
+and Files & checkpoints. Tab selections have bookmarkable URLs.
 Messages, system prompts, reasoning, structured calls, and raw records are folded
 by default. The expand control opens the selected trajectory's messages.
 Structured calls are labelled as emitted, not as proof of execution. Token-limit

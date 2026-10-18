@@ -106,7 +106,7 @@ def test_index_has_descriptive_labels_outcomes_and_search(tmp_path):
             }
         )
     )
-    page = dashboard.render_index(tmp_path)
+    page = dashboard.render_index(tmp_path, view="runs")
     assert "Fixed syntax check · three correct submissions" in page
     assert "3/4 correct final submissions" in page
     assert "10.0 min" in page
@@ -115,7 +115,9 @@ def test_index_has_descriptive_labels_outcomes_and_search(tmp_path):
     assert "&lt;script&gt;unsafe&lt;/script&gt;" in page
     assert run.name in page
     (run / "report.json").write_text(json.dumps({"run_id": run.name, "groups": {"legacy": 4}}))
-    assert "Outcome unavailable in downloaded evidence" in dashboard.render_index(tmp_path)
+    assert "Outcome unavailable in downloaded evidence" in dashboard.render_index(
+        tmp_path, view="runs"
+    )
 
 
 def test_project_guide_is_available_from_dashboard():
@@ -315,7 +317,7 @@ def test_prepared_manifest_is_discoverable_and_snapshots_are_whitelisted(tmp_pat
     )
     (directory / "inputs/config.toml").write_text("modified")
     assert "MISMATCH" in dashboard.render_input(tmp_path, directory.name, "config.toml")
-    assert "Code, dataset" in dashboard.render_run(tmp_path, directory.name)
+    assert "Inputs &amp; setup" in dashboard.render_run(tmp_path, directory.name)
 
 
 def test_historical_runs_do_not_gain_fake_provenance(tmp_path):
@@ -325,3 +327,65 @@ def test_historical_runs_do_not_gain_fake_provenance(tmp_path):
     page = dashboard.render_provenance(tmp_path, directory.name)
     assert "Not captured before launch" in page
     assert "No exact commit" in page
+
+
+def test_main_navigation_has_only_three_sections(tmp_path):
+    page = dashboard.render_index(tmp_path, "checkpoint-resume")
+    navigation = page.split('<nav aria-label="Workspace">')[1].split("</nav>")[0]
+    assert navigation.count("<a ") == 3
+    assert "Overview" in navigation
+    assert "Experiments" in navigation
+    assert "Learning report" in navigation
+    assert "Provenance" not in navigation
+    assert "Lineage" not in navigation
+    assert "<h2>Intent</h2>" in page
+    assert "<h2>Conclusion</h2>" in page
+    assert "section=lineage" in page
+
+
+def test_preparation_is_not_counted_as_execution(tmp_path):
+    directory = tmp_path / "20261018T120000Z-prepared"
+    directory.mkdir()
+    (directory / "provenance.json").write_text(
+        json.dumps({"run_id": directory.name, "experiment_id": "reply-budget", "inputs": []})
+    )
+    page = dashboard.render_index(tmp_path, "reply-budget")
+    assert "0 executions" in page
+    assert "Prepared inputs · no execution started" in page
+    assert "<tr data-run>" not in page
+    assert f"run={directory.name}&amp;tab=setup" in page
+    assert "<details open" not in page
+
+
+def test_run_tabs_are_bookmarkable_and_scoped_to_experiment(tmp_path):
+    directory = tmp_path / "20261018T120000Z-test"
+    directory.mkdir()
+    (directory / "report.json").write_text(json.dumps({"experiment_id": "checkpoint-resume"}))
+    page = dashboard.render_run(tmp_path, directory.name, tab="setup")
+    assert 'href="/?experiment=checkpoint-resume#runs"' in page
+    assert 'id="tab-setup" aria-controls="setup" data-tab="setup" aria-selected="true"' in page
+    assert 'id="trace" hidden' in page
+    assert "No exact commit or dataset hash is inferred" in page
+    fallback = dashboard.render_run(tmp_path, directory.name, tab="invalid")
+    assert 'data-tab="trace" aria-selected="true"' in fallback
+    assert "<details open" not in page
+
+
+def test_lineage_scopes_run_edges_and_distinguishes_research_questions(tmp_path):
+    for name, report in (
+        (
+            "resume",
+            {"experiment_id": "checkpoint-resume", "resumed_from": "original", "status": "passed"},
+        ),
+        ("unrelated", {"experiment_id": "other", "resumed_from": "other-parent"}),
+    ):
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / "report.json").write_text(json.dumps(report))
+    page = dashboard.render_index(tmp_path, "checkpoint-resume", section="lineage")
+    assert "Follow-up research question" in page
+    assert "does not imply inherited model weights" in page
+    assert "Checkpoint and execution relationships" in page
+    assert 'href="/?run=original"' in page
+    assert "other-parent" not in page
+    assert "<details open" not in page

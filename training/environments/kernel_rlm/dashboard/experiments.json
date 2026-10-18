@@ -18,6 +18,7 @@
   "experiments": [
     {
       "id": "factory-provenance",
+      "follows_experiments": ["checkpoint-resume"],
       "title": "Trace experiments from inputs to artifacts",
       "status": "prepared",
       "intent": "Require a registered research question and exact input evidence before future GRPO launches.",
@@ -36,6 +37,7 @@
     },
     {
       "id": "checkpoint-resume",
+      "follows_experiments": ["first-grpo-update"],
       "provenance": {
         "dataset_ids": ["ops6k-l1-seed42"],
         "code_paths": ["rlm/training/environments/kernel_rlm/modal_app/compact_checkpoint.py", "rlm/training/environments/kernel_rlm/modal_app/grpo_live_smoke.py"],
@@ -74,6 +76,7 @@
     },
     {
       "id": "reply-budget",
+      "follows_experiments": ["checkpoint-resume"],
       "provenance": {
         "dataset_ids": ["ops6k-l1-seed42"],
         "code_paths": ["rlm/training/environments/kernel_rlm/configs/grpo_pilot.toml", "rlm/training/environments/kernel_rlm/configs/grpo_level1.toml"],
@@ -93,6 +96,7 @@
     },
     {
       "id": "subcall-guidance",
+      "follows_experiments": ["checkpoint-resume"],
       "provenance": {
         "dataset_ids": ["ops6k-l1-seed42"],
         "code_paths": ["rlm/training/environments/kernel_rlm/kernel_rlm/subcalls.py", "rlm/training/environments/kernel_rlm/kernel_rlm_v1/program.py"],

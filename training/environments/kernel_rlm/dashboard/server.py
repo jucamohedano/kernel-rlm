@@ -361,6 +361,8 @@ def render_gpu_charts(run: dict) -> str:
 
 
 def layout(title: str, body: str, active: str = "experiments") -> str:
+    if active not in {"overview", "experiments", "guide"}:
+        active = "experiments"
     assets = Path(__file__).parent
     styles = (assets / "viewer.css").read_text()
     script = (assets / "viewer.js").read_text()
@@ -369,10 +371,6 @@ def layout(title: str, body: str, active: str = "experiments") -> str:
         for key, label, url in (
             ("overview", "Overview", "/"),
             ("experiments", "Experiments", "/?view=experiments"),
-            ("lineage", "Lineage", "/?view=lineage"),
-            ("runs", "Run attempts", "/?view=runs"),
-            ("configs", "Configs & compatibility", "/?view=configs"),
-            ("provenance", "Provenance", "/?view=provenance"),
             ("guide", "Learning report", "/guide"),
         )
     )
@@ -440,20 +438,68 @@ def render_run_table(runs: list[dict]) -> str:
     )
 
 
-def render_experiment(experiment: dict, runs: list[dict]) -> str:
-    attempts = [
+def experiment_runs(experiment: dict, runs: list[dict]) -> list[dict]:
+    return [
         run
         for run in runs
         if run["id"] in experiment["runs"] or run["report"].get("experiment_id") == experiment["id"]
     ]
-    sections = "".join(
-        f'<section class="research-section"><h2>{label}</h2><p>{text(experiment[key])}</p></section>'
-        for key, label in (
-            ("intent", "Intent"),
-            ("change", "What changed"),
-            ("conclusion", "Conclusion"),
-            ("decision", "Next decision"),
-        )
+
+
+def owner_experiment(run: dict) -> dict | None:
+    return next(
+        (
+            item
+            for item in experiment_catalog()
+            if run["id"] in item["runs"] or run["report"].get("experiment_id") == item["id"]
+        ),
+        None,
+    )
+
+
+def is_preparation(run: dict) -> bool:
+    return (
+        bool(run.get("provenance"))
+        and run["report"].get("status") in {"prepared", "dispatch_requested"}
+        and not (run["root"] / "runtime.json").exists()
+        and not run.get("metrics")
+    )
+
+
+def render_preparations(runs: list[dict]) -> str:
+    if not runs:
+        return ""
+    links = "".join(
+        f'<li><a href="/?run={quote(run["id"])}&amp;tab=setup">{text(run_title(run))}</a>'
+        f"<small> · {text(run_date(run))}</small></li>"
+        for run in runs
+    )
+    return (
+        '<details class="preparations"><summary>Prepared inputs · no execution started</summary><ul>'
+        + links
+        + "</ul></details>"
+    )
+
+
+def render_experiment(experiment: dict, runs: list[dict]) -> str:
+    records = experiment_runs(experiment, runs)
+    attempts = [run for run in records if not is_preparation(run)]
+    preparations = [run for run in records if is_preparation(run)]
+    trajectory_run = next(
+        (run for run in attempts if rollout_traces(run) or run.get("traces")), None
+    )
+    actions = (
+        f'<a class="button-link" href="/?run={quote(trajectory_run["id"])}">Trajectories</a>'
+        if trajectory_run
+        else '<button type="button" disabled title="No trajectories recorded yet">Trajectories</button>'
+    )
+    actions += f'<a class="button-link" href="/?experiment={quote(experiment["id"])}&amp;section=lineage">Lineage</a>'
+    sections = (
+        '<section class="experiment-card"><h2>Intent</h2>'
+        f"<p>{text(experiment['intent'])}</p><details><summary>What changed</summary><p>{text(experiment['change'])}</p></details></section>"
+        '<section class="experiment-card"><h2>Conclusion</h2>'
+        f"<p>{text(experiment['conclusion'])}</p><h3>Next decision</h3><p>{text(experiment['decision'])}</p>"
+        '<p class="muted">Held-out quality improvement: not established.</p></section>'
     )
     limitations = "".join(f"<li>{text(item)}</li>" for item in experiment["limitations"])
     evidence = ""
@@ -467,10 +513,8 @@ def render_experiment(experiment: dict, runs: list[dict]) -> str:
     commit = experiment.get("code_commit")
     return (
         f'<header><div><div class="eyebrow">Experiment · {text(experiment["id"])}</div>'
-        f'<h1>{text(experiment["title"])}</h1></div><span class="pill {text(experiment["status"])}">'
-        f"{text(experiment['status'])}</span></header>"
-        '<div class="evidence-strip"><span>Execution ≠ validation ≠ model improvement</span>'
-        "<span>Held-out quality improvement: not established</span></div>"
+        f'<h1>{text(experiment["title"])}</h1><span class="pill {text(experiment["status"])}">'
+        f'{text(experiment["status"])}</span></div><div class="experiment-actions">{actions}</div></header>'
         + sections
         + "<details><summary>Limitations and untested behavior</summary><ul>"
         + limitations
@@ -481,10 +525,12 @@ def render_experiment(experiment: dict, runs: list[dict]) -> str:
             else ""
         )
         + (
-            "<h2>Run attempts</h2>" + render_run_table(attempts)
+            '<h2 id="runs">Runs</h2><p class="muted">One execution per row. Retries stay under this research question.</p>'
+            + render_run_table(attempts)
             if attempts
             else '<p class="prepared-note">No run launched for this change. CPU checks are not model experiments.</p>'
         )
+        + render_preparations(preparations)
         + evidence
         + folded(
             "Traceability references · not historical input attestations",
@@ -493,7 +539,9 @@ def render_experiment(experiment: dict, runs: list[dict]) -> str:
     )
 
 
-def render_index(root: Path, experiment_id: str = "", view: str = "overview") -> str:
+def render_index(
+    root: Path, experiment_id: str = "", view: str = "overview", section: str = "summary"
+) -> str:
     runs = discover_runs(root)
     experiments = experiment_catalog()
     if view == "runs":
@@ -501,21 +549,38 @@ def render_index(root: Path, experiment_id: str = "", view: str = "overview") ->
             "Run attempts",
             '<header><div><div class="eyebrow">Evidence library</div>'
             "<h1>Run attempts</h1><p>Failures remain visible. Correctness and speed are separate from execution status.</p></div></header>"
-            + render_run_table(runs),
-            "runs",
+            + '<p><a href="/?view=experiments">← Back to experiments</a> · Optional cross-experiment index.</p>'
+            + render_run_table([run for run in runs if not is_preparation(run)])
+            + render_preparations([run for run in runs if is_preparation(run)]),
+            "experiments",
         )
     selected = next((item for item in experiments if item["id"] == experiment_id), None)
     if view == "experiments" and selected is None:
-        selected = experiments[0] if experiments else None
+        selected = next(
+            (
+                item
+                for item in experiments
+                if any(
+                    not is_preparation(run) and (run.get("rollouts") or run.get("traces"))
+                    for run in experiment_runs(item, runs)
+                )
+            ),
+            experiments[0] if experiments else None,
+        )
     links = "".join(
         f'<a class="experiment-link {"selected" if selected == item else ""}" data-experiment '
         f'href="/?experiment={quote(item["id"])}"><span class="status-dot {text(item["status"])}"></span>'
         f"<span><strong>{text(item['title'])}</strong><small>{text(item['status'])} · "
-        f"{sum(run['id'] in item['runs'] or run['report'].get('experiment_id') == item['id'] for run in runs)} records</small></span></a>"
+        f"{sum(not is_preparation(run) for run in experiment_runs(item, runs))} executions</small></span></a>"
         for item in experiments
     )
     if selected:
-        content = render_experiment(selected, runs)
+        content = (
+            f'<p><a href="/?experiment={quote(selected["id"])}">← {text(selected["title"])}</a></p>'
+            + render_lineage(root, selected["id"], embedded=True)
+            if section == "lineage"
+            else render_experiment(selected, runs)
+        )
     else:
         content = (
             '<header><div><div class="eyebrow">Kernel generation · Laguna XS.2</div>'
@@ -528,7 +593,7 @@ def render_index(root: Path, experiment_id: str = "", view: str = "overview") ->
             "Context, recovery limits and hardware are unchanged.</p></section>"
             "<section><h2>Next validation</h2><p>Restart from the compact checkpoint before a longer run. "
             "Measure end-to-end throughput and evaluate held-out tasks before claiming improvement.</p></section></div>"
-            "<h2>Downloaded run attempts</h2>" + render_run_table(runs)
+            '<p><a class="button-link" href="/?view=runs">Browse all runs</a></p>'
         )
     return layout(
         "Kernel-RLM Research",
@@ -542,7 +607,7 @@ def render_index(root: Path, experiment_id: str = "", view: str = "overview") ->
     )
 
 
-def render_lineage(root: Path) -> str:
+def render_lineage(root: Path, experiment_id: str = "", embedded: bool = False) -> str:
     runs = discover_runs(root)
     by_id = {run["id"]: run for run in runs}
     edges = []
@@ -568,6 +633,12 @@ def render_lineage(root: Path) -> str:
             for edge in experiment.get("relationships", [])
             if edge["from"] in by_id and edge["to"] in by_id
         )
+    if experiment_id:
+        experiment = next(
+            (item for item in experiment_catalog() if item["id"] == experiment_id), None
+        )
+        scoped = {run["id"] for run in experiment_runs(experiment, runs)} if experiment else set()
+        edges = [edge for edge in edges if edge["from"] in scoped or edge["to"] in scoped]
     connections = []
     for edge in edges:
         parent = by_id.get(edge["from"])
@@ -580,15 +651,38 @@ def render_lineage(root: Path) -> str:
             f'<a class="lineage-node" href="/?run={quote(edge["to"])}"><strong>{text(run_title(child) if child else edge["to"])}</strong>'
             f"<small>{text(edge['to'])}</small></a></article>"
         )
-    return layout(
-        "Experiment lineage",
+    body = (
         '<header><div><div class="eyebrow">Recorded dependencies</div><h1>Lineage</h1>'
         "<p>Solid links restore checkpoint state. Dashed links describe a retry, not inherited trained weights.</p></div></header>"
         '<div class="lineage-board">' + "".join(connections) + "</div>"
         '<p class="muted">Only explicit report or experiment relationships are shown. Chronological order does not create a dependency. '
-        "A repeated source node represents the same run, not a duplicated checkpoint.</p>",
-        "lineage",
+        "A repeated source node represents the same run, not a duplicated checkpoint.</p>"
     )
+    if not connections:
+        body += "<p>No explicit relationships recorded for this experiment. None are inferred from dates.</p>"
+    catalog = {item.get("id"): item for item in experiment_catalog()}
+    questions = []
+    if experiment_id:
+        for child_id, child_question in catalog.items():
+            for parent_id in child_question.get("follows_experiments", []):
+                if experiment_id not in (parent_id, child_id) or parent_id not in catalog:
+                    continue
+                questions.append(
+                    '<article class="lineage-edge">'
+                    f'<a class="lineage-node" href="/?experiment={quote(parent_id)}"><strong>{text(catalog[parent_id]["title"])}</strong></a>'
+                    '<div class="lineage-connector retry"><span>Follow-up research question</span><b aria-hidden="true">→</b></div>'
+                    f'<a class="lineage-node" href="/?experiment={quote(child_id)}"><strong>{text(child_question["title"])}</strong></a></article>'
+                )
+    if questions:
+        body = (
+            "<h1>Experiment lineage</h1><p>These questions build on earlier findings. "
+            'A follow-up does not imply inherited model weights.</p><div class="lineage-board">'
+            + "".join(questions)
+            + "</div><details><summary>Checkpoint and execution relationships</summary>"
+            + body
+            + "</details>"
+        )
+    return body if embedded else layout("Experiment lineage", body, "experiments")
 
 
 def render_configs(root: Path) -> str:
@@ -630,20 +724,33 @@ def render_configs(root: Path) -> str:
     )
 
 
-def render_provenance(root: Path, run_id: str = "") -> str:
+def render_provenance(root: Path, run_id: str = "", embedded: bool = False) -> str:
     runs = discover_runs(root)
     run = next((item for item in runs if item["id"] == run_id), None)
-    heading = '<header><div><div class="eyebrow">Project-level factory</div><h1>Provenance</h1>'
-    heading += "<p>Code → dataset → config and prompt source → run → evidence and checkpoint. Hashes detect changed bytes; they are not trusted signatures.</p></div></header>"
+    heading = (
+        '<header><div><div class="eyebrow">Recorded execution details</div><h1>Inputs & setup</h1>'
+    )
+    heading += "<p>Code, dataset, model, prompts and settings that produced this result. Open details only when you need them.</p></div></header>"
     if run_id:
         manifest = (run or {}).get("provenance", {})
         if not manifest:
-            return layout(
-                "Run provenance",
-                heading
-                + '<p class="prepared-note">Not captured before launch. No exact commit, dataset hash or prompt snapshot is inferred for this historical run.</p>',
-                "provenance",
-            )
+            body = '<p class="prepared-note">Not captured before launch: the full input manifest. No exact commit or dataset hash is inferred for this historical run. Saved per-call prompts remain in its trajectories.</p>'
+            if run:
+                body += folded(
+                    "Model and framework metadata from this run",
+                    {
+                        key: run["report"][key]
+                        for key in (
+                            "model_id",
+                            "model_revision",
+                            "prime_revision",
+                            "config",
+                            "gpu_topology",
+                        )
+                        if key in run["report"]
+                    },
+                )
+            return body if embedded else layout("Inputs & setup", heading + body, "experiments")
         rows = "".join(
             f'<tr><td>{text(item["role"])}</td><td><a href="/?view=input&amp;run={quote(run_id)}&amp;asset={quote(item["path"])}">{text(item["path"])}</a></td>'
             f"<td><code>{text(item['sha256'])}</code><small>{item['bytes']} bytes</small></td></tr>"
@@ -654,9 +761,7 @@ def render_provenance(root: Path, run_id: str = "") -> str:
             f"{'dirty snapshot explicitly allowed' if state.get('dirty') else 'clean at capture'}</li>"
             for name, state in manifest.get("repositories", {}).items()
         )
-        return layout(
-            "Run provenance",
-            heading + f"<h2>{text(run_title(run))}</h2>"
+        body = (
             f'<p>Experiment: <a href="/?experiment={quote(manifest["experiment_id"])}">{text(manifest["experiment_id"])}</a> · '
             f"Captured: {text(manifest.get('created_at_utc'))}</p><ul>"
             + repositories
@@ -681,9 +786,16 @@ def render_provenance(root: Path, run_id: str = "") -> str:
             + "<h2>Captured inputs</h2><p>Open an exact saved input, not the current working file.</p>"
             '<div class="table-scroll"><table><thead><tr><th>Role</th><th>Saved input</th><th>SHA-256</th></tr></thead><tbody>'
             + rows
-            + "</tbody></table></div>",
-            "provenance",
+            + "</tbody></table></div>"
+            + folded(
+                "Advanced identity checks",
+                {
+                    "manifest_sha256": manifest.get("manifest_sha256"),
+                    "scope": "Content hashes detect changes; they are not trusted signatures.",
+                },
+            )
         )
+        return body if embedded else layout("Inputs & setup", heading + body, "experiments")
     registry = read_json(Path(__file__).with_name("experiments.json"))
     dataset_cards = []
     project = Path(__file__).resolve().parents[5]
@@ -732,6 +844,7 @@ def render_input(root: Path, run_id: str, asset: str) -> str:
     matched = hashlib.sha256(content).hexdigest() == recorded["sha256"]
     return layout(
         "Captured input",
+        f'<p><a href="/?run={quote(run_id)}&amp;tab=setup">← Inputs & setup</a></p>'
         f"<h1>{text(asset)}</h1><p>Snapshot checksum: "
         f"{'matches manifest' if matched else 'MISMATCH — do not use as verified evidence'}.</p>"
         + folded("Exact captured source / data / note", content.decode("utf-8")),
@@ -843,7 +956,7 @@ def render_timeline(trace: dict) -> str:
     return '<div class="timeline">' + "".join(events) + "</div>"
 
 
-def render_run(root: Path, run_id: str, trajectory: int = 0) -> str:
+def render_run(root: Path, run_id: str, trajectory: int = 0, tab: str = "trace") -> str:
     run = next(
         (
             candidate
@@ -855,6 +968,9 @@ def render_run(root: Path, run_id: str, trajectory: int = 0) -> str:
     if run is None:
         return layout("Not found", '<h1>Run not found</h1><a href="/">Back</a>')
     report = run["report"]
+    experiment = owner_experiment(run)
+    back = f"/?experiment={quote(experiment['id'])}#runs" if experiment else "/?view=runs"
+    back_label = experiment["title"] if experiment else "All runs · not catalogued yet"
     metrics = run.get("metrics", [])
     normalized = run_summary(run)
     traces = normalized["traces"]
@@ -871,7 +987,7 @@ def render_run(root: Path, run_id: str, trajectory: int = 0) -> str:
         for key in ("prompt_tokens", "completion_tokens")
     }
     summary = (
-        '<aside class="sidebar"><a href="/?view=runs">← All run attempts</a><div class="card">'
+        f'<aside class="sidebar"><a href="{back}">← {text(back_label)}</a><div class="card">'
         f"<h2>{text(report.get('model_id', 'Kernel-RLM'))}</h2>"
         f"{execution_badge(run)}"
         '<hr><div class="eyebrow">Mean saved kernel reward</div>'
@@ -947,16 +1063,37 @@ def render_run(root: Path, run_id: str, trajectory: int = 0) -> str:
     artifacts += folded(
         "Downloaded trace files", [str(path.relative_to(root)) for path in run.get("rollouts", [])]
     )
+    manifest = run.get("provenance", {})
+    checkpoint_check = read_json(run["root"] / "checkpoint-check.json")
+    if checkpoint_check:
+        artifacts += folded("Saved checkpoint read-back", checkpoint_check)
+    if manifest:
+        artifacts += folded(
+            "Files and checkpoints · declared locations", manifest.get("artifacts", {})
+        )
+    panels = {
+        "trace": ("Run trace", timeline),
+        "verification": ("Verification", verification),
+        "setup": ("Inputs & setup", render_provenance(root, run["id"], embedded=True)),
+        "artifacts": ("Files & checkpoints", artifacts),
+    }
+    tab = tab if tab in panels else "trace"
+    tab_buttons = "".join(
+        f'<button role="tab" id="tab-{key}" aria-controls="{key}" data-tab="{key}" aria-selected="{str(key == tab).lower()}">{text(label)}</button>'
+        for key, (label, _body) in panels.items()
+    )
+    panel_bodies = "".join(
+        f'<div class="panel" role="tabpanel" aria-labelledby="tab-{key}" id="{key}" {"hidden" if key != tab else ""}>{body}</div>'
+        for key, (_label, body) in panels.items()
+    )
     center = (
         '<section><div class="tabs" role="tablist" aria-label="Run views">'
-        '<button role="tab" data-tab="trace" aria-selected="true">Run trace</button>'
-        '<button role="tab" data-tab="verification" aria-selected="false">Verification</button>'
-        '<button role="tab" data-tab="artifacts" aria-selected="false">Artifacts</button></div>'
+        + tab_buttons
+        + "</div>"
         + controls
         + evidence
-        + f'<div class="panel" id="trace">{timeline}</div>'
-        + f'<div class="panel" id="verification" hidden>{verification}</div>'
-        + f'<div class="panel" id="artifacts" hidden>{artifacts}</div></section>'
+        + panel_bodies
+        + "</section>"
     )
     curves = (
         '<aside class="metrics"><h2 class="eyebrow">Saved measurements</h2>'
@@ -1001,8 +1138,12 @@ def render_run(root: Path, run_id: str, trajectory: int = 0) -> str:
     heading = (
         f'<header class="run-header"><div><div class="eyebrow">Run attempt · {text(run_date(run))}</div>'
         f'<h1>{text(run_title(run))}</h1><p class="muted">Execution status is not a held-out quality result.</p></div>'
-        '<a class="button-link" href="/?view=lineage">View lineage</a></header>'
-        f'<p><a href="/?view=provenance&amp;run={quote(run["id"])}">Code, dataset, notes and input provenance →</a></p>'
+        + (
+            f'<a class="button-link" href="/?experiment={quote(experiment["id"])}&amp;section=lineage">Lineage</a>'
+            if experiment
+            else ""
+        )
+        + "</header>"
     )
     return layout(
         f"Kernel-RLM · {run_id}",
@@ -1055,17 +1196,23 @@ def make_handler(root: Path):
             view = query.get("view", ["overview"])[0]
             experiment = query.get("experiment", [""])[0]
             if view == "provenance":
-                document = render_provenance(root, run_id)
+                document = (
+                    render_run(root, run_id, trajectory, "setup")
+                    if run_id
+                    else render_provenance(root)
+                )
             elif view == "input":
                 document = render_input(root, run_id, query.get("asset", [""])[0])
             elif run_id:
-                document = render_run(root, run_id, trajectory)
+                document = render_run(root, run_id, trajectory, query.get("tab", ["trace"])[0])
             elif view == "lineage":
                 document = render_lineage(root)
             elif view == "configs":
                 document = render_configs(root)
             else:
-                document = render_index(root, experiment, view)
+                document = render_index(
+                    root, experiment, view, query.get("section", ["summary"])[0]
+                )
             payload = document.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
