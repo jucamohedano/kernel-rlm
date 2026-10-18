@@ -4,6 +4,10 @@ Status: CPU-tested rollout integration. **Training launch is not enabled.**
 This is an additional backend. Prime-RL, Modal and their checkpoints are unchanged.
 No VM is rented by this package.
 
+The [Laguna BF16/Muon gates](LAGUNA_VALIDATION.md) validate native model storage
+and distributed optimizer components separately. These helpers are not yet
+connected to a SkyRL/Ray training entrypoint.
+
 ## Why SkyRL
 
 SkyRL supports shared training/inference GPUs and phase offload. That is a better
