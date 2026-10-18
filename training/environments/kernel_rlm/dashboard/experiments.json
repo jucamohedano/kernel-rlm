@@ -17,6 +17,24 @@
   },
   "experiments": [
     {
+      "id": "trl-rlm-l40s",
+      "follows_experiments": ["checkpoint-resume"],
+      "title": "Train exact RLM turns with TRL on two L40S",
+      "status": "prepared",
+      "intent": "Can fast tensor-parallel inference supply genuine CUDA RLM trajectories for a correctly normalized native TRL/Muon update on the same GPU pair?",
+      "change": "Separate vLLM runtime; exact per-turn prompts and root-only targets; trajectory-level GRPO advantages; native DAPO PPO loss; phase-separated one-step training and compact adapter export.",
+      "conclusion": "Single-process and two-rank CPU gradient proofs passed. Live model inference and one real-reward update are pending.",
+      "decision": "Attempt one bounded optimizer update. Preserve zero-variance groups and failures; never substitute synthetic rewards.",
+      "limitations": ["Not a quality-improvement comparison.", "Fresh-process optimizer resume and post-update inference reload are separate gates."],
+      "runs": [],
+      "provenance": {
+        "dataset_ids": ["ops6k-l1-seed42"],
+        "code_paths": ["rlm/training/environments/kernel_rlm/kernel_trl/turn_credit.py", "rlm/training/environments/kernel_rlm/kernel_trl/replay_trainer.py", "rlm/training/environments/kernel_rlm/kernel_trl/rlm_update.py", "rlm/training/environments/kernel_rlm/kernel_trl/collect.py", "rlm/training/environments/kernel_rlm/kernel_skyrl/generator.py", "rlm/training/environments/kernel_rlm/kernel_rlm_v1/program.py"],
+        "notes": ["rlm/training/environments/kernel_rlm/kernel_trl/RLM_TRAINING.md", "notes/datasets.md"],
+        "historical_attestation": "New TRL path. The exact launch sources, runtime pins and dataset bytes must be captured; earlier Prime provenance is not reused."
+      }
+    },
+    {
       "id": "factory-provenance",
       "follows_experiments": ["checkpoint-resume"],
       "title": "Trace experiments from inputs to artifacts",
