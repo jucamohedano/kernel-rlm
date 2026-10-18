@@ -60,7 +60,7 @@ and final verification. No reward is added for delegation and no call is require
 Verifiers 0.3.1 normally replaces the program's output cap with the rollout-wide
 sampling cap. The image now applies a version-checked patch at build time:
 both chat request mediation and the training client keep the lower cap. A
-512-token recovery request therefore stays below the 4,096-token rollout cap;
+1,024-token recovery request therefore stays below the 4,096-token rollout cap;
 larger requests cannot raise that rollout cap. Temperature and other sampling
 settings remain framework-controlled. The patch is idempotent and fails if its
 source anchors change. CPU tests also exercised the actual pinned methods.

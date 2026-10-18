@@ -89,6 +89,11 @@ One completed optimizer step is not evidence of quality improvement.
 
 ## Saved state and evidence
 
+For the next run, recovery replies allow up to 1,024 tokens instead of 512.
+The normal reply cap remains 4,096 and the total context cap remains 12,288.
+Recovery still requires context headroom and permits only final submission, not
+new compilation, feedback or delegation. The historical first run above used 512.
+
 The checkpoint contains full LoRA matrices plus each rank's local adapter,
 momentum and Torch RNG tensors. It is not yet a full native Trainer checkpoint:
 fresh-process optimizer/scheduler/data-sampler resume has not been validated.

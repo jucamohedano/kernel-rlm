@@ -37,7 +37,7 @@ def test_submission_warning_arrives_before_the_deadline(actions):
 def test_recovery_requires_context_room_and_a_known_usage(actions):
     pending = [{"role": "user", "content": "Submit now."}]
     budget, estimate = actions.recovery_budget({"total_tokens": 9000}, pending, 12288, 2048, len)
-    assert budget == 512
+    assert budget == 1024
     assert estimate > 9000
     assert actions.recovery_budget({"total_tokens": 12200}, pending, 12288, 2048, len)[0] == 0
     assert actions.recovery_budget({}, pending, 12288, 2048, len) == (0, None)
@@ -165,7 +165,7 @@ def test_missing_submission_can_recover_in_a_short_seventh_turn(run_program):
     assert record["submission"] == "candidate"
     assert record["turns"] == 7
     assert all(request["max_tokens"] == 4096 for request in requests[:6])
-    assert requests[-1]["max_tokens"] == 512
+    assert requests[-1]["max_tokens"] == 1024
     assert record["model_calls"][-1]["phase"] == "recovery"
     assert "Only two turns" in str(requests[3]["messages"])
     assert "SUBMISSION DEADLINE" in str(requests[5]["messages"])
