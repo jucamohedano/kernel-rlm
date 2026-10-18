@@ -672,3 +672,6 @@ check.
 The [SkyRL rollout adapter](kernel_skyrl/README.md) adds CPU-testable integration
 with the existing REPL loop. It does not replace Prime-RL or Modal. Training launch
 remains gated on model loading, BF16 storage, Muon and compact checkpoint support.
+
+The [TRL compatibility check](kernel_trl/README.md) tests the alternative API with
+an actual tiny CPU GRPO update. It is not a Laguna training launcher.
