@@ -4,6 +4,11 @@ TRL is a candidate, not yet a Laguna training backend. Keep this separate from
 the Prime and SkyRL environments. Pin v1.9.2 at
 `33f9e462728b98f7f91d38b99328e81adde2faa0`.
 
+The later [two-GPU native framework gates](../kernel_skyrl/FRAMEWORK_VALIDATION.md)
+test BF16 Laguna, Accelerate FSDP2 and real Dion Muon through `GRPOTrainer.train`.
+That is separate from the earlier CPU/SGD injection check described below. It
+does not yet port the RLM's changing-prefix, multi-turn credit to TRL.
+
 The real CPU probe uses an in-memory random one-layer Llama, local tokenizer,
 attention LoRA rank 8/alpha 16 and four synthetic rewards. It calls TRL's custom
 rollout hook, verifies feedback-token masking, injects an optimizer, and completes

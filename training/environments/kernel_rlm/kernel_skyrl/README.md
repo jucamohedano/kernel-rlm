@@ -8,6 +8,10 @@ The [Laguna BF16/Muon gates](LAGUNA_VALIDATION.md) validate native model storage
 and distributed optimizer components separately. These helpers are not yet
 connected to a SkyRL/Ray training entrypoint.
 
+The [native framework gates](FRAMEWORK_VALIDATION.md) connect the shared BF16/Muon
+helpers to SkyRL's native strategy and TRL's native GRPO trainer. They test one
+short synthetic update, separately from the RLM/Ray/vLLM training entrypoint.
+
 ## Why SkyRL
 
 SkyRL supports shared training/inference GPUs and phase offload. That is a better
