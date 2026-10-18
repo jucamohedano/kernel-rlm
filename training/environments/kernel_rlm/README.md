@@ -667,3 +667,8 @@ The CPU-only function has a 720-second timeout, a 600-second work budget and no
 automatic retries. CPU charges still apply. It cannot test GPU execution or
 correctness; use the separate cache diagnostic for an explicitly authorized GPU
 check.
+# Optional two-L40S backend
+
+The [SkyRL rollout adapter](kernel_skyrl/README.md) adds CPU-testable integration
+with the existing REPL loop. It does not replace Prime-RL or Modal. Training launch
+remains gated on model loading, BF16 storage, Muon and compact checkpoint support.
