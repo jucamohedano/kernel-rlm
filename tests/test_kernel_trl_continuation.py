@@ -56,6 +56,16 @@ def test_old_checkpoint_is_readable_without_claiming_new_manifest(checkpoints, t
     assert "sha256" not in checkpoints.checkpoint_metadata(tmp_path, 2)
 
 
+def test_portable_adapter_names_remove_activation_checkpoint_wrappers(checkpoints):
+    original = (
+        "base_model.model.model.layers.0._checkpoint_wrapped_module."
+        "self_attn.q_proj.lora_A.default.weight"
+    )
+    expected = "base_model.model.model.layers.0.self_attn.q_proj.lora_A.weight"
+    assert checkpoints.portable_adapter_name(original) == expected
+    assert checkpoints.portable_adapter_name(expected) == expected
+
+
 def test_probability_audit_uses_real_token_denominator(audit):
     result = audit.summarize_deltas([0, 0, math.log(2), math.log(0.5)])
     assert result["tokens"] == 4

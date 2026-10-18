@@ -6,6 +6,10 @@ import random
 from pathlib import Path
 
 
+def portable_adapter_name(name: str) -> str:
+    return name.replace("._checkpoint_wrapped_module.", ".").replace(".default.", ".")
+
+
 def checkpoint_metadata(directory: Path, expected_step: int) -> dict:
     metadata = json.loads((directory / "metadata.json").read_text())
     if metadata["step"] != expected_step or metadata["world_size"] != 2:
@@ -24,9 +28,12 @@ def load_adapters(model, directory: Path) -> int:
     import torch
     from safetensors.torch import load_file
 
-    weights = load_file(directory / "adapter_model.safetensors")
+    saved = load_file(directory / "adapter_model.safetensors")
+    weights = {portable_adapter_name(name): value for name, value in saved.items()}
+    if len(weights) != len(saved):
+        raise ValueError("Checkpoint adapter names collide after removing framework wrappers")
     parameters = {
-        name.replace(".default.", "."): parameter
+        portable_adapter_name(name): parameter
         for name, parameter in model.named_parameters()
         if parameter.requires_grad
     }
@@ -129,7 +136,10 @@ def save_training_state(trainer, directory: Path, step: int) -> Path:
         momentum[name] = local_tensor(parameter_state["momentum"]).detach().cpu().clone()
         value = parameter.full_tensor().detach().cpu()
         if rank == 0:
-            full[name.replace(".default.", ".")] = value.contiguous()
+            key = portable_adapter_name(name)
+            if key in full:
+                raise ValueError("Adapter names collide after removing framework wrappers")
+            full[key] = value.contiguous()
     numpy_rng = np.random.get_state()
     state = {
         "adapters": local,
