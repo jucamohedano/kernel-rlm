@@ -13,8 +13,10 @@ KERNEL_TASK_INSTRUCTION = (
     "text with print(context) or parse it statically with ast.parse(context). Never "
     "assign to context or context_0. Read the Model.forward and get_inputs definitions "
     "in that source text to infer input count, shapes, and dtypes; do not guess. Match "
-    "cuda_forward(*tensors) and the exported C++ launch signature "
-    "to that input count. Then write a standalone Python source "
+    "cuda_forward(*tensors) to that runtime input count. Also inspect __init__ and "
+    "get_init_inputs: constructor values are NOT extra runtime inputs. The Python "
+    "wrapper must supply any constructor constants required by the C++ launch "
+    "function. Match its declaration, definition, and Python call. Then write a standalone Python source "
     "string defining CPP_SOURCE, CUDA_SOURCE, and cuda_forward(*tensors). The source "
     "must implement the reference operation with a compiled CUDA extension.\n\n"
     "The submission must import load_inline from torch.utils.cpp_extension and call "
@@ -83,6 +85,13 @@ CUDA_BUILD_GUIDE = textwrap.dedent(
        return a tensor; a void function returns None to Python. Adapt the launch
        signature to the reference inputs; the task-independent
        scaffold intentionally does not supply the kernel computation.
+       The scaffold directly forwards runtime tensors only. If the reference uses
+       constructor constants, adapt cuda_forward before testing it. For example,
+       if forward(x) uses self.offset and get_init_inputs sets offset to 3.0,
+       cuda_forward(x) can call _module.launch(x, 3.0), with matching Tensor/double
+       C++ arguments. Do not require the verifier to pass offset as a second input.
+       Read the actual task's constant; 3.0 is only an example. Random initialized
+       model weights are not constants: never invent them or guess their values.
        Do not set is_python_module=False: cuda_forward needs a Python module,
        not a library path string. Use only the load_inline keywords shown here.
        Never add is_pure_python, keep_debug_buffers, opt_level, or invented options.

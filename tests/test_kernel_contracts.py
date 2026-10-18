@@ -130,6 +130,15 @@ def test_timeout_budget_includes_two_feedback_calls(modules):
     assert actions.REPL_TIMEOUT_S < actions.BACKEND_TIMEOUT_S
 
 
+def test_prompt_distinguishes_constructor_constants_from_runtime_inputs(modules):
+    from kernel_rlm.submission_contract import KERNEL_TASK_INSTRUCTION
+
+    assert "constructor values are NOT extra runtime inputs" in KERNEL_TASK_INSTRUCTION
+    assert "_module.launch(x, 3.0)" in KERNEL_TASK_INSTRUCTION
+    assert "Random initialized" in KERNEL_TASK_INSTRUCTION
+    assert "never invent them" in KERNEL_TASK_INSTRUCTION
+
+
 def test_prompt_scaffold_assembles_source_without_loading_extension(modules, capsys):
     import ast
 
