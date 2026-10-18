@@ -648,3 +648,22 @@ Keep the source passed to final scoring byte-identical to the submitted program.
 Both scoring paths use `.strip()` only to detect blank content, not to rewrite
 the source. This preserves the isolated build cache used by `cuda_feedback`.
 Cache reuse never replaces fresh correctness trials or final timing checks.
+
+For CPU-only compiler attribution and bounded contention checks:
+
+```bash
+modal run -m modal_app.compiler_profile --source-run logs/live-grpo/RUN_ID --output-dir /tmp/compiler-profile
+```
+
+This entrypoint has no GPU parameter or GPU dispatch. It requires no visible GPU
+devices, wraps the actual C++ and NVCC compiler commands without changing their
+arguments, and records wall time, child CPU time and maximum child RSS. It compares
+serial two-worker builds, two simultaneous two-worker builds, two simultaneous
+one-worker builds, and a final serial control. Every batch has fresh artifact
+caches; OS page caches can remain warm. Command times overlap and must not be
+added as sequential wall time. Cgroup samples record memory use, CPU throttling
+and memory events when available. There are no model calls or training updates.
+The CPU-only function has a 720-second timeout, a 600-second work budget and no
+automatic retries. CPU charges still apply. It cannot test GPU execution or
+correctness; use the separate cache diagnostic for an explicitly authorized GPU
+check.
