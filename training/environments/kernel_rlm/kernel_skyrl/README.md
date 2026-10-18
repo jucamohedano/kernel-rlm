@@ -76,14 +76,15 @@ a preparation report. It does not import Torch, start Ray, download model weight
 create a research experiment, call an API, or allocate a GPU. It refuses to overwrite
 an existing output. A preparation is not a successful training run.
 
-## Before renting the two L40S cards
+## Before full training on the two L40S cards
 
 1. Connect the validated native Laguna loader to the SkyRL worker. The component
    check loaded the full pretrained base on two L40S GPUs; it was not a Ray run.
 2. Keep BF16 **storage** for frozen weights and FP32 adapters. The shared helper
    enforces this distinction; the worker must actually call it.
-3. Connect the validated Dion Muon factory with Moonlight RMS scaling. SkyRL's
-   standard FSDP optimizer still constructs AdamW; that path must be replaced.
+3. Select the validated `LagunaMuonStrategy` in the policy worker. Its public
+   preparation hook replaces the standard AdamW path with Moonlight RMS Muon;
+   the unmodified upstream worker does not select that hook automatically.
 4. Add compact checkpoint save/resume. Native FSDP saves frozen model shards too.
 5. Connect the entrypoint and provider-neutral factory input capture.
 6. On the VM, test adapter reload, offload, verifier placement and peak memory,

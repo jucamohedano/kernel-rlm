@@ -16,7 +16,7 @@ one optimizer step. Four adapter tensors changed. No pretrained weights, model
 API, vLLM engine, CUDA kernel or GPU is used. This does not measure learning quality.
 
 The injected optimizer is **SGD solely to test the hook**, not our project optimizer.
-Pinned Dion Muon was not validated: its CPU import requires Triton even when Triton
+That CPU probe did not validate pinned Dion Muon: its CPU import requires Triton even when Triton
 execution is disabled. No AdamW or SGD replacement is proposed for project training.
 
 ## Reproduce in the isolated CPU-check environment
@@ -34,7 +34,7 @@ These are diagnostic versions, not a validated CUDA training image. Disable
 dependency resolution when reusing the installed CPU Torch; otherwise a package
 resolver can download CUDA Torch and NVIDIA libraries unnecessarily.
 
-## Is it less friction?
+## What the earlier CPU check established
 
 - **Yes for optimizer injection:** TRL accepts an optimizer directly. SkyRL's
   pinned FSDP path constructs AdamW internally and needs a worker extension.

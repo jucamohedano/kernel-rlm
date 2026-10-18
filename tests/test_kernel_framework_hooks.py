@@ -81,3 +81,67 @@ def test_skyrl_suppresses_adamw_and_restores_configuration(monkeypatch, fail_pre
         with pytest.raises(ValueError, match="pre-existing"):
             strategy.prepare(("model", "adamw", None))
     assert strategy.optimizer_config is settings
+
+
+@pytest.mark.parametrize("rank", [0, 1])
+def test_meta_buffer_fix_preserves_only_nonpersistent_metadata(monkeypatch, rank):
+    class Buffer:
+        def __init__(self, meta):
+            self.is_meta = meta
+            self.shape = (32,)
+            self.dtype = "fp32"
+
+        def detach(self):
+            return self
+
+        def cuda(self):
+            assert not self.is_meta
+            return self
+
+        def cpu(self):
+            return self
+
+    buffer = Buffer(meta=rank == 1)
+    registered = {}
+    owner = SimpleNamespace(
+        _non_persistent_buffers_set={"rope", "absent"},
+        _buffers={"rope": buffer, "absent": None, "persistent": object()},
+        register_buffer=lambda name, value, persistent: registered.update(
+            {name: (value, persistent)}
+        ),
+    )
+    distributed = ModuleType("torch.distributed")
+    distributed.get_rank = lambda: rank
+    calls = []
+    distributed.broadcast = lambda value, src: calls.append((value, src))
+    torch = ModuleType("torch")
+    torch.distributed = distributed
+    torch.empty = lambda *args, **kwargs: Buffer(meta=False)
+    torch.isfinite = lambda value: SimpleNamespace(all=lambda: True)
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setitem(sys.modules, "torch.distributed", distributed)
+    model = SimpleNamespace(named_modules=lambda: [("model.rotary_emb", owner)])
+    assert hooks.materialize_nonpersistent_buffers(model) == ["model.rotary_emb.rope"]
+    assert len(calls) == 1 and calls[0][1] == 0
+    assert not registered["rope"][0].is_meta
+    assert registered["rope"][1] is False
+    assert "persistent" not in registered
+
+
+def test_only_meta_adapters_receive_small_cpu_placeholder_storage(monkeypatch):
+    parameters = {
+        "adapter": SimpleNamespace(requires_grad=True, is_meta=True, shape=(8, 16), dtype="fp32"),
+        "base": SimpleNamespace(requires_grad=False, is_meta=True, shape=(128, 128), dtype="bf16"),
+        "existing_adapter": SimpleNamespace(requires_grad=True, is_meta=False),
+    }
+    registered = {}
+    owner = SimpleNamespace(
+        named_parameters=lambda recurse: list(parameters.items()),
+        register_parameter=lambda name, value: registered.update({name: value}),
+    )
+    torch = ModuleType("torch")
+    torch.empty = lambda shape, dtype, device: (shape, dtype, device)
+    torch.nn = SimpleNamespace(Parameter=lambda value: value)
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    assert hooks.materialize_meta_adapters(SimpleNamespace(modules=lambda: [owner])) == 1
+    assert registered == {"adapter": ((8, 16), "fp32", "cpu")}

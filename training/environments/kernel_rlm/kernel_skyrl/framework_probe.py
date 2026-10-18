@@ -11,7 +11,12 @@ from datetime import timedelta
 from pathlib import Path
 
 from kernel_skyrl import framework_hooks, laguna_policy, laguna_probe
-from kernel_skyrl.framework_hooks import skyrl_muon_strategy, trl_muon_trainer
+from kernel_skyrl.framework_hooks import (
+    materialize_meta_adapters,
+    materialize_nonpersistent_buffers,
+    skyrl_muon_strategy,
+    trl_muon_trainer,
+)
 from kernel_skyrl.laguna_policy import attach_adapters, audit_storage, load_base
 from kernel_skyrl.laguna_probe import event, tiny_model
 
@@ -30,6 +35,11 @@ def observe_updates(optimizer, model, directory: Path, records: list):
         parameters = current.param_groups[0]["params"]
         if not all(isinstance(parameter, DTensor) for parameter in parameters):
             raise ValueError("Muon must update actual FSDP2 DTensors")
+        expected = {id(parameter) for parameter in model.parameters() if parameter.requires_grad}
+        if len({id(parameter) for parameter in parameters}) != len(parameters) or expected != {
+            id(parameter) for parameter in parameters
+        }:
+            raise ValueError("Optimizer parameter remapping lost or duplicated trainable adapters")
         nonzero = sum(
             parameter.grad is not None and bool(torch.count_nonzero(local_tensor(parameter.grad)))
             for parameter in parameters
@@ -241,6 +251,7 @@ def run(arguments, directory: Path) -> dict:
         timeout=timedelta(seconds=300),
         device_id=torch.device("cuda", int(os.environ["LOCAL_RANK"])),
     )
+    failed = False
     try:
         mesh = init_device_mesh("cuda", (2,), mesh_dim_names=("fsdp",))
         torch.manual_seed(42)
@@ -252,7 +263,8 @@ def run(arguments, directory: Path) -> dict:
             full_checkpoint=bool(arguments.checkpoint),
         )
         if arguments.checkpoint is None:
-            model = tiny_model().to(torch.bfloat16)
+            with torch.device("cpu" if rank == 0 else "meta"):
+                model = tiny_model().to(torch.bfloat16)
         elif rank == 0:
             model, information = load_base(arguments.checkpoint)
             (directory / "loading-information.json").write_text(json.dumps(information, indent=2))
@@ -268,6 +280,17 @@ def run(arguments, directory: Path) -> dict:
         model = attach_adapters(model)
         inventory = audit_storage(model)
         event(directory, "cpu_model_ready", inventory=inventory)
+        buffers = []
+        materialized_adapters = 0
+        if arguments.backend == "trl":
+            materialized_adapters = materialize_meta_adapters(model)
+            buffers = materialize_nonpersistent_buffers(model)
+            event(
+                directory,
+                "nonpersistent_buffers_materialized",
+                buffers=buffers,
+                meta_adapters_materialized_on_cpu=materialized_adapters,
+            )
         records = []
         result = (
             skyrl_update(model, directory, records)
@@ -282,6 +305,8 @@ def run(arguments, directory: Path) -> dict:
             "full_pretrained_checkpoint": bool(arguments.checkpoint),
             "inventory_before": inventory,
             "updates": records,
+            "nonpersistent_buffers_materialized_before_accelerate": buffers,
+            "meta_adapters_materialized_on_cpu": materialized_adapters,
             "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
             "peak_reserved_bytes": torch.cuda.max_memory_reserved(),
             "versions": {
@@ -298,8 +323,18 @@ def run(arguments, directory: Path) -> dict:
             ],
             **result,
         }
+    except Exception as error:
+        failed = True
+        event(
+            directory,
+            "exception_before_distributed_cleanup",
+            error_type=type(error).__name__,
+            error=str(error),
+        )
+        raise
     finally:
-        dist.destroy_process_group()
+        if not failed:
+            dist.destroy_process_group()
 
 
 def main():

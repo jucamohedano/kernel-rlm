@@ -9,6 +9,10 @@ synthetic-gradient update and finite four-token logits on each rank. Maximum
 observed NVML use was 37.9 GiB per GPU (one-second samples); PyTorch's own peak
 allocation was 36.3 GiB and peak reservation 37.2 GiB. These are different metrics.
 
+The later [native framework gates](FRAMEWORK_VALIDATION.md) extend this component
+check to actual SkyRL strategy/loss and TRL GRPO trainer paths. Keep the earlier
+synthetic-gradient evidence separate from those real-backward diagnostics.
+
 ## What changed
 
 `laguna_policy.py` provides reusable loader and optimizer functions:

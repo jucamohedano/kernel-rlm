@@ -61,6 +61,27 @@ TRL enables gradient checkpointing by default. These checks explicitly disable
 that option and enable FSDP activation checkpointing instead; enabling both makes
 Transformers reject the configuration before training.
 
+The first full TRL attempt stalled after rank-0 loading and was stopped. Unlike
+the first tiny fixture, the full model creates rank 1 on meta. Accelerate 1.15.0
+restores each rank's local nonpersistent buffers with `.to(device)`, without
+broadcasting the real data first. Four tiny RoPE buffers on rank 1 have no data
+to copy. A CPU-only full-config reproduction confirms that error. The loader now
+broadcasts those buffers from rank 0 before native Accelerate preparation. No
+frozen weights are copied eagerly to GPU. The corrected tiny test also creates
+rank 1 on meta, so it covers the actual loading pattern rather than both-rank CPU
+initialization. Keep failed and corrected attempts separate in the evidence.
+
+That meta-initialized tiny check exposed a second issue: Accelerate remaps
+optimizer parameters by their old storage pointers. All meta tensors have pointer
+zero, so an optimizer constructed from those adapters can map multiple entries
+to the same sharded parameter on rank 1. The loader now gives only the FP32 LoRA
+adapters distinct empty CPU storage before optimizer construction (32.8 MB for
+the full model). Rank 0 still supplies all actual values through native FSDP
+broadcast; frozen base weights remain meta on rank 1. The step guard requires
+exact identity coverage of every trainable adapter, with no duplicate entries.
+Host-side exceptions are recorded before distributed cleanup, and a failing rank
+exits promptly so torchrun can stop its sibling instead of waiting in cleanup.
+
 ## Bounded invocation
 
 Use a private source upload and the same CPATH documented in
