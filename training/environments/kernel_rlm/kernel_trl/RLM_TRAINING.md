@@ -87,6 +87,31 @@ All requests, root/child responses, REPL observations, submissions, feedback,
 verifier results, rejected groups and training inputs must remain inspectable.
 One completed optimizer step is not evidence of quality improvement.
 
+## Preparing the full L1 pass
+
+- Eight-rollout groups now run as two waves of four. Every member uses the same
+  explicit adapter and policy version. Four-rollout diagnostics remain supported.
+- The native two-rank CPU gradient proof passed with eight trajectories and policy
+  version seven: maximum parameter error was about `7.3e-12`. This validates credit
+  and accumulation, not model quality or distributed GPU checkpoint resume.
+- Collection stops for diagnosis if no reward exceeds 0.1. Uniform rewards,
+  including equal speed rewards, remain filtered. Rejected rewards are saved intact.
+- Each trainer process consumes exactly one fresh group. Its local step starts at
+  zero; the global policy version comes from a matching compact checkpoint.
+- New checkpoint support saves full LoRA plus local Muon momentum, its step counter,
+  scheduler and Python/NumPy/Torch RNG states. A checksum manifest marks completed
+  saves. GPU readback and an actual resumed update still require verification.
+- Legacy checkpoints lack full RNG/scheduler state. Their limited restore is
+  explicitly reported, never presented as an exact full-Trainer resume.
+- An audit-only mode scores every real root target with native TRL without an
+  optimizer update; padding is excluded. The first measured audit found 93.25% of
+  token probability ratios outside 0.8–1.2, with mean absolute log-ratio about 5.17.
+  This is a blocking discrepancy, not ordinary rounding evidence. Diagnose it
+  before using these samples for prolonged curriculum training.
+
+The full 50-task GPU pass has not started. Sampling remains phase-alternated;
+this change does not enable simultaneous vLLM and trainer model copies.
+
 ## Saved state and evidence
 
 For the next run, recovery replies allow up to 1,024 tokens instead of 512.

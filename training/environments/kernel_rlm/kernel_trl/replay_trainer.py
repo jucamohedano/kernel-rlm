@@ -23,7 +23,7 @@ def rlm_grpo_trainer(mesh, observe_optimizer, group: dict):
             return self.accelerator.prepare(loader)
 
         def training_step(self, model, inputs, num_items_in_batch=None):
-            if self.state.global_step != group["policy_version"]:
+            if self.state.global_step != 0:
                 raise ValueError("This bounded trainer refuses stale policy data")
             model.train()
             prepared = tensors_for_turn(inputs, group["trainable_tokens"], self.accelerator.device)

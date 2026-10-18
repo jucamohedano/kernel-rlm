@@ -1,4 +1,4 @@
-"""One real-data TRL/Muon update; input group is generated and verified beforehand."""
+"""One phase-shared TRL/Muon update with compact policy continuation, or audit only."""
 
 import argparse
 import json
@@ -8,60 +8,6 @@ from datetime import timedelta
 from pathlib import Path
 
 
-def export_adapter(model, optimizer, directory: Path) -> None:
-    import torch
-    import torch.distributed as dist
-    from kernel_skyrl.framework_probe import local_tensor
-    from safetensors.torch import save_file
-
-    rank = dist.get_rank()
-    full = {}
-    local = {}
-    momentum = {}
-    for name, parameter in model.named_parameters():
-        if not parameter.requires_grad:
-            continue
-        local[name] = local_tensor(parameter).detach().cpu().clone()
-        state = optimizer.state.get(parameter, {})
-        if "momentum" in state:
-            momentum[name] = local_tensor(state["momentum"]).detach().cpu().clone()
-        value = parameter.full_tensor().detach().cpu()
-        if rank == 0:
-            full[name.replace(".default.", ".")] = value.contiguous()
-    output = directory / "checkpoint-step-1"
-    output.mkdir(exist_ok=True)
-    torch.save(
-        {
-            "adapters": local,
-            "momentum": momentum,
-            "step": 1,
-            "rng": torch.get_rng_state(),
-            "cuda_rng": torch.cuda.get_rng_state(),
-        },
-        output / f"state-rank-{rank}.pt",
-    )
-    if rank == 0:
-        save_file(full, output / "adapter_model.safetensors")
-        model.peft_config["default"].save_pretrained(output)
-        (output / "metadata.json").write_text(
-            json.dumps(
-                {
-                    "step": 1,
-                    "world_size": 2,
-                    "adapter_tensors": len(full),
-                    "frozen_weights_saved": False,
-                    "optimizer_resume_tested": False,
-                    "muon_groups": [
-                        {name: value for name, value in group.items() if name != "params"}
-                        for group in optimizer.param_groups
-                    ],
-                },
-                indent=2,
-            )
-        )
-    dist.barrier()
-
-
 def run(arguments) -> dict:
     import torch
     import torch.distributed as dist
@@ -69,19 +15,45 @@ def run(arguments) -> dict:
     from kernel_skyrl.framework_hooks import (
         materialize_meta_adapters,
         materialize_nonpersistent_buffers,
+        trl_muon_trainer,
     )
     from kernel_skyrl.framework_probe import observe_updates
     from kernel_skyrl.laguna_policy import attach_adapters, audit_storage, load_base
     from kernel_skyrl.laguna_probe import event
     from torch.distributed.device_mesh import init_device_mesh
-    from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, TrainerCallback
     from trl import GRPOConfig
 
+    from kernel_trl.checkpoint_state import (
+        checkpoint_metadata,
+        load_adapters,
+        restore_training_state,
+        save_training_state,
+    )
+    from kernel_trl.probability_audit import AuditComplete, audit_group
     from kernel_trl.replay_trainer import rlm_grpo_trainer
 
-    group = json.loads(arguments.group.read_text())
-    if group["policy_version"] != 0 or len(group["rows"]) % 4 or group["trainable_tokens"] <= 0:
-        raise ValueError("Invalid or stale one-update group")
+    group = json.loads(arguments.group.read_text()) if arguments.group else None
+    if arguments.readback_only:
+        if group is not None or arguments.resume_from is None:
+            raise ValueError("Readback requires only a checkpoint, not sampled trajectories")
+        version = json.loads((arguments.resume_from / "metadata.json").read_text())["step"]
+    else:
+        if group is None:
+            raise ValueError("A training or probability audit group is required")
+        version = group["policy_version"]
+        if type(version) is not int or version < 0:
+            raise ValueError("Invalid sampled policy version")
+        if len(group["rewards"]) not in {4, 8} or len(group["rows"]) % len(group["rewards"]):
+            raise ValueError("Expected four or eight complete trajectories with aligned rows")
+        if group["trainable_tokens"] <= 0:
+            raise ValueError("No real trainable tokens")
+    if version and arguments.resume_from is None:
+        raise ValueError("Nonzero policy version requires its checkpoint")
+    if arguments.resume_from:
+        checkpoint_metadata(arguments.resume_from, version)
+    if group and not arguments.audit_only and max(group["rewards"]) <= 0.1:
+        raise ValueError("No reward above 0.1: inspect trajectories before further updates")
     if int(os.environ["WORLD_SIZE"]) != 2 or torch.cuda.device_count() != 2:
         raise ValueError("Exactly two allocated GPUs are required")
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
@@ -110,6 +82,8 @@ def run(arguments) -> dict:
                     configuration, dtype=torch.bfloat16, attn_implementation="sdpa"
                 )
         model = attach_adapters(model)
+        if rank == 0 and arguments.resume_from:
+            load_adapters(model, arguments.resume_from)
         model.config.use_cache = False
         materialize_meta_adapters(model)
         materialize_nonpersistent_buffers(model)
@@ -117,14 +91,15 @@ def run(arguments) -> dict:
             str(arguments.checkpoint), trust_remote_code=False
         )
         updates = []
-        gas = len(group["rows"]) // 2
+        row_count = len(group["rows"]) if group else 4
+        gas = row_count // 2
         settings = GRPOConfig(
             output_dir=str(directory / "trainer-output"),
             bf16=True,
             per_device_train_batch_size=1,
             gradient_accumulation_steps=gas,
             steps_per_generation=gas,
-            num_generations=4,
+            num_generations=len(group["rewards"]) if group else 4,
             max_steps=1,
             max_completion_length=4096,
             loss_type="dapo",
@@ -149,24 +124,66 @@ def run(arguments) -> dict:
                 "reshard_after_forward": True,
             },
         )
-        trainer = rlm_grpo_trainer(
-            mesh, lambda optimizer: observe_updates(optimizer, model, directory, updates), group
-        )(
+
+        def observe_optimizer(optimizer):
+            observe_updates(optimizer, model, directory, updates)
+
+        trainer_class = (
+            rlm_grpo_trainer(mesh, observe_optimizer, group)
+            if group
+            else trl_muon_trainer(mesh, observe_optimizer)
+        )
+        trainer = trainer_class(
             model=model,
             args=settings,
-            train_dataset=Dataset.from_dict(
-                {"prompt": ["unused-exact-token-replay"] * len(group["rows"])}
-            ),
+            train_dataset=Dataset.from_dict({"prompt": ["unused-exact-token-replay"] * row_count}),
             reward_funcs=lambda completions, **kwargs: [0.0] * len(completions),
             processing_class=tokenizer,
         )
-        result = trainer.train()
+        resumed = {}
+        audit = {}
+        readback = {}
+
+        class PhaseStart(TrainerCallback):
+            def on_train_begin(self, args, state, control, **kwargs):
+                if arguments.resume_from:
+                    resumed.update(restore_training_state(trainer, arguments.resume_from, version))
+                    event(directory, "compact_resume_verified", **resumed)
+                if arguments.readback_only:
+                    output = save_training_state(trainer, directory, version)
+                    readback.update(checkpoint=output.name)
+                    raise AuditComplete()
+                if arguments.audit_only:
+                    audit.update(audit_group(trainer, group, directory))
+                    event(directory, "probability_audit_complete", **audit)
+                    raise AuditComplete()
+
+        trainer.add_callback(PhaseStart())
+        try:
+            result = trainer.train()
+        except AuditComplete:
+            if updates:
+                raise ValueError("Audit-only execution performed an optimizer update") from None
+            return {
+                "status": "readback" if arguments.readback_only else "audited",
+                "global_step": version,
+                "optimizer_steps": 0,
+                "probability_audit": audit,
+                "resume": resumed,
+                **readback,
+                "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
+                "peak_reserved_bytes": torch.cuda.max_memory_reserved(),
+                "elapsed_seconds": time.monotonic() - started,
+            }
         if trainer.state.global_step != 1 or len(updates) != 1:
             raise ValueError("Expected one actual optimizer update")
-        export_adapter(trainer.model, trainer.optimizer.optimizer, directory)
+        output = save_training_state(trainer, directory, version + 1)
         return {
             "status": "passed",
-            "global_step": 1,
+            "global_step": version + 1,
+            "local_optimizer_steps": 1,
+            "sampled_policy_version": version,
+            "resume": resumed,
             "rewards": group["rewards"],
             "advantages": group["advantages"],
             "root_turns": group["real_rows"],
@@ -179,7 +196,7 @@ def run(arguments) -> dict:
             "auxiliary_router_loss": False,
             "padding_loss": 0,
             "quality_improvement_claimed": False,
-            "checkpoint": "checkpoint-step-1",
+            "checkpoint": output.name,
             "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
             "peak_reserved_bytes": torch.cuda.max_memory_reserved(),
             "elapsed_seconds": time.monotonic() - started,
@@ -196,8 +213,12 @@ def run(arguments) -> dict:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--group", type=Path, required=True)
+    parser.add_argument("--group", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--resume-from", type=Path)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--audit-only", action="store_true")
+    mode.add_argument("--readback-only", action="store_true")
     arguments = parser.parse_args()
     arguments.output_dir.mkdir(parents=True, exist_ok=True)
     result = run(arguments)

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 
-def check(directory: Path) -> dict:
+def check(directory: Path, rollouts: int = 4, policy_version: int = 0) -> dict:
     if os.environ.get("CUDA_VISIBLE_DEVICES") != "":
         raise ValueError("Use CUDA_VISIBLE_DEVICES='' for the CPU gradient proof")
     import torch
@@ -25,14 +25,15 @@ def check(directory: Path) -> dict:
     tokenizer, prompt = tokenizer_and_prompt(None)
     model = attach_adapters(tiny_model().to(torch.bfloat16)).float()
     values = []
-    for trajectory, reward in enumerate([0.0, 0.2, 0.8, 1.0]):
+    for trajectory in range(rollouts):
+        reward = trajectory / (rollouts - 1)
         samples = [RootSample([2, 10], [20 + trajectory, 2], [-4.8, -4.8], "stop")]
         if trajectory % 2:
             samples.append(
                 RootSample([2, 40 + trajectory, 7], [30 + trajectory, 2], [-4.8, -4.8], "stop")
             )
         values.append({"reward": reward, "samples": samples})
-    group = training_rows(values)
+    group = training_rows(values, policy_version)
     parent = rlm_grpo_trainer(None, lambda optimizer: None, group)
 
     class CPUGradientProof(parent):
@@ -60,7 +61,7 @@ def check(directory: Path) -> dict:
             per_device_train_batch_size=1,
             gradient_accumulation_steps=gas,
             steps_per_generation=gas,
-            num_generations=4,
+            num_generations=rollouts,
             max_steps=1,
             max_completion_length=8,
             loss_type="dapo",
@@ -103,6 +104,8 @@ def check(directory: Path) -> dict:
     assert not torch.cuda.is_initialized()
     return {
         "status": "passed",
+        "rollouts": rollouts,
+        "sampled_policy_version": policy_version,
         "kind": "CPU native TRL per-turn gradient and accumulation proof",
         "probe_optimizer": "SGD for analytic comparison only; production remains Muon",
         "real_rows": group["real_rows"],
@@ -117,6 +120,8 @@ def check(directory: Path) -> dict:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--rollouts", type=int, choices=(4, 8), default=4)
+    parser.add_argument("--policy-version", type=int, default=0)
     arguments = parser.parse_args()
     if int(os.environ.get("WORLD_SIZE", "1")) > 1:
         arguments.output = arguments.output.with_name(
@@ -124,7 +129,9 @@ def main():
         )
     if arguments.output.exists():
         raise ValueError("Use a fresh output path")
-    result = check(arguments.output.parent / "cpu-proof-trainer")
+    result = check(
+        arguments.output.parent / "cpu-proof-trainer", arguments.rollouts, arguments.policy_version
+    )
     arguments.output.write_text(json.dumps(result, indent=2))
     print(json.dumps(result))
 

@@ -75,3 +75,25 @@ def test_bad_logprobs_fail_closed(credit):
     values[0]["samples"][0] = RootSample([2], [4], [math.nan], "stop")
     with pytest.raises(ValueError, match="log probabilities"):
         credit.training_rows(values)
+
+
+def test_eight_rollouts_keep_one_advantage_per_trajectory(credit):
+    result = credit.training_rows(episodes() + episodes(), policy_version=7)
+    assert len(result["rewards"]) == len(result["advantages"]) == 8
+    assert result["real_rows"] == 14
+    assert result["trainable_tokens"] == 28
+    assert len(result["rows"]) == 16
+    assert all(row["policy_version"] == 7 for row in result["rows"])
+    assert all(row["advantage"] == 0 for row in result["rows"] if row["padding"])
+    assert sum(result["advantages"]) == pytest.approx(0)
+
+
+@pytest.mark.parametrize("version", [-1, 0.5, True])
+def test_invalid_policy_versions_are_rejected(credit, version):
+    with pytest.raises(ValueError, match="Policy version"):
+        credit.training_rows(episodes(), version)
+
+
+def test_incomplete_eight_rollout_group_is_rejected(credit):
+    with pytest.raises(ValueError, match="four or eight"):
+        credit.training_rows(episodes() + episodes()[:3])

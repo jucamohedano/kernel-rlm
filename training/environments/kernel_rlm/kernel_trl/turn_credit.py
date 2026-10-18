@@ -7,8 +7,10 @@ from kernel_skyrl.contract import RootSample, has_signal
 
 
 def training_rows(episodes: list[dict], policy_version: int = 0) -> dict:
-    if len(episodes) != 4:
-        raise ValueError("The first TRL run requires four complete trajectories")
+    if len(episodes) not in {4, 8}:
+        raise ValueError("TRL requires four or eight complete trajectories")
+    if type(policy_version) is not int or policy_version < 0:
+        raise ValueError("Policy version must be a non-negative integer")
     rewards = [float(episode["reward"]) for episode in episodes]
     if not has_signal(rewards):
         raise ValueError("Zero-variance terminal rewards: no optimizer update allowed")
@@ -47,7 +49,7 @@ def training_rows(episodes: list[dict], policy_version: int = 0) -> dict:
             )
     tokens = sum(len(row["completion_ids"]) for row in rows)
     real_rows = len(rows)
-    while len(rows) % 4:
+    while len(rows) % len(episodes):
         rows.append({**rows[0], "advantage": 0.0, "padding": True})
     return {
         "rows": rows,

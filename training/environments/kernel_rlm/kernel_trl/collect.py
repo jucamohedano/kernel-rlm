@@ -71,7 +71,7 @@ async def collect(arguments):
         client = InferenceClient(session, arguments.endpoint, directory / "requests.jsonl")
         started = time.monotonic()
         smoke_request = {
-            "model": "kernel-base",
+            "model": arguments.adapter_name,
             "messages": [
                 {
                     "role": "user",
@@ -116,35 +116,58 @@ async def collect(arguments):
         await runner.setup()
         await web.TCPSite(runner, "127.0.0.1", 8016).start()
         generator = KernelGenerator(
-            client, "kernel-base", str(arguments.checkpoint), directory, episode_timeout_s=700
+            client,
+            arguments.adapter_name,
+            str(arguments.checkpoint),
+            directory,
+            episode_timeout_s=700,
         )
         tasks = {task["name"]: task for task in load_tasks(arguments.dataset)}
         attempts = []
         try:
             for group_index, task_id in enumerate(arguments.task_ids):
                 task = tasks[task_id]
-                jobs = [
-                    asyncio.create_task(
-                        generator.run_episode(
-                            task, directory / f"group-{group_index}-trajectory-{index}", 0
+                episodes = []
+                for start in range(0, arguments.rollouts, 4):
+                    jobs = [
+                        asyncio.create_task(
+                            generator.run_episode(
+                                task,
+                                directory / f"group-{group_index}-trajectory-{index}",
+                                arguments.policy_version,
+                            )
                         )
-                    )
-                    for index in range(4)
-                ]
-                try:
-                    episodes = await asyncio.gather(*jobs)
-                finally:
-                    for job in jobs:
-                        if not job.done():
-                            job.cancel()
-                    await asyncio.gather(*jobs, return_exceptions=True)
+                        for index in range(start, start + 4)
+                    ]
+                    try:
+                        episodes.extend(await asyncio.gather(*jobs))
+                    finally:
+                        for job in jobs:
+                            if not job.done():
+                                job.cancel()
+                        await asyncio.gather(*jobs, return_exceptions=True)
                 rewards = [episode["reward"] for episode in episodes]
+                admitted = has_signal(rewards) and max(rewards) > 0.1
                 attempts.append(
-                    {"task": task_id, "rewards": rewards, "admitted": has_signal(rewards)}
+                    {
+                        "task": task_id,
+                        "rewards": rewards,
+                        "admitted": admitted,
+                        "policy_version": arguments.policy_version,
+                        "reason": "admitted"
+                        if admitted
+                        else "weak_signal"
+                        if max(rewards) <= 0.1
+                        else "zero_variance",
+                    }
                 )
                 (directory / "groups.json").write_text(json.dumps(attempts, indent=2))
-                if has_signal(rewards):
-                    group = training_rows(episodes)
+                if max(rewards) <= 0.1:
+                    raise RuntimeError(
+                        "No reward above 0.1; inspect saved trajectories before continuing"
+                    )
+                if admitted:
+                    group = training_rows(episodes, arguments.policy_version)
                     group["task"] = task_id
                     (directory / "training-group.json").write_text(json.dumps(group, indent=2))
                     print(
@@ -172,15 +195,22 @@ def main():
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--rollouts", type=int, choices=(4, 8), default=4)
+    parser.add_argument("--policy-version", type=int, default=0)
+    parser.add_argument("--adapter-name", default="kernel-base")
     parser.add_argument(
         "--task-ids",
         nargs="+",
         default=["lvl1-seed42-0038", "lvl1-seed42-0011", "lvl1-seed42-0044"],
     )
     arguments = parser.parse_args()
+    if arguments.policy_version < 0 or (
+        arguments.policy_version > 0 and arguments.adapter_name == "kernel-base"
+    ):
+        raise ValueError("A nonzero policy requires an explicitly loaded trained adapter")
     if len(arguments.task_ids) > 3 or not arguments.endpoint.startswith("http://127.0.0.1:"):
         raise ValueError("Use loopback inference and at most three groups")
-    asyncio.run(asyncio.wait_for(collect(arguments), timeout=900))
+    asyncio.run(asyncio.wait_for(collect(arguments), timeout=900 * (arguments.rollouts // 4)))
 
 
 if __name__ == "__main__":
