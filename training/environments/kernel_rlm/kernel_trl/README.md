@@ -57,11 +57,11 @@ resolver can download CUDA Torch and NVIDIA libraries unnecessarily.
   weights. That is different from adapter-only reload; it needs a memory/transfer
   check for Laguna before billing for a full-model run.
 
-Recommendation: retain TRL as an option, with SkyRL the primary RLM integration
-candidate because it supports native per-turn training and phase offload. Both
-have now passed the short native full-model backward/Muon gates linked above.
-Neither path is ready for full RLM training on the pair: phase sharing, realistic
-context, checkpoint restart and exact trajectory credit still need validation.
+Next: continue TRL first, as requested. Keep SkyRL as another option. Both passed
+short native full-model backward/Muon gates; TRL also passed native generation
+and manual CPU phase moves with two updates. Native decoding was slow in that
+short test. Exact per-turn RLM credit, faster inference, realistic context and
+checkpoint restart still need validation before full RLM training.
 
 Sources: [custom rollouts](https://huggingface.co/docs/trl/grpo_trainer),
 [vLLM integration](https://huggingface.co/docs/trl/vllm_integration),
