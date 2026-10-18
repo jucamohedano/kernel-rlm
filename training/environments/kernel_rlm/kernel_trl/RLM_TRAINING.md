@@ -100,7 +100,8 @@ One completed optimizer step is not evidence of quality improvement.
   zero; the global policy version comes from a matching compact checkpoint.
 - New checkpoint support saves full LoRA plus local Muon momentum, its step counter,
   scheduler and Python/NumPy/Torch RNG states. A checksum manifest marks completed
-  saves. GPU readback and an actual resumed update still require verification.
+  saves. Fresh two-rank GPU readback and re-export now pass; an actual resumed
+  optimizer update still requires verification.
 - Legacy checkpoints lack full RNG/scheduler state. Their limited restore is
   explicitly reported, never presented as an exact full-Trainer resume.
 - An audit-only mode scores every real root target with native TRL without an
@@ -108,6 +109,24 @@ One completed optimizer step is not evidence of quality improvement.
   token probability ratios outside 0.8–1.2, with mean absolute log-ratio about 5.17.
   This is a blocking discrepancy, not ordinary rounding evidence. Diagnose it
   before using these samples for prolonged curriculum training.
+- Training now requires a passing `--audit-report` for the exact group hash,
+  policy version and real token count. Conservative readiness limits are mean
+  absolute log-ratio at most 0.1 and at most 5% outside ratios 0.8–1.2. These are
+  diagnostic safety thresholds, not claims about model quality. Missing, stale
+  or failing audits stop before model loading; audit/readback modes never update.
+- A separate unsharded forward reproduces a large discrepancy on 64 saved tokens
+  (mean absolute log-ratio about 5.10). This rules out FSDP as the sole cause; it
+  does not establish that FSDP and unsharded execution are identical.
+- Direct CPU comparisons found identical BF16 RoPE tables at six tested positions
+  for global and sliding attention. Nested config warnings alone are not proof
+  of incorrect rotary tables. The original router-bias tensors are already BF16.
+- The first resume attempt caught activation-checkpoint wrapper names in the old
+  adapter export. Portable names now remove those wrappers. The corrected GPU
+  restore checks all 320 adapter shards; a CPU comparison confirms all 1,280 local
+  adapter/momentum tensors and 320 exported full adapters are bitwise unchanged.
+  All original files are preserved and the old compact checkpoint is hash-verified
+  in ignored local backup storage. Prior vLLM reload only proved that generation
+  ran; adapter tensor coverage must be checked explicitly before claiming sync.
 
 The full 50-task GPU pass has not started. Sampling remains phase-alternated;
 this change does not enable simultaneous vLLM and trainer model copies.

@@ -30,7 +30,11 @@ def run(arguments) -> dict:
         restore_training_state,
         save_training_state,
     )
-    from kernel_trl.probability_audit import AuditComplete, audit_group
+    from kernel_trl.probability_audit import (
+        AuditComplete,
+        audit_group,
+        require_probability_agreement,
+    )
     from kernel_trl.replay_trainer import rlm_grpo_trainer
 
     group = json.loads(arguments.group.read_text()) if arguments.group else None
@@ -54,6 +58,8 @@ def run(arguments) -> dict:
         checkpoint_metadata(arguments.resume_from, version)
     if group and not arguments.audit_only and max(group["rewards"]) <= 0.1:
         raise ValueError("No reward above 0.1: inspect trajectories before further updates")
+    if group and not arguments.audit_only:
+        require_probability_agreement(arguments.audit_report, group)
     if int(os.environ["WORLD_SIZE"]) != 2 or torch.cuda.device_count() != 2:
         raise ValueError("Exactly two allocated GPUs are required")
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
@@ -216,6 +222,7 @@ def main():
     parser.add_argument("--group", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--resume-from", type=Path)
+    parser.add_argument("--audit-report", type=Path)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--audit-only", action="store_true")
     mode.add_argument("--readback-only", action="store_true")

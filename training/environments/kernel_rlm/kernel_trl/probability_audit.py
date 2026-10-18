@@ -1,11 +1,38 @@
 """Compare saved sampler probabilities with the unchanged native learner policy."""
 
+import hashlib
+import json
 import math
 import statistics
 
 
 class AuditComplete(Exception):
     pass
+
+
+def group_digest(group: dict) -> str:
+    return hashlib.sha256(
+        json.dumps(group, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()
+
+
+def require_probability_agreement(path, group: dict) -> dict:
+    if path is None:
+        raise ValueError("A passing probability audit is required before training")
+    summary = json.loads(path.read_text())["probability_audit"]
+    if (
+        summary.get("group_sha256") != group_digest(group)
+        or summary.get("policy_version") != group["policy_version"]
+        or summary.get("tokens") != group["trainable_tokens"]
+    ):
+        raise ValueError("Probability audit is stale or does not cover this exact group")
+    mean = summary["mean_absolute_log_ratio"]
+    outside = summary["outside_ratio_0_8_to_1_2_fraction"]
+    if not (
+        math.isfinite(mean) and math.isfinite(outside) and 0 <= mean <= 0.1 and 0 <= outside <= 0.05
+    ):
+        raise ValueError("Sampler/learner probability disagreement exceeds readiness limits")
+    return summary
 
 
 def summarize_deltas(deltas: list[float]) -> dict:
@@ -26,8 +53,6 @@ def summarize_deltas(deltas: list[float]) -> dict:
 
 
 def audit_group(trainer, group: dict, directory) -> dict:
-    import json
-
     import torch
     import torch.distributed as dist
 
@@ -67,6 +92,7 @@ def audit_group(trainer, group: dict, directory) -> dict:
     dist.all_gather_object(gathered, deltas)
     report = {
         "policy_version": group["policy_version"],
+        "group_sha256": group_digest(group),
         "optimizer_steps": 0,
         "all_real_root_tokens_scored": True,
         "padding_excluded": True,

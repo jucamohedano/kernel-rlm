@@ -79,3 +79,44 @@ def test_probability_audit_uses_real_token_denominator(audit):
 def test_probability_audit_rejects_invalid_values(audit, values):
     with pytest.raises(ValueError, match="finite"):
         audit.summarize_deltas(values)
+
+
+def audit_report(audit, tmp_path, group, **overrides):
+    summary = {
+        "group_sha256": audit.group_digest(group),
+        "policy_version": group["policy_version"],
+        "tokens": group["trainable_tokens"],
+        "mean_absolute_log_ratio": 0.02,
+        "outside_ratio_0_8_to_1_2_fraction": 0.01,
+        **overrides,
+    }
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps({"probability_audit": summary}))
+    return path
+
+
+def test_training_requires_an_exact_group_probability_audit(audit, tmp_path):
+    group = {"policy_version": 2, "trainable_tokens": 3, "rows": [{"completion_ids": [4, 5, 6]}]}
+    path = audit_report(audit, tmp_path, group)
+    assert audit.require_probability_agreement(path, group)["tokens"] == 3
+    group["rows"][0]["completion_ids"][0] = 7
+    with pytest.raises(ValueError, match="stale"):
+        audit.require_probability_agreement(path, group)
+    with pytest.raises(ValueError, match="required"):
+        audit.require_probability_agreement(None, group)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"mean_absolute_log_ratio": 5.17},
+        {"outside_ratio_0_8_to_1_2_fraction": 0.93},
+        {"mean_absolute_log_ratio": math.nan},
+        {"outside_ratio_0_8_to_1_2_fraction": -1},
+    ],
+)
+def test_probability_disagreement_cannot_reach_training(audit, tmp_path, overrides):
+    group = {"policy_version": 0, "trainable_tokens": 3}
+    path = audit_report(audit, tmp_path, group, **overrides)
+    with pytest.raises(ValueError, match="disagreement"):
+        audit.require_probability_agreement(path, group)
