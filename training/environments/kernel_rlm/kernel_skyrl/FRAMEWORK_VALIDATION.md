@@ -3,6 +3,13 @@
 These are bounded maintenance checks on the existing two-L40S CloudRift VM.
 They are not kernel-generation experiments. Modal and Prime remain unchanged.
 
+**18 October result:** the full pinned pretrained checkpoint passed real backward
+and one Muon update in both paths, on both ranks. SkyRL used its native strategy
+and loss under torchrun, not its Ray trainer. TRL used native `GRPOTrainer.train`.
+All 320 adapters remained FP32 and the base remained frozen BF16. Tiny gates also
+passed, including TRL's corrected rank-1 meta initialization. These outcomes do
+not close the integration and memory gates listed at the end of this document.
+
 ## What the code connects
 
 `framework_hooks.py` supplies two public hooks:
