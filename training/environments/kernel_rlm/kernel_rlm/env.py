@@ -9,9 +9,9 @@ import pathlib
 import uuid
 from typing import Any
 
-import rlm_train
 from datasets import Dataset
 
+import rlm_train
 from kernel_rlm.feedback import build_http_feedback_bootstrap
 from kernel_rlm.submission_contract import KERNEL_TASK_INSTRUCTION, validate_submission_source
 from kernel_rlm.verifier import verify_cuda
@@ -49,8 +49,8 @@ def _build_dataset(*, manifest_path: str, max_tasks: int | None = None, **kwargs
 async def score(info: Any, state: Any, **_kwargs: Any) -> float:
     """Verify a CUDA submission and return a correctness-first reward."""
     metadata = json.loads(info) if isinstance(info, str) else (info or {})
-    submitted = (state.get("rlm_final_answer") or state.get("final_answer") or "").strip()
-    if not submitted:
+    submitted = state.get("rlm_final_answer") or state.get("final_answer") or ""
+    if not submitted.strip():
         return 0.0
 
     is_valid, validation_error = validate_submission_source(submitted)
@@ -168,9 +168,7 @@ def load_environment(
         if feedback_url
         else ""
     )
-    combined_bootstrap = "\n\n".join(
-        code for code in (bootstrap_code or "", feedback_code) if code
-    )
+    combined_bootstrap = "\n\n".join(code for code in (bootstrap_code or "", feedback_code) if code)
     return rlm_train.RLMTrainEnv(
         dataset=dataset,
         max_iterations=max_iterations,

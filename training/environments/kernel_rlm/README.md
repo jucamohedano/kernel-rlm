@@ -611,3 +611,40 @@ thinking text before it builds the next prompt, while preserving the response,
 tool call, and REPL feedback. The V1 trace may still contain sampled reasoning
 tokens, and the current loss mask does not exclude root thoughts. Child branches
 remain excluded; neither thoughts nor subcalls earn an extra reward.
+
+## Profiling diagnostics
+
+Diagnostics are maintenance checks, not registered research experiments. They do
+not call a language model, update an optimizer, access checkpoint weights, or
+modify the training configuration.
+
+Analyze an existing downloaded run locally:
+
+```bash
+python -m kernel_rlm.diagnostics --run-dir logs/live-grpo/RUN_ID --output /tmp/latency.json
+```
+
+The report deduplicates episode exports, separates admitted episodes, summarizes
+per-episode stages, and exports timestamped timeline segments. Overlapping times
+are not added as sequential wall time. Missing phases remain unknown. Literal
+AST recovery compares feedback/final source without executing model code.
+
+Replay two saved correct candidates in the existing training image:
+
+```bash
+modal run -m modal_app.cache_diagnostic --source-run logs/live-grpo/RUN_ID --output-dir /tmp/cache-diagnostic --gpu
+```
+
+CPU-only CUDA compilation runs first: cold, identical warm, and a Python-wrapper
+newline change. The optional single-A100 stage then checks intermediate feedback
+and final scoring on unchanged source in fresh verifier processes. CPU work has
+a 480-second timeout; GPU work has a 180-second timeout; automatic retries are off.
+The diagnostic uses a separate `kernel-rlm-diagnostics` volume and makes no
+experiment-registry entry. Omit `--gpu` for compilation only. Software, hardware,
+phases and object-file timestamps are saved; unchanged timestamps are a cache
+reuse indicator, not a guarantee about arbitrary future submissions.
+
+Keep the source passed to final scoring byte-identical to the submitted program.
+Both scoring paths use `.strip()` only to detect blank content, not to rewrite
+the source. This preserves the isolated build cache used by `cuda_feedback`.
+Cache reuse never replaces fresh correctness trials or final timing checks.

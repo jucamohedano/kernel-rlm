@@ -22,7 +22,7 @@ class KernelTask(vf.Task[KernelData]):
     async def kernel_reward(self, trace: vf.Trace, runtime: vf.Runtime) -> float:
         mask_child_branches(trace)
         record = json.loads(await runtime.read("submission.json", max_bytes=1_000_000))
-        source = record["submission"].strip()
+        source = record["submission"]
         trace.info["kernel_submission"] = source
         trace.info["repl_calls"] = record["repl_calls"]
         trace.info["feedback_calls"] = record.get("feedback_calls", 0)
@@ -33,7 +33,7 @@ class KernelTask(vf.Task[KernelData]):
         trace.info["kernel_subcalls"] = record.get("subcalls", [])
         trace.info["kernel_recovery"] = record.get("recovery", [])
         trace.info["kernel_action_rejections"] = record.get("action_rejections", [])
-        if not source:
+        if not source.strip():
             trace.info["kernel_reward"] = 0.0
             return 0.0
         is_valid, validation_error = validate_submission_source(source)
