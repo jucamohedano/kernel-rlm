@@ -74,18 +74,21 @@ an existing output. A preparation is not a successful training run.
 
 ## Before renting the two L40S cards
 
-1. Add the Laguna loader/conversion path for this separate dependency stack.
-2. Enforce BF16 **storage** for frozen weights before FSDP, keeping adapters FP32.
-   A BF16 forward-pass setting alone does not ensure BF16 parameter storage.
-3. Add the pinned Dion Muon worker hook with Moonlight RMS scaling. SkyRL's
-   standard FSDP optimizer is hardcoded AdamW; we do not silently use it.
+1. Connect the validated native Laguna loader to the SkyRL worker. The component
+   check loaded the full pretrained base on two L40S GPUs; it was not a Ray run.
+2. Keep BF16 **storage** for frozen weights and FP32 adapters. The shared helper
+   enforces this distinction; the worker must actually call it.
+3. Connect the validated Dion Muon factory with Moonlight RMS scaling. SkyRL's
+   standard FSDP optimizer still constructs AdamW; that path must be replaced.
 4. Add compact checkpoint save/resume. Native FSDP saves frozen model shards too.
 5. Connect the entrypoint and provider-neutral factory input capture.
 6. On the VM, test adapter reload, offload, verifier placement and peak memory,
    then one bounded update. Only then compare throughput or learning quality.
 
-Ideal BF16 base storage is approximately 31.1 GiB per GPU. Activations, all-gathers,
-KV cache, adapters and verification need additional room. Memory fit is unproven.
+Ideal BF16 base storage is approximately 31.1 GiB per GPU. A full-base synthetic
+Muon update and four-token forward passed, with about 37.9 GiB observed NVML use
+per GPU. Activations at training context length, KV cache, phase offload and
+verification still need checks. Full training memory fit is unproven.
 Inference and training must alternate; this is not the previous asynchronous
 disaggregated topology. Changing frameworks also changes the loss implementation;
 do not treat the first SkyRL run as a bitwise continuation of the Prime run.

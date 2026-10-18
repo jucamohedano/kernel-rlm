@@ -23,9 +23,8 @@ SOURCE_FILES = (
     "skyrl/backends/skyrl_train/inference_servers/remote_inference_client.py",
 )
 PENDING_GATES = (
-    "Add a Laguna loader and verify checkpoint conversion with the isolated SkyRL stack",
-    "Enforce BF16 frozen base and FP32 adapters before FSDP sharding",
-    "Wire pinned Dion Muon with Moonlight RMS scaling; no AdamW substitution",
+    "Connect the validated native Laguna BF16/FP32 helpers to the SkyRL policy worker",
+    "Replace SkyRL's AdamW construction with the validated Dion Moonlight factory",
     "Add compact adapter/optimizer checkpoint save and distributed resume",
     "Connect KernelGenerator to the SkyRL entrypoint and factory launch capture",
     "Validate LoRA reload, exact token protocol and phase offload on two L40S GPUs",
@@ -98,6 +97,8 @@ def prepare(source: Path, manifest: Path) -> dict:
             "lr": 1e-5,
             "weight_decay": 0.01,
             "implemented": False,
+            "component_factory": "kernel_skyrl.laguna_policy.build_muon",
+            "scope": "Component validated; implemented=false refers to native SkyRL worker integration",
         },
         "dataset": {"sha256": digest(manifest), "examples": task_count},
         "code": {

@@ -3,6 +3,12 @@
 These checks run only on the allocated CloudRift VM. They do not launch GRPO,
 inference rollouts, Ray workers or vLLM. Prime and Modal are unchanged.
 
+The full pretrained two-GPU component check passed on 18 October 2026. It used
+BF16 frozen weights and all 320 FP32 attention LoRA tensors, with a real Dion
+synthetic-gradient update and finite four-token logits on each rank. Maximum
+observed NVML use was 37.9 GiB per GPU (one-second samples); PyTorch's own peak
+allocation was 36.3 GiB and peak reservation 37.2 GiB. These are different metrics.
+
 ## What changed
 
 `laguna_policy.py` provides reusable loader and optimizer functions:
