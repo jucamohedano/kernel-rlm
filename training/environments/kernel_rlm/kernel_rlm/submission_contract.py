@@ -17,12 +17,23 @@ KERNEL_TASK_INSTRUCTION = (
     "get_init_inputs: constructor values are NOT extra runtime inputs. The Python "
     "wrapper must supply any constructor constants required by the C++ launch "
     "function. Match its declaration, definition, and Python call. Then write a standalone Python source "
-    "string defining CPP_SOURCE, CUDA_SOURCE, and cuda_forward(*tensors). The source "
+    "string defining CPP_SOURCE, CUDA_SOURCE, and a cuda_forward or ModelNew entrypoint. The source "
     "must implement the reference operation with a compiled CUDA extension.\n\n"
+    "For tasks with constructor state or model weights, you may instead define "
+    "class ModelNew(torch.nn.Module) with the same __init__ arguments as Model and "
+    "a forward method that calls your compiled extension. The verifier supplies "
+    "get_init_inputs(), initializes the reference, then copies its parameters and "
+    "buffers into ModelNew with strict state-dict matching. Mirror the reference's "
+    "parameter and buffer names and shapes, and pass the needed weights or "
+    "constructor values to your extension in forward. Do not guess random weights. "
+    "ModelNew may use nn modules to register state, but its numerical forward must "
+    "use the CUDA extension, not the PyTorch reference operation. Return the same "
+    "tensor or nested tuple/list/dict structure and dtypes as the reference. "
+    "For stateless tasks, cuda_forward remains sufficient.\n\n"
     "The submission must import load_inline from torch.utils.cpp_extension and call "
     "torch.utils.cpp_extension.load_inline with cpp_sources=CPP_SOURCE and "
     "cuda_sources=CUDA_SOURCE. Build the extension at module import time, store the "
-    "returned module in a global such as _module, and make cuda_forward call the "
+    "returned module in a global such as _module, and make the entrypoint call the "
     "bound extension function. Do not use torch.utils.cpp_extension.load, "
     "load_extension, build_cuda_extension, source filenames, rebuild=, "
     "extra_cuda_flags=, or extra_nvcc_flags=. Those APIs are not accepted by the "
@@ -149,11 +160,20 @@ def validate_submission_source(source: str) -> tuple[bool, str]:
     }
     if "CPP_SOURCE" not in assigned_names or "CUDA_SOURCE" not in assigned_names:
         return False, "source must define CPP_SOURCE and CUDA_SOURCE"
-    if not any(
+    has_function = any(
         isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == "cuda_forward"
         for node in tree.body
-    ):
-        return False, "source must define cuda_forward"
+    )
+    has_model = any(
+        isinstance(node, ast.ClassDef)
+        and node.name == "ModelNew"
+        and any(
+            isinstance(method, ast.FunctionDef) and method.name == "forward" for method in node.body
+        )
+        for node in tree.body
+    )
+    if not has_function and not has_model:
+        return False, "source must define cuda_forward or ModelNew.forward"
 
     load_inline_calls: list[ast.Call] = []
     for node in ast.walk(tree):

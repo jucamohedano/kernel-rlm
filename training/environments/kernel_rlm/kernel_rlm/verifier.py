@@ -72,6 +72,7 @@ _RUNNER = textwrap.dedent(
     runner_started = time.monotonic()
     import torch
     import torch.utils.cpp_extension
+    from kernel_rlm.candidate import candidate_forward, clone_inputs, compare_outputs
 
     status_path = Path(sys.argv[-2])
     extension_root = Path(os.environ.get("KERNEL_RLM_EXTENSION_BUILD_ROOT", "/tmp/kernel-rlm-extensions"))
@@ -225,7 +226,6 @@ _RUNNER = textwrap.dedent(
             raise ValueError("submission must define CPP_SOURCE")
         if not isinstance(getattr(submission, "CUDA_SOURCE", None), str):
             raise ValueError("submission must define CUDA_SOURCE")
-        cuda_forward = submission.cuda_forward
         model_class = reference.Model
         get_inputs = reference.get_inputs
         get_init_inputs = getattr(reference, "get_init_inputs", lambda: [])
@@ -251,38 +251,30 @@ _RUNNER = textwrap.dedent(
     try:
         for trial in range(trials):
             mark_phase(f"correctness_trial_{trial + 1}")
-            model = model_class(*get_init_inputs()).to(device)
+            init_inputs = get_init_inputs()
+            model = model_class(*init_inputs).to(device)
             model.eval()
             inputs = [move_to_device(value, device) for value in get_inputs()]
+            candidate_inputs = clone_inputs(inputs)
             calls_before = len(extension_calls)
             with torch.no_grad():
                 reference_output = model(*inputs)
-                candidate_output = cuda_forward(*inputs)
+                run_candidate = candidate_forward(submission, model, init_inputs, device)
+                candidate_output = run_candidate(*candidate_inputs)
             if not extension_builds:
                 raise ValueError(
                     "submission must build a CUDA extension with torch.utils.cpp_extension.load_inline"
                 )
             if len(extension_calls) == calls_before:
-                raise ValueError("cuda_forward did not invoke the compiled CUDA extension")
-            if tuple(reference_output.shape) != tuple(candidate_output.shape):
-                result["error"] = (
-                    f"shape mismatch: reference {tuple(reference_output.shape)} "
-                    f"vs candidate {tuple(candidate_output.shape)}"
-                )
-                correct = False
-                break
-            reference_flat = reference_output.reshape(-1)
-            candidate_flat = candidate_output.reshape(-1)
-            reference_chunk = candidate_chunk = None
-            for start in range(0, reference_flat.numel(), 1048576):
-                reference_chunk = reference_flat[start:start + 1048576]
-                candidate_chunk = candidate_flat[start:start + 1048576]
-                difference = (reference_chunk.float() - candidate_chunk.float()).abs().max().item()
-                max_diff = max(max_diff, float(difference))
-                if not torch.allclose(reference_chunk, candidate_chunk, atol=atol, rtol=rtol):
-                    correct = False
-            del reference_flat, candidate_flat, reference_output, candidate_output
-            del reference_chunk, candidate_chunk
+                raise ValueError("candidate forward did not invoke the compiled CUDA extension")
+            correct, difference, error = compare_outputs(reference_output, candidate_output, atol, rtol)
+            if correct:
+                correct, _, error = compare_outputs(inputs, candidate_inputs, atol, rtol)
+                if not correct:
+                    error = "input mutation mismatch: " + error
+            max_diff = max(max_diff, difference)
+            result["error"] = error
+            del reference_output, candidate_output, candidate_inputs, run_candidate
             if inputs:
                 del inputs
             del model
@@ -303,9 +295,14 @@ _RUNNER = textwrap.dedent(
         try:
             mark_phase("benchmark")
             inputs = [move_to_device(value, device) for value in get_inputs()]
-            model = model_class(*get_init_inputs()).to(device).eval()
-            reference_ms = benchmark(lambda: model(*inputs))
-            candidate_ms = benchmark(lambda: cuda_forward(*inputs))
+            init_inputs = get_init_inputs()
+            model = model_class(*init_inputs).to(device).eval()
+            with torch.no_grad():
+                model(*inputs)
+                run_candidate = candidate_forward(submission, model, init_inputs, device)
+            with torch.no_grad():
+                reference_ms = benchmark(lambda: model(*inputs))
+                candidate_ms = benchmark(lambda: run_candidate(*inputs))
             result["ref_ms"] = reference_ms
             result["kernel_ms"] = candidate_ms
             result["speedup"] = reference_ms / max(candidate_ms, 1e-9)
