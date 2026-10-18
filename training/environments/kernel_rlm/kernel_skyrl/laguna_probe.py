@@ -17,6 +17,7 @@ from kernel_skyrl.laguna_policy import (
     audit_storage,
     build_muon,
     load_base,
+    load_config,
 )
 
 
@@ -149,7 +150,7 @@ def distributed_check(directory: Path, checkpoint: Path | None) -> dict:
     import torch.distributed as dist
     from torch.distributed.device_mesh import init_device_mesh
     from torch.distributed.tensor import DTensor
-    from transformers import AutoConfig, AutoModelForCausalLM
+    from transformers import AutoModelForCausalLM
 
     rank = int(os.environ["RANK"])
     local_rank = int(os.environ["LOCAL_RANK"])
@@ -171,7 +172,7 @@ def distributed_check(directory: Path, checkpoint: Path | None) -> dict:
             model, information = load_base(checkpoint)
             (directory / "loading-information.json").write_text(json.dumps(information, indent=2))
         else:
-            config = AutoConfig.from_pretrained(str(checkpoint), trust_remote_code=False)
+            config = load_config(checkpoint)
             with torch.device("meta"):
                 model = AutoModelForCausalLM.from_config(
                     config,

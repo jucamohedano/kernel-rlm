@@ -17,7 +17,7 @@ from kernel_skyrl.framework_hooks import (
     skyrl_muon_strategy,
     trl_muon_trainer,
 )
-from kernel_skyrl.laguna_policy import attach_adapters, audit_storage, load_base
+from kernel_skyrl.laguna_policy import attach_adapters, audit_storage, load_base, load_config
 from kernel_skyrl.laguna_probe import event, tiny_model
 
 
@@ -240,7 +240,7 @@ def run(arguments, directory: Path) -> dict:
     import torch
     import torch.distributed as dist
     from torch.distributed.device_mesh import init_device_mesh
-    from transformers import AutoConfig, AutoModelForCausalLM
+    from transformers import AutoModelForCausalLM
 
     if int(os.environ["WORLD_SIZE"]) != 2 or torch.cuda.device_count() != 2:
         raise ValueError("This bounded gate requires exactly two GPUs")
@@ -269,9 +269,7 @@ def run(arguments, directory: Path) -> dict:
             model, information = load_base(arguments.checkpoint)
             (directory / "loading-information.json").write_text(json.dumps(information, indent=2))
         else:
-            configuration = AutoConfig.from_pretrained(
-                str(arguments.checkpoint), trust_remote_code=False
-            )
+            configuration = load_config(arguments.checkpoint)
             with torch.device("meta"):
                 model = AutoModelForCausalLM.from_config(
                     configuration, dtype=torch.bfloat16, attn_implementation="sdpa"

@@ -18,10 +18,10 @@ def run(arguments) -> dict:
         trl_muon_trainer,
     )
     from kernel_skyrl.framework_probe import observe_updates
-    from kernel_skyrl.laguna_policy import attach_adapters, audit_storage, load_base
+    from kernel_skyrl.laguna_policy import attach_adapters, audit_storage, load_base, load_config
     from kernel_skyrl.laguna_probe import event
     from torch.distributed.device_mesh import init_device_mesh
-    from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, TrainerCallback
+    from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
     from trl import GRPOConfig
 
     from kernel_trl.checkpoint_state import (
@@ -80,9 +80,7 @@ def run(arguments) -> dict:
             model, information = load_base(arguments.checkpoint)
             (directory / "loading-information.json").write_text(json.dumps(information, indent=2))
         else:
-            configuration = AutoConfig.from_pretrained(
-                str(arguments.checkpoint), trust_remote_code=False
-            )
+            configuration = load_config(arguments.checkpoint)
             with torch.device("meta"):
                 model = AutoModelForCausalLM.from_config(
                     configuration, dtype=torch.bfloat16, attn_implementation="sdpa"

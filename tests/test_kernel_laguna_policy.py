@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import math
 import sys
 from pathlib import Path
@@ -116,6 +117,8 @@ def test_pinned_muon_mesh_and_moonlight_scaling(policy, monkeypatch):
 def test_native_loader_is_strict_and_cpu_bf16(policy, monkeypatch):
     calls = []
     model = SimpleNamespace(config=SimpleNamespace(model_type="laguna"))
+    model.config.rope_parameters = {"full_attention": {"rope_type": "default", "rope_theta": 10000}}
+    monkeypatch.setattr(policy, "load_config", lambda path: model.config)
     information = {"missing_keys": set(), "unexpected_keys": set(), "mismatched_keys": set()}
 
     def load(*args, **kwargs):
@@ -142,3 +145,73 @@ def test_loading_metadata_can_be_saved_without_weakening_validation(policy):
     assert policy.serializable_loading_info({"nested": {"missing": {"one"}}}) == {
         "nested": {"missing": ["one"]}
     }
+
+
+def test_layer_specific_rope_survives_legacy_global_override(policy, monkeypatch, tmp_path):
+    original = {
+        "full_attention": {"rope_type": "yarn", "rope_theta": 500000, "partial_rotary_factor": 0.5},
+        "sliding_attention": {
+            "rope_type": "default",
+            "rope_theta": 10000,
+            "partial_rotary_factor": 1.0,
+        },
+    }
+    (tmp_path / "config.json").write_text(
+        json.dumps({"rope_parameters": original, "partial_rotary_factor": 0.5})
+    )
+    parsed = json.loads(json.dumps(original))
+    parsed["sliding_attention"]["partial_rotary_factor"] = 0.5
+    configuration = SimpleNamespace(
+        model_type="laguna",
+        layer_types=["full_attention", "sliding_attention"],
+        rope_parameters=parsed,
+        partial_rotary_factor=0.5,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(
+            AutoConfig=SimpleNamespace(from_pretrained=lambda *args, **kwargs: configuration)
+        ),
+    )
+    result = policy.load_config(tmp_path)
+    assert result.rope_parameters == original
+    assert result.rope_parameters["sliding_attention"]["partial_rotary_factor"] == 1
+    assert not hasattr(result, "partial_rotary_factor")
+    assert json.loads((tmp_path / "config.json").read_text())["partial_rotary_factor"] == 0.5
+
+
+def test_missing_per_type_rope_is_not_silently_guessed(policy, monkeypatch, tmp_path):
+    (tmp_path / "config.json").write_text("{}")
+    configuration = SimpleNamespace(model_type="laguna", layer_types=["full_attention"])
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(
+            AutoConfig=SimpleNamespace(from_pretrained=lambda *args, **kwargs: configuration)
+        ),
+    )
+    with pytest.raises(ValueError, match="per-layer-type"):
+        policy.load_config(tmp_path)
+
+
+def test_readonly_legacy_alias_is_not_deleted(policy, monkeypatch, tmp_path):
+    parameters = {"full_attention": {"rope_type": "default", "rope_theta": 10000}}
+    (tmp_path / "config.json").write_text(json.dumps({"rope_parameters": parameters}))
+
+    class Configuration:
+        model_type = "laguna"
+        layer_types = ["full_attention"]
+
+        @property
+        def rope_scaling(self):
+            return self.rope_parameters
+
+    parsed = Configuration()
+    parsed.rope_parameters = parameters
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(AutoConfig=SimpleNamespace(from_pretrained=lambda *args, **kwargs: parsed)),
+    )
+    assert policy.load_config(tmp_path).rope_scaling == parameters

@@ -1,5 +1,7 @@
 """Shared BF16 Laguna loading and Moonlight Muon wiring for the optional backend."""
 
+import copy
+import json
 import math
 from pathlib import Path
 from typing import Any
@@ -9,6 +11,29 @@ DION_REVISION = "d891eebbd950a6ff11d9b5f806282e33df83df9d"
 TARGETS = ("q_proj", "k_proj", "v_proj", "o_proj")
 RANK = 8
 ALPHA = 16
+
+
+def load_config(model_path: Path):
+    from transformers import AutoConfig
+
+    configuration = AutoConfig.from_pretrained(str(model_path), trust_remote_code=False)
+    raw = json.loads((model_path / "config.json").read_text())
+    if configuration.model_type != "laguna":
+        raise ValueError("The loader only supports Laguna")
+    parameters = raw.get("rope_parameters")
+    if not isinstance(parameters, dict) or set(parameters) != set(configuration.layer_types):
+        raise ValueError("Checkpoint must specify per-layer-type rotary parameters")
+    for layer_type, values in parameters.items():
+        if not isinstance(values, dict) or "rope_type" not in values or "rope_theta" not in values:
+            raise ValueError(f"Incomplete rotary parameters for {layer_type}")
+        fraction = values.get("partial_rotary_factor", 1.0)
+        if type(fraction) not in (float, int) or not 0 < fraction <= 1:
+            raise ValueError(f"Invalid rotary dimension fraction for {layer_type}")
+    configuration.rope_parameters = copy.deepcopy(parameters)
+    for legacy_name in ("partial_rotary_factor", "rope_scaling", "rope_theta"):
+        if legacy_name in vars(configuration):
+            delattr(configuration, legacy_name)
+    return configuration
 
 
 def serializable_loading_info(value: Any) -> Any:
@@ -76,6 +101,7 @@ def load_base(model_path: Path) -> tuple[Any, dict]:
 
     model, information = AutoModelForCausalLM.from_pretrained(
         str(model_path),
+        config=load_config(model_path),
         dtype=torch.bfloat16,
         device_map="cpu",
         trust_remote_code=False,
@@ -91,6 +117,7 @@ def load_base(model_path: Path) -> tuple[Any, dict]:
         raise ValueError(f"Incomplete Laguna checkpoint load: {problems}")
     if model.config.model_type != "laguna":
         raise ValueError("The loader only supports Laguna")
+    information["rope_parameters_from_checkpoint"] = copy.deepcopy(model.config.rope_parameters)
     return model, serializable_loading_info(information)
 
 
