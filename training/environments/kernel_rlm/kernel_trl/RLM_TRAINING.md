@@ -1,5 +1,23 @@
 # Exact-turn RLM training with TRL
 
+**18 October: one real update passed.** vLLM TP2 generated four trajectories on
+L1 subtraction task `lvl1-seed42-0038`. Native TRL/Muon trained 22 root replies
+(10,631 target tokens) and exported a 94.21 MiB adapter/local-state checkpoint.
+CPU read-back and a fresh vLLM process loading that trained adapter passed.
+The raw run is `20261018T212420Z-50f5a8cb`, using source commit `9f73e79`.
+
+**Quality did not pass:** rewards were `[0.1, 0, 0.1, 0.1]`; three final sources,
+zero correct kernels. Two bindings omitted constructor-derived arguments, one
+submission failed compilation, and one trajectory ended truncated. Both limited
+calls were 512-token recovery replies. Four intermediate feedback checks timed
+out, including three explicit GPU-slot waits. No child call occurred.
+
+Keep the working framework route, but seek positive correctness signal before
+longer training. Fix the stateful-task interface and verifier feedback queue;
+audit the native first-update clipping statistic (about 0.306) against sampler
+probabilities. That statistic is averaged across microbatches and includes
+zero-credit padding in metrics. It is not a measured fraction of all real tokens.
+
 ## Credit is not a separate reward per turn
 
 For four trajectories, compute one GRPO advantage from each final verifier reward,
@@ -68,3 +86,18 @@ always uses the validated Dion Muon factory.
 All requests, root/child responses, REPL observations, submissions, feedback,
 verifier results, rejected groups and training inputs must remain inspectable.
 One completed optimizer step is not evidence of quality improvement.
+
+## Saved state and evidence
+
+The checkpoint contains full LoRA matrices plus each rank's local adapter,
+momentum and Torch RNG tensors. It is not yet a full native Trainer checkpoint:
+fresh-process optimizer/scheduler/data-sampler resume has not been validated.
+Frozen base tensors are absent. This is a new baseline from the pinned base,
+not a continuation of the old Prime checkpoint. Back it up before releasing the VM.
+
+The local importer verifies saved source hashes and an optional equivalent Git
+commit. It maps the run into the existing dashboard without changing trajectory
+design. Full traces remain on the VM and ignored local log directories; aggregate
+results are in `notes/results/20261018-trl-live.json` in the parent project.
+The single- and two-rank native CPU proofs matched direct reference gradients;
+the two-rank maximum parameter error was about `7.3e-12`.

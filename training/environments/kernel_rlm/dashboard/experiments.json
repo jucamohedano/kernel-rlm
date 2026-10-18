@@ -20,18 +20,20 @@
       "id": "trl-rlm-l40s",
       "follows_experiments": ["checkpoint-resume"],
       "title": "Train exact RLM turns with TRL on two L40S",
-      "status": "prepared",
+      "status": "concluded",
       "intent": "Can fast tensor-parallel inference supply genuine CUDA RLM trajectories for a correctly normalized native TRL/Muon update on the same GPU pair?",
       "change": "Separate vLLM runtime; exact per-turn prompts and root-only targets; trajectory-level GRPO advantages; native DAPO PPO loss; phase-separated one-step training and compact adapter export.",
-      "conclusion": "Single-process and two-rank CPU gradient proofs passed. Live model inference and one real-reward update are pending.",
-      "decision": "Attempt one bounded optimizer update. Preserve zero-variance groups and failures; never substitute synthetic rewards.",
-      "limitations": ["Not a quality-improvement comparison.", "Fresh-process optimizer resume and post-update inference reload are separate gates."],
-      "runs": [],
+      "conclusion": "A real L1 group produced 22 exact root turns and one native TRL/Muon update. Compact export, CPU read-back and vLLM trained-adapter inference passed. Rewards were 0.1/0/0.1/0.1; zero of four kernels were correct. The update carried submission-format signal, not positive correctness/speed signal.",
+      "decision": "Keep the TRL/TP2 training route. Fix constructor-state interfaces and verifier feedback delays, then audit sampler/learner clipping before spending on a longer run.",
+      "evidence_file": "notes/results/20261018-trl-live.json",
+      "limitations": ["No quality improvement is established by one update or by adapter reload.", "This run starts from the pinned base, not the old Prime checkpoint.", "Full fresh-process optimizer/scheduler/sampler resume remains untested.", "Native initial clipping statistic was about 0.306, averaged over microbatches and including padding in metrics."],
+      "runs": ["20261018T212420Z-50f5a8cb"],
       "provenance": {
         "dataset_ids": ["ops6k-l1-seed42"],
         "code_paths": ["rlm/training/environments/kernel_rlm/kernel_trl/turn_credit.py", "rlm/training/environments/kernel_rlm/kernel_trl/replay_trainer.py", "rlm/training/environments/kernel_rlm/kernel_trl/rlm_update.py", "rlm/training/environments/kernel_rlm/kernel_trl/collect.py", "rlm/training/environments/kernel_rlm/kernel_skyrl/generator.py", "rlm/training/environments/kernel_rlm/kernel_rlm_v1/program.py"],
         "notes": ["rlm/training/environments/kernel_rlm/kernel_trl/RLM_TRAINING.md", "notes/datasets.md"],
-        "historical_attestation": "New TRL path. The exact launch sources, runtime pins and dataset bytes must be captured; earlier Prime provenance is not reused."
+        "documented_change_commits": ["9f73e79"],
+        "historical_attestation": "Uploaded source hashes were captured before rollout and verified equivalent to 9f73e79 on import. Remote Git checkout state was not measured. Earlier Prime provenance is not reused."
       }
     },
     {

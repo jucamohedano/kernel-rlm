@@ -17,8 +17,7 @@ import aiohttp
 def event(directory: Path, phase: str, **details):
     with (directory / "events.jsonl").open("a") as stream:
         stream.write(
-            json.dumps({"phase": phase, "utc": datetime.now(UTC).isoformat(), **details})
-            + "\n"
+            json.dumps({"phase": phase, "utc": datetime.now(UTC).isoformat(), **details}) + "\n"
         )
 
 
@@ -76,8 +75,10 @@ async def run(arguments):
             indent=2,
         )
     )
+
     def remaining():
         return arguments.deadline - time.time()
+
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
             ready = False
