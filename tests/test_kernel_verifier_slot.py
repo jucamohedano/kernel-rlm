@@ -13,7 +13,13 @@ import pytest
 @pytest.fixture
 def slot_module(monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "training/environments/kernel_rlm"))
-    from kernel_rlm import verifier_slot
+    from kernel_rlm import verifier, verifier_slot
+
+    monkeypatch.setattr(
+        verifier,
+        "run_contract_preflight",
+        lambda *args, **kwargs: {"status": "unsupported", "elapsed_seconds": 0.0},
+    )
 
     return verifier_slot
 

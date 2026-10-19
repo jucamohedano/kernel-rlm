@@ -4,7 +4,7 @@ import asyncio
 import fcntl
 import time
 from collections.abc import AsyncIterator, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, nullcontext
 from pathlib import Path
 
 LOCK_PATH = Path("/tmp/kernel-rlm-verifier.lock")
@@ -112,10 +112,9 @@ async def exclusive_inference_slot(
 
 
 @contextmanager
-def verifier_slot(timeout_s: float, *, path: Path = LOCK_PATH) -> Iterator[float]:
+def inference_drain(timeout_s: float, *, path: Path = LOCK_PATH) -> Iterator[float]:
     deadline = time.monotonic() + timeout_s
-    intent_path = _intent_path(path)
-    with intent_path.open("a") as intent:
+    with _intent_path(path).open("a") as intent:
         _acquire_sync(
             intent,
             fcntl.LOCK_EX,
@@ -123,19 +122,28 @@ def verifier_slot(timeout_s: float, *, path: Path = LOCK_PATH) -> Iterator[float
             "Timed out waiting for the verifier GPU slot",
         )
         try:
-            with path.open("a") as lock:
-                _acquire_sync(
-                    lock,
-                    fcntl.LOCK_EX,
-                    deadline,
-                    "Timed out waiting for the verifier GPU slot",
-                )
-                try:
-                    yield max(0.0, deadline - time.monotonic())
-                finally:
-                    fcntl.flock(lock, fcntl.LOCK_UN)
+            yield max(0.0, deadline - time.monotonic())
         finally:
             fcntl.flock(intent, fcntl.LOCK_UN)
+
+
+@contextmanager
+def verifier_slot(
+    timeout_s: float, *, path: Path = LOCK_PATH, intent_held: bool = False
+) -> Iterator[float]:
+    deadline = time.monotonic() + timeout_s
+    with nullcontext() if intent_held else inference_drain(timeout_s, path=path):
+        with path.open("a") as lock:
+            _acquire_sync(
+                lock,
+                fcntl.LOCK_EX,
+                deadline,
+                "Timed out waiting for the verifier GPU slot",
+            )
+            try:
+                yield max(0.0, deadline - time.monotonic())
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 @contextmanager

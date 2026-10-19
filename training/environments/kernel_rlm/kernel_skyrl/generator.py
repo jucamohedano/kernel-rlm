@@ -105,7 +105,7 @@ class KernelGenerator:
                 KERNEL_ENDPOINT=bridge.endpoint,
                 KERNEL_API_KEY=bridge.api_key,
                 KERNEL_MODEL=self.tokenizer_path,
-                KERNEL_LIMITS=json.dumps(self.limits),
+                KERNEL_LIMITS=json.dumps({**self.limits, "bridge_owns_admission": True}),
                 KERNEL_FEEDBACK_LOG_DIR=str(directory.resolve()),
             )
             with (directory / "program.log").open("wb") as log:

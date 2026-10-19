@@ -18,7 +18,13 @@ from typing import Any
 
 from kernel_rlm.feedback_overlap import RESERVE_BYTES, overlap_budget
 from kernel_rlm.gpu_sharing import paused_inference
-from kernel_rlm.verifier_slot import COMPILE_LOCK_PATH, compile_slot, feedback_slot, verifier_slot
+from kernel_rlm.verifier_slot import (
+    COMPILE_LOCK_PATH,
+    compile_slot,
+    feedback_slot,
+    inference_drain,
+    verifier_slot,
+)
 
 
 def submission_extension_root(submission_code: str) -> Path:
@@ -330,6 +336,124 @@ def verify_cuda(
     collect_phase_events: bool = False,
     allow_feedback_overlap: bool = False,
 ) -> dict[str, Any]:
+    """Preflight interfaces, drain during CPU compilation, then independently verify."""
+    if timeout_s <= 0:
+        raise ValueError("Verification timeout must be positive")
+    started = time.monotonic()
+    deadline = started + timeout_s
+    preflight = run_contract_preflight(
+        reference_code, submission_code, python=python, cwd=cwd, timeout_s=min(15, timeout_s / 10)
+    )
+    if preflight.get("status") == "contract_failed":
+        return {
+            "compiled": False,
+            "extension_used": None,
+            "correct": None,
+            "max_diff": None,
+            "speedup": None,
+            "ref_ms": None,
+            "kernel_ms": None,
+            "verification_status": "contract_failed",
+            "error": "CPU contract preflight: " + preflight["error"],
+            "preflight": preflight,
+            "trials": n_trials,
+            "device": "cpu_meta",
+        }
+    shared_gpu = bool(os.environ.get("KERNEL_INFERENCE_ADMIN_URL"))
+    memory_limit = None
+    if shared_gpu and allow_feedback_overlap and not benchmark:
+        memory_limit, _reason = overlap_budget(reference_code, submission_code)
+    drain_early = shared_gpu and not benchmark and memory_limit is None
+    try:
+        with inference_drain(max(0, deadline - time.monotonic())) if drain_early else nullcontext():
+            result = verify_cuda_execution(
+                reference_code,
+                submission_code,
+                n_trials=n_trials,
+                atol=atol,
+                rtol=rtol,
+                timeout_s=max(0, deadline - time.monotonic()),
+                python=python,
+                cwd=cwd,
+                benchmark=benchmark,
+                collect_phase_events=collect_phase_events,
+                allow_feedback_overlap=allow_feedback_overlap,
+                drain_intent_held=drain_early,
+            )
+    except TimeoutError as error:
+        result = {
+            "compiled": None,
+            "extension_used": None,
+            "correct": None,
+            "verification_status": "timeout",
+            "timeout_phase": "inference_drain",
+            "error": str(error),
+        }
+    result["preflight"] = preflight
+    result.setdefault("timings", {}).update(
+        preflight_elapsed_seconds=preflight["elapsed_seconds"],
+        total_elapsed_seconds=time.monotonic() - started,
+    )
+    result.setdefault("scheduling", {})["drain_started_before_compile"] = drain_early
+    return result
+
+
+def run_contract_preflight(
+    reference_code: str,
+    submission_code: str,
+    *,
+    python: str | None,
+    cwd: str | None,
+    timeout_s: float,
+) -> dict[str, Any]:
+    started = time.monotonic()
+    with tempfile.TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        reference = directory / "reference.py"
+        submission = directory / "submission.py"
+        reference.write_text(reference_code)
+        submission.write_text(submission_code)
+        try:
+            process = _run_verifier_process(
+                [
+                    python or os.environ.get("KERNEL_VERIFY_PYTHON") or sys.executable,
+                    "-m",
+                    "kernel_rlm.contract_preflight",
+                    str(reference),
+                    str(submission),
+                ],
+                timeout_s=timeout_s,
+                cwd=cwd,
+                env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
+            )
+            result = json.loads(process.stdout.strip().splitlines()[-1])
+            if process.returncode or result.get("status") not in {
+                "contract_failed",
+                "interface_passed",
+                "unsupported",
+            }:
+                raise ValueError("Invalid preflight response")
+        except (subprocess.TimeoutExpired, IndexError, json.JSONDecodeError, ValueError) as error:
+            result = {"status": "unsupported", "error": f"{type(error).__name__}: {error}"}
+    result["elapsed_seconds"] = time.monotonic() - started
+    return result
+
+
+def verify_cuda_execution(
+    reference_code: str,
+    submission_code: str,
+    *,
+    n_trials: int,
+    atol: float,
+    rtol: float,
+    timeout_s: float,
+    python: str | None,
+    cwd: str | None,
+    benchmark: bool,
+    collect_phase_events: bool,
+    allow_feedback_overlap: bool,
+    drain_intent_held: bool,
+) -> dict[str, Any]:
     """Compile, run, and benchmark a CUDA submission in a subprocess."""
     python = python or os.environ.get("KERNEL_VERIFY_PYTHON") or sys.executable
     failure = {
@@ -347,6 +471,7 @@ def verify_cuda(
     timings: dict[str, float] = {}
     phase = "verifier_slot_queue"
     verification_started = time.monotonic()
+    verification_deadline = verification_started + timeout_s
     shared_gpu = bool(os.environ.get("KERNEL_INFERENCE_ADMIN_URL"))
     memory_limit = None
     reason = "final_benchmark" if benchmark else "overlap_not_requested"
@@ -375,7 +500,7 @@ def verify_cuda(
             repr(float(atol)),
             repr(float(rtol)),
         ]
-        compile_budget = min(90.0, timeout_s * 0.75)
+        compile_budget = min(90.0, max(0.0, timeout_s * 0.75))
         compiler_lock = submission_compile_lock(submission_code)
         compile_queue_started = time.monotonic()
         compile_command = [
@@ -475,61 +600,41 @@ def verify_cuda(
                 remaining_total = timeout_s - (time.monotonic() - verification_started)
                 slot = feedback_slot if overlap else verifier_slot
                 queue_started = time.monotonic()
-                with (
-                    slot(remaining_total) as remaining,
-                    compile_slot(remaining_total, path=compiler_lock) as _compile_remaining,
-                ):
+                slot_arguments = {"intent_held": True} if drain_intent_held and not overlap else {}
+                with slot(remaining_total, **slot_arguments):
                     timings["verifier_queue_wait_seconds"] = (
                         timings.get("verifier_queue_wait_seconds", 0.0)
                         + time.monotonic()
                         - queue_started
                     )
-                    scheduling["mode"] = (
-                        "overlap" if overlap else ("exclusive" if shared_gpu else "dedicated")
-                    )
-                    phase = "pause_inference"
-                    pause_started = time.monotonic()
-                    try:
-                        access = nullcontext(remaining) if overlap else paused_inference(remaining)
-                        with access as execution_budget:
-                            phase = "runner_startup"
-                            runner_started = time.monotonic()
-                            run_command = command
-                            if overlap:
-                                guard = {
-                                    "allocator_limit_bytes": memory_limit,
-                                    "reserve_bytes": RESERVE_BYTES,
-                                }
-                                run_command = [*command[:-2], json.dumps(guard), *command[-2:]]
-                            try:
-                                process = _run_verifier_process(
-                                    run_command,
-                                    timeout_s=execution_budget,
-                                    cwd=cwd,
-                                    env={
-                                        **os.environ,
-                                        "CUDA_VISIBLE_DEVICES": "0",
-                                        "KERNEL_RLM_EXTENSION_BUILD_ROOT": str(extension_root),
-                                    }
-                                    if shared_gpu
-                                    else {
-                                        **os.environ,
-                                        "KERNEL_RLM_EXTENSION_BUILD_ROOT": str(extension_root),
-                                    },
-                                )
-                            finally:
-                                timings["runner_elapsed_seconds"] = (
-                                    timings.get("runner_elapsed_seconds", 0.0)
-                                    + time.monotonic()
-                                    - runner_started
-                                )
-                            phase = "result_parse"
-                    finally:
-                        timings["inference_paused_seconds"] = timings.get(
-                            "inference_paused_seconds", 0.0
-                        ) + (
-                            time.monotonic() - pause_started if shared_gpu and not overlap else 0.0
+                    phase = "compile_cache_queue"
+                    cache_queue_started = time.monotonic()
+                    with compile_slot(
+                        max(0, verification_deadline - time.monotonic()), path=compiler_lock
+                    ):
+                        remaining = max(0, verification_deadline - time.monotonic())
+                        if remaining <= 0:
+                            raise TimeoutError(
+                                "Verification budget exhausted while acquiring locks"
+                            )
+                        timings["compile_cache_queue_wait_seconds"] = (
+                            timings.get("compile_cache_queue_wait_seconds", 0.0)
+                            + time.monotonic()
+                            - cache_queue_started
                         )
+                        process = execute_verification(
+                            command,
+                            status_path,
+                            remaining,
+                            overlap,
+                            memory_limit,
+                            extension_root,
+                            shared_gpu,
+                            cwd,
+                            timings,
+                            scheduling,
+                        )
+                phase = "result_parse"
                 if overlap and process.returncode == 0:
                     try:
                         guard_result = json.loads(process.stdout.strip().splitlines()[-1])
@@ -543,7 +648,18 @@ def verify_cuda(
                         continue
                 break
         except (subprocess.TimeoutExpired, TimeoutError) as error:
-            timings.setdefault("verifier_queue_wait_seconds", time.monotonic() - queue_started)
+            if phase == "verifier_slot_queue":
+                timings["verifier_queue_wait_seconds"] = (
+                    timings.get("verifier_queue_wait_seconds", 0.0)
+                    + time.monotonic()
+                    - queue_started
+                )
+            elif phase == "compile_cache_queue" and not status_path.exists():
+                timings["compile_cache_queue_wait_seconds"] = (
+                    timings.get("compile_cache_queue_wait_seconds", 0.0)
+                    + time.monotonic()
+                    - cache_queue_started
+                )
             phase_details = _read_phase(status_path)
             phase = phase_details.get("phase", phase)
             failure.update(
@@ -605,6 +721,51 @@ def verify_cuda(
             failure["verifier_phase"] = phase_details.get("phase")
             failure["verifier_phase_elapsed_seconds"] = phase_details.get("elapsed_seconds")
             return failure
+
+
+def execute_verification(
+    command: list[str],
+    status_path: Path,
+    remaining: float,
+    overlap: bool,
+    memory_limit: int | None,
+    extension_root: Path,
+    shared_gpu: bool,
+    cwd: str | None,
+    timings: dict[str, float],
+    scheduling: dict[str, Any],
+) -> subprocess.CompletedProcess:
+    scheduling["mode"] = "overlap" if overlap else ("exclusive" if shared_gpu else "dedicated")
+    status_path.write_text(json.dumps({"phase": "pause_inference"}))
+    pause_started = time.monotonic()
+    try:
+        access = nullcontext(remaining) if overlap else paused_inference(remaining)
+        with access as execution_budget:
+            status_path.write_text(json.dumps({"phase": "runner_startup"}))
+            runner_started = time.monotonic()
+            run_command = command
+            if overlap:
+                guard = {"allocator_limit_bytes": memory_limit, "reserve_bytes": RESERVE_BYTES}
+                run_command = [*command[:-2], json.dumps(guard), *command[-2:]]
+            try:
+                return _run_verifier_process(
+                    run_command,
+                    timeout_s=execution_budget,
+                    cwd=cwd,
+                    env={
+                        **os.environ,
+                        **({"CUDA_VISIBLE_DEVICES": "0"} if shared_gpu else {}),
+                        "KERNEL_RLM_EXTENSION_BUILD_ROOT": str(extension_root),
+                    },
+                )
+            finally:
+                timings["runner_elapsed_seconds"] = (
+                    timings.get("runner_elapsed_seconds", 0.0) + time.monotonic() - runner_started
+                )
+    finally:
+        timings["inference_paused_seconds"] = timings.get("inference_paused_seconds", 0.0) + (
+            time.monotonic() - pause_started if shared_gpu and not overlap else 0.0
+        )
 
 
 def _read_phase(path: Path) -> dict[str, Any]:

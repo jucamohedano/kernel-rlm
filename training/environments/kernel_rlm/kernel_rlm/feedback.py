@@ -10,7 +10,7 @@ def build_local_feedback_bootstrap(
     reference_code: str,
     *,
     max_calls: int = 2,
-    timeout_s: float = 120.0,
+    timeout_s: float = 180.0,
     details_path: str | None = None,
 ) -> str:
     """Build worker code that runs the verifier in the worker's CUDA environment."""

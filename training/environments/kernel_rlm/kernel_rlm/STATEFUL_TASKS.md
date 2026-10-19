@@ -44,7 +44,7 @@ to the result is rejected with an error about one, using the same cached extensi
 This verifies the constructor/structured-output path, not model-generated kernel
 quality. Benchmark calls now disable autograd for both reference and candidate.
 
-## CPU preflight is not integrated yet
+## CPU contract preflight
 
 The saved-candidate CPU diagnostic caught six of the eight old task-0018
 interfaces without compiling an extension. It extracted candidate definitions,
@@ -52,13 +52,19 @@ used real CPU Torch state copying, and replaced the extension with an
 argument-count stub. This proves that those specific errors can be caught
 cheaply; it is not a general numerical verifier or a safe arbitrary-code loader.
 
-The production verifier still compiles before checking candidate state and
-runtime arguments. A future preflight needs a bounded, GPU-hidden subprocess
-and an explicit unsupported result for constructors or bindings it cannot safely
-analyze. Unsupported code must reach the existing verifier, not be falsely
-rejected. Independent CUDA correctness and speed checks remain mandatory.
+New source runs `contract_preflight` before compilation. It uses meta tensors in
+a fresh GPU-hidden subprocess, with a wall deadline, 10 CPU seconds and a 16 GiB
+address-space limit. Simple `load_inline(functions=[...])` bindings are replaced
+with argument-count stubs. Strict state keys/shapes, the Python wrapper signature
+and supported C++ binding arities can fail before a CUDA build.
 
-## Feedback deadline diagnostic
+Defaulted or ambiguous C++ signatures, unsupported imports, data-dependent meta
+operations and preflight resource failures fall back to the full verifier. A
+positive preflight never establishes numerical correctness or extension use.
+Independent CUDA correctness and speed checks remain mandatory. This bounded
+subprocess is not a hardened hostile-code sandbox.
+
+## Baseline feedback deadline diagnostic
 
 Compilation, GPU admission and execution currently share a 120-second feedback
 deadline. A 54-second compile leaves 66 seconds for both admission and execution.
@@ -77,5 +83,30 @@ Do not increase only the feedback deadline. The base REPL and backend limits are
 reserves another 180 seconds, giving 450 and 480 seconds respectively. Two
 feedback calls, any child calls and cleanup must still fit those limits. Queue,
 compile, execution, wake cleanup and episode deadlines need a coordinated budget
-policy. This is follow-up infrastructure work; it is not deployed into the
-unchanged three-update baseline block.
+policy. These numbers describe the immutable completed three-update baseline;
+its samples and source have not been changed.
+
+## Repaired scheduling and cancellation
+
+- The loopback completion bridge owns inference admission for bridged root and
+  child requests. The program does not acquire a second reader lock. Direct
+  non-bridge integrations retain their caller-owned admission.
+- Disconnects cancel the bridge's transport coroutine. Its reader lock remains
+  held through coroutine cleanup. Cancelled child calls are logged and excluded
+  from root samples; cancelled root calls still reject incomplete collection.
+- Exclusive intermediate feedback announces writer intent before CPU compilation.
+  Active inference can finish while the CPU builds; new requests wait. CUDA
+  execution still requires the exclusive GPU slot. Qualified guarded overlap
+  retains its separate eligibility checks; final benchmarks stay exclusive.
+- Every queue/cache-lock wait reduces the same absolute verification deadline.
+  Queue timeout still means unknown correctness, not an incorrect kernel.
+- Feedback has a 180-second deadline, plus a 30-second cleanup allowance per call.
+  Two feedback calls fit a 450-second base REPL and 480-second backend. Two
+  optional 90-second children raise those enclosing bounds to 630/660 seconds.
+  Turn/output/context caps and the outer group deadline are unchanged.
+
+This policy bounds waiting; it cannot guarantee that every long active inference
+request drains before a feedback deadline. CPU cancellation and lock tests are
+not measurements of live GPU abort latency, throughput or numerical correctness.
+Use a new source snapshot for GPU validation; do not resume the old immutable run
+with edited code.

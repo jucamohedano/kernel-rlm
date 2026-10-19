@@ -108,6 +108,7 @@ async def run(task: dict) -> None:
                 record["subcalls"],
                 max_calls=max_child_calls,
                 enable_thinking=bool(limits.get("enable_thinking")),
+                admission_enabled=not limits.get("bridge_owns_admission", False),
             )
             proxy = SubLLMProxy()
             proxy.register(
@@ -209,7 +210,8 @@ async def run(task: dict) -> None:
             try:
                 async with inference_request_slot(
                     INFERENCE_ADMISSION_TIMEOUT_S,
-                    enabled=bool(os.environ.get("KERNEL_INFERENCE_ADMIN_URL")),
+                    enabled=bool(os.environ.get("KERNEL_INFERENCE_ADMIN_URL"))
+                    and not limits.get("bridge_owns_admission", False),
                 ) as admission_wait:
                     request_started = time.monotonic()
                     response = await client.chat.completions.create(**request_args)

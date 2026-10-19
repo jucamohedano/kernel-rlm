@@ -18,6 +18,12 @@ def modules(monkeypatch):
     monkeypatch.syspath_prepend(str(ROOT))
     from kernel_rlm import feedback, feedback_overlap, gpu_sharing, verifier, verifier_slot
 
+    monkeypatch.setattr(
+        verifier,
+        "run_contract_preflight",
+        lambda *args, **kwargs: {"status": "unsupported", "elapsed_seconds": 0.0},
+    )
+
     return SimpleNamespace(
         feedback=feedback,
         policy=feedback_overlap,
@@ -189,7 +195,9 @@ def test_guarded_verifier_and_bounded_exclusive_fallback(
     monkeypatch.setattr(
         modules.verifier,
         "verifier_slot",
-        lambda timeout: modules.slot.verifier_slot(timeout, path=tmp_path / "gate"),
+        lambda timeout, **kwargs: modules.slot.verifier_slot(
+            timeout, path=tmp_path / "gate", **kwargs
+        ),
     )
     pauses = []
 
@@ -238,7 +246,9 @@ def test_final_benchmark_and_unprofiled_tasks_stay_exclusive(
     monkeypatch.setattr(
         modules.verifier,
         "verifier_slot",
-        lambda timeout: modules.slot.verifier_slot(timeout, path=tmp_path / "gate"),
+        lambda timeout, **kwargs: modules.slot.verifier_slot(
+            timeout, path=tmp_path / "gate", **kwargs
+        ),
     )
 
     def run(command, **kwargs):
@@ -255,6 +265,7 @@ def test_final_benchmark_and_unprofiled_tasks_stay_exclusive(
     assert result["scheduling"] == {
         "mode": "exclusive",
         "reason": "final_benchmark" if benchmark else "unprofiled_reference",
+        "drain_started_before_compile": not benchmark,
     }
 
 

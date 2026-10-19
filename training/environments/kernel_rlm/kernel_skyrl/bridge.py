@@ -3,6 +3,7 @@
 import asyncio
 import copy
 import json
+import os
 import secrets
 import time
 import uuid
@@ -11,6 +12,7 @@ from typing import Any
 from aiohttp import web
 from kernel_rlm.capacity import ContextExhaustedError
 from kernel_rlm.subcalls import CHILD_SYSTEM
+from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_request_slot
 
 from kernel_skyrl.contract import exact_sample
 
@@ -46,7 +48,7 @@ class CompletionBridge:
     async def start(self) -> None:
         app = web.Application(client_max_size=2_000_000)
         app.router.add_post("/v1/chat/completions", self.complete)
-        self.runner = web.AppRunner(app, shutdown_timeout=1)
+        self.runner = web.AppRunner(app, shutdown_timeout=1, handler_cancellation=True)
         await self.runner.setup()
         await web.TCPSite(self.runner, "127.0.0.1", 0).start()
         address = self.runner.addresses[0]
@@ -89,9 +91,14 @@ class CompletionBridge:
                 cache_salt=f"kernel-{self.policy_version}",
             )
             record.update(branch="child" if child else "root", request=copy.deepcopy(body))
-            response = await asyncio.wait_for(
-                self.client.chat_completion({"json": body}), self.timeout_s
-            )
+            async with inference_request_slot(
+                INFERENCE_ADMISSION_TIMEOUT_S,
+                enabled=bool(os.environ.get("KERNEL_INFERENCE_ADMIN_URL")),
+            ) as admission_wait:
+                record["admission_wait_seconds"] = admission_wait
+                response = await asyncio.wait_for(
+                    self.client.chat_completion({"json": body}), self.timeout_s
+                )
             record["response"] = response
             sample = exact_sample(response, self.context_limit)
             if len(sample.response_ids) > body["max_tokens"]:
@@ -101,6 +108,15 @@ class CompletionBridge:
             else:
                 self.samples.append(sample)
             return web.json_response(response)
+        except asyncio.CancelledError:
+            record.update(outcome="cancelled", error="Caller disconnected or bridge stopped")
+            if record.get("branch") != "child":
+                self.failures.append("Root completion cancelled before delivery")
+            raise
+        except TimeoutError as error:
+            record.update(outcome="timeout", error=f"{type(error).__name__}: {error}")
+            self.failures.append(record["error"])
+            return web.json_response({"error": {"message": record["error"]}}, status=502)
         except ContextExhaustedError as error:
             record.update(outcome="context_exhausted", context_exhaustion=error.details)
             return web.json_response(

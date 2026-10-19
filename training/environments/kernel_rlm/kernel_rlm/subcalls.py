@@ -132,6 +132,7 @@ class BoundedSubcalls:
         timeout_s=SUBCALL_TIMEOUT_S,
         max_calls=SUBCALL_MAX_CALLS,
         enable_thinking=False,
+        admission_enabled=True,
     ):
         self.client = client
         self.model = model
@@ -140,6 +141,7 @@ class BoundedSubcalls:
         self.timeout_s = timeout_s
         self.max_calls = max_calls
         self.enable_thinking = enable_thinking
+        self.admission_enabled = admission_enabled
         self.calls_used = 0
 
     async def query(self, prompt, state=None):
@@ -157,7 +159,8 @@ class BoundedSubcalls:
         try:
             async with inference_request_slot(
                 INFERENCE_ADMISSION_TIMEOUT_S,
-                enabled=bool(os.environ.get("KERNEL_INFERENCE_ADMIN_URL")),
+                enabled=self.admission_enabled
+                and bool(os.environ.get("KERNEL_INFERENCE_ADMIN_URL")),
             ) as admission_wait:
                 entry["admission_wait_seconds"] = admission_wait
                 async with asyncio.timeout(self.timeout_s):

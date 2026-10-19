@@ -7,8 +7,9 @@ from collections.abc import Callable
 from rlm.utils.parsing import find_code_blocks
 
 FEEDBACK_MAX_CALLS = 2
-FEEDBACK_TIMEOUT_S = 120
-REPL_TIMEOUT_S = FEEDBACK_MAX_CALLS * FEEDBACK_TIMEOUT_S + 30
+FEEDBACK_TIMEOUT_S = 180
+FEEDBACK_CLEANUP_TIMEOUT_S = 30
+REPL_TIMEOUT_S = FEEDBACK_MAX_CALLS * (FEEDBACK_TIMEOUT_S + FEEDBACK_CLEANUP_TIMEOUT_S) + 30
 BACKEND_TIMEOUT_S = REPL_TIMEOUT_S + 30
 SUBMISSION_TURN = 6
 RECOVERY_MAX_TOKENS = 1024
@@ -66,11 +67,15 @@ def preparation_error(code: str, compiler_names: set[str], *, recovery: bool = F
                 for alias in node.names
                 if alias.name in {"load_inline", "load"}
             )
-        if not recovery and isinstance(node, ast.Call) and (
-            isinstance(node.func, ast.Name)
-            and node.func.id in compiler_names
-            or isinstance(node.func, ast.Attribute)
-            and node.func.attr == "load_inline"
+        if (
+            not recovery
+            and isinstance(node, ast.Call)
+            and (
+                isinstance(node.func, ast.Name)
+                and node.func.id in compiler_names
+                or isinstance(node.func, ast.Attribute)
+                and node.func.attr == "load_inline"
+            )
         ):
             return (
                 "Do not compile an extension directly in the REPL. Store the complete "

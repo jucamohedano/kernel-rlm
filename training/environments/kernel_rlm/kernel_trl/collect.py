@@ -27,7 +27,7 @@ KernelGenerator = None
 
 
 class InferenceClient:
-    """Transport REPL-admitted requests without acquiring a second reader lock."""
+    """Transport bridge-admitted requests without acquiring a second reader lock."""
 
     def __init__(self, session, endpoint, trace, context_tokens=LEGACY_CONTEXT_TOKENS):
         self.session = session

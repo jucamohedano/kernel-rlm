@@ -10,7 +10,20 @@
 <p class="muted">Status snapshot: 19 October 2026. This is not a live job or billing monitor.</p></header>
 <nav aria-label="Guide sections"><a href="#now">Start here</a><a href="#next">Next run</a><a href="#decisions">Decisions</a><a href="#evidence">Results</a><a href="#learn">Learn the loop</a><a href="#project">Project brief</a><a href="#references">References</a><a href="http://127.0.0.1:7790/">Experiment runs</a><button id="collapse" type="button">Close all details</button></nav>
 
-<section id="now" class="latest"><span class="tag">Bounded block complete · 19 October · 22:06 Madrid</span><h2>Step 8 saved. Training paused as planned.</h2><ul>
+<section id="now" class="latest"><span class="tag">Infrastructure repair · 19 October · CPU-only validation</span><h2>Feedback repairs implemented. Training stays paused at step 8.</h2><ul>
+<li><strong>Cancellation:</strong> the completion bridge now owns GPU admission and cancels its backend transport when the caller disconnects. The reader lock stays held through cleanup. Cancelled child responses never become root training targets.</li>
+<li><strong>Contract feedback:</strong> a bounded CPU/meta check can reject state-key, wrapper-signature and supported C++ binding errors before compilation. Unsupported cases still reach the independent CUDA verifier. Reward coefficients and numerical tests are unchanged.</li>
+<li><strong>Deadlines:</strong> exclusive feedback starts draining inference during CPU compilation. Lock waits reduce one shared deadline. Feedback has 180 seconds plus cleanup allowance; two optional children fit the enclosing 630/660-second REPL/backend bounds.</li>
+<li><strong>CPU evidence:</strong> 146 local regressions passed. Replay of 35 saved candidates caught 18 interface failures and preserved all three previously correct kernels. One unsupported case falls back to full verification. These checks do not establish live GPU abort latency, throughput or improved model quality.</li>
+<li><strong>Two-GPU plan:</strong> keep inference and training phase-separated. First investigate retaining the loaded inference engine across weak groups with no policy change; next, prebuild final candidates on CPU while sibling rollouts continue. Neither optimization is deployed yet.</li>
+<li><strong>Status:</strong> checkpoint 8 and all old traces remain intact. No GPU probe, training restart or extra VM was launched. The hourly monitor stays paused; <a href="http://127.0.0.1:7861/">Trackio</a> remains available. The rented VM still bills. Evidence: <code>notes/results/20261019-feedback-repair.json</code>.</li>
+</ul><details><summary>What still needs validation</summary><ul>
+<li><strong>GPU gate:</strong> validate real cancellation, feedback queue/execution timing and memory in a new bounded source snapshot before extending training. Do not edit or relaunch the immutable old run with changed source.</li>
+<li><strong>Not fixed here:</strong> recovery output caps, model instruction following and kernel arithmetic. Five previously recorded broader tests still expect old prompt/reasoning behavior. Their assertions are separate from these repairs.</li>
+<li><strong>Memory caution:</strong> sleeping vLLM workers may retain CUDA contexts and communication buffers. Do not assume they can coexist with the tightly packed learner. Both phases still need the L40S pair.</li>
+</ul></details></section>
+
+<section id="step8-history"><details><summary>Completed baseline block · step 8 and verified checkpoint</summary><h2>Step 8 saved. Training paused as planned.</h2><ul>
 <li><strong>Current:</strong> <a href="/?run=20261019T160431Z-context-resume">Context-safe continuation</a> finished its third authorized update at <strong>21:33 Madrid</strong> on task <code>0035</code>. The driver exited normally; no GPU process remains. No new training or evaluation job was launched.</li>
 <li><strong>Latest signal:</strong> six of eight episodes submitted. One CUDA kernel was correct, with reward <strong>0.769</strong>, but ran at <strong>0.69× reference speed</strong> (slower). Two kernels failed compilation, three failed wrapper arguments, and two episodes missed submission. Final scoring had no infrastructure error.</li>
 <li><strong>Update proof:</strong> both ranks restored all 320 step-7 adapter and momentum shards, RNG and scheduler. The audit passed on <strong>49,540 root tokens</strong>. Muon changed all 320 adapters; native loss was −0.03112. A negative policy loss is not proof that kernel quality improved.</li>
@@ -32,7 +45,7 @@
 <li><strong>Unchanged:</strong> 14,336 total context tokens, 4,096-token replies, eight rollouts, concurrency four, rank-8 attention LoRA, Muon and the original prompt/rewards/dataset. Child outputs remain excluded from loss.</li>
 <li><strong>Still strict:</strong> real infrastructure failures and failed exact probability audits block updates. Complete weak/equal-reward groups are preserved and deferred without training.</li>
 <li><strong>Remaining validation:</strong> a fresh distributed restore from step 8 and a natural typed HTTP context-exhaustion outcome remain unobserved. The CPU capacity tests and earlier distributed restores do not close these specific gaps.</li>
-</ul></details></section>
+</ul></details></details></section>
 
 <section id="context-memory-history"><details><summary>Resource checks · 14k and 16k native backward memory</summary><h2>The larger context was selected from measured memory.</h2><ul>
 <li><strong>Changed:</strong> new TRL runs use <strong>14,336 total sequence tokens</strong>, up from 12,288 (+16.7%). Root replies stay capped at 4,096, recovery at 1,024, and child input/output at 2,048. Eight rollouts and concurrency four are unchanged.</li>
