@@ -33,6 +33,97 @@ def test_curriculum_rotates_after_bootstrap_without_dropping_tasks(
     assert len(set(ordered)) == 50
 
 
+@pytest.fixture
+def continuation_parent(curriculum, tmp_path):
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    dataset = tmp_path / "dataset.jsonl"
+    dataset.write_text("unchanged dataset")
+    order = [f"task-{index}" for index in range(50)]
+    manifest = {
+        "source_commit": "parent-source",
+        "model_revision": curriculum.MODEL_REVISION,
+        "dataset_sha256": hashlib.sha256(dataset.read_bytes()).hexdigest(),
+    }
+    state = {
+        "run_id": "parent-run",
+        "status": "needs_diagnosis",
+        "policy_version": 4,
+        "completed_task_ids": order[:4],
+        "task_order": order,
+        "checkpoint": str(parent / "groups/step-004/update/checkpoint-step-4"),
+        "manifest_sha256": hashlib.sha256(
+            json.dumps(manifest, sort_keys=True).encode()
+        ).hexdigest(),
+        "results": [
+            {
+                "status": "trained",
+                "task_id": task,
+                "optimizer_step": index + 1,
+                "policy_version": index,
+                "rewards": [0.8, 0.1],
+            }
+            for index, task in enumerate(order[:4])
+        ]
+        + [{"status": "needs_diagnosis", "task_id": order[4], "optimizer_step": None}],
+        "attempts": {order[4]: 1},
+        "failure": {"task_id": order[4], "reason": "weak_signal"},
+    }
+    curriculum.write_json(parent / "inputs.json", manifest)
+    curriculum.write_json(parent / "state.json", state)
+    arguments = SimpleNamespace(parent_run_dir=parent, bootstrap_dir=None, dataset=dataset)
+    return arguments, state, order
+
+
+def test_new_snapshot_continuation_keeps_all_coverage_and_rejected_history(
+    curriculum, continuation_parent, monkeypatch
+):
+    arguments, original, order = continuation_parent
+    before = (arguments.parent_run_dir / "state.json").read_bytes()
+    validated = []
+
+    def validate(selected, task_order):
+        validated.append(selected)
+        return {
+            "policy_version": 4,
+            "completed_task_ids": order[3:4],
+            "results": [{"rewards": [0.8, 0.1]}],
+        }
+
+    monkeypatch.setattr(curriculum, "bootstrap_state", validate)
+    result = curriculum.continuation_state(arguments, order)
+
+    assert result["completed_task_ids"] == order[:4]
+    assert result["results"] == original["results"]
+    assert result["attempts"] == {order[4]: 1}
+    assert result["continuation_parent"]["failure_preserved"] == original["failure"]
+    assert result["continuation_parent"]["rejected_group_trained"] is False
+    assert validated[0].parent_run_dir is None
+    assert validated[0].bootstrap_dir == Path(original["checkpoint"]).parent.parent
+    assert result["status"] == "ready"
+    assert (arguments.parent_run_dir / "state.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("fault", ["active", "unfinished", "coverage", "manifest", "dataset"])
+def test_new_snapshot_continuation_rejects_inconsistent_parent(
+    curriculum, continuation_parent, fault
+):
+    arguments, state, order = continuation_parent
+    if fault == "active":
+        state["status"] = "running"
+    elif fault == "unfinished":
+        state["pending_task_id"] = order[4]
+    elif fault == "coverage":
+        state["completed_task_ids"] = order[:1]
+    elif fault == "manifest":
+        state["manifest_sha256"] = "changed"
+    else:
+        arguments.dataset.write_text("changed dataset")
+    curriculum.write_json(arguments.parent_run_dir / "state.json", state)
+    with pytest.raises(ValueError):
+        curriculum.continuation_state(arguments, order)
+
+
 def test_server_serves_the_base_or_exact_saved_lora(curriculum, tmp_path):
     arguments = SimpleNamespace(
         inference_python="/venv/inference-python",

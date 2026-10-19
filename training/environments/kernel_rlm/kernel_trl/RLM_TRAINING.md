@@ -211,6 +211,22 @@ this cycle without removing verifier priority or allowing inference during
 exclusive verification. This fix is not a measured GPU-throughput improvement;
 the next bounded live check must still validate scheduling behavior.
 
+## New snapshot after a diagnosed failure
+
+Use `--parent-run-dir` in a new output directory when an explicitly authorized
+retry needs corrected source. The parent must be stopped, with no pending group.
+Its dataset bytes, all 50 task IDs and order, manifest checksum and complete
+optimizer/coverage history must match. The latest checkpoint is independently
+validated through the existing two-rank bootstrap reports and probability audit.
+
+The new run keeps every completed task, prior result and attempt count. It
+records the parent's state hash, source commit and rejected group separately;
+it never edits the parent's failed state or trains its rejected samples. Use
+`--max-groups 1` for the first fresh eight-rollout validation. Pass the updated
+authorization file with the original spending baseline. This is not a way to
+relax probability audits, reset the budget or resume unfinished infrastructure
+failures blindly.
+
 For a bounded continuation test, use `--bootstrap-dir` with a successful
 step-1 run and `--max-groups 1`. Remove `--max-groups` for the remaining L1
 curriculum. Run the same command with `--resume` after a clean paused boundary.

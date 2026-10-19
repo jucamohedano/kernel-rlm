@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import copy
 import fcntl
 import hashlib
 import json
@@ -226,6 +227,8 @@ def ensure_gpus_idle() -> None:
 
 
 def bootstrap_state(arguments, task_order: list[str]) -> dict:
+    if getattr(arguments, "parent_run_dir", None) is not None:
+        return continuation_state(arguments, task_order)
     if arguments.bootstrap_dir is None:
         return {
             "status": "ready",
@@ -298,6 +301,84 @@ def bootstrap_state(arguments, task_order: list[str]) -> dict:
         ],
         "task_order": order,
     }
+
+
+def continuation_state(arguments, task_order: list[str]) -> dict:
+    if arguments.bootstrap_dir is not None or getattr(arguments, "replay_source", None):
+        raise ValueError("A parent continuation cannot also select a bootstrap or replay group")
+    parent = arguments.parent_run_dir.resolve()
+    with (parent / "driver.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        state_path = parent / "state.json"
+        state = read_json(state_path)
+        manifest = read_json(parent / "inputs.json")
+        if state.get("status") not in {"paused", "needs_diagnosis"}:
+            raise ValueError("Parent must have stopped at a saved continuation boundary")
+        if state.get("pending_directory") or state.get("pending_task_id"):
+            raise ValueError("Preserve and diagnose unfinished parent samples before continuing")
+        if (
+            manifest.get("model_revision") != MODEL_REVISION
+            or manifest.get("dataset_sha256")
+            != hashlib.sha256(arguments.dataset.read_bytes()).hexdigest()
+            or state.get("task_order") != task_order
+            or len(task_order) != 50
+            or len(set(task_order)) != 50
+        ):
+            raise ValueError("Parent model, dataset or full curriculum order changed")
+        if (
+            state.get("manifest_sha256")
+            != hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
+        ):
+            raise ValueError("Parent input manifest checksum changed")
+        version = state.get("policy_version")
+        completed = state.get("completed_task_ids", [])
+        trained = [
+            result for result in state.get("results", []) if result.get("status") == "trained"
+        ]
+        if (
+            type(version) is not int
+            or version < 1
+            or len(completed) != version
+            or len(set(completed)) != version
+            or not set(completed).issubset(task_order)
+            or [result.get("task_id") for result in trained] != completed
+            or [result.get("optimizer_step") for result in trained] != list(range(1, version + 1))
+            or any(result.get("policy_version") != index for index, result in enumerate(trained))
+        ):
+            raise ValueError("Parent coverage or optimizer history is inconsistent")
+        checkpoint = Path(state["checkpoint"])
+        if not checkpoint.resolve().is_relative_to(parent):
+            raise ValueError("Parent checkpoint must belong to the selected run")
+        selected = copy.copy(arguments)
+        selected.parent_run_dir = None
+        selected.bootstrap_dir = checkpoint.parent.parent
+        validated = bootstrap_state(selected, task_order)
+        if (
+            validated["policy_version"] != version
+            or validated["completed_task_ids"] != completed[-1:]
+            or validated["results"][0]["rewards"] != trained[-1]["rewards"]
+        ):
+            raise ValueError("Parent checkpoint audit differs from the saved optimizer history")
+        result = {
+            "status": "ready",
+            "policy_version": version,
+            "checkpoint": str(checkpoint),
+            "completed_task_ids": copy.deepcopy(completed),
+            "results": copy.deepcopy(state["results"]),
+            "task_order": list(task_order),
+            "attempts": copy.deepcopy(state.get("attempts", {})),
+            "continuation_parent": {
+                "run_id": state["run_id"],
+                "directory": str(parent),
+                "state_sha256": hashlib.sha256(state_path.read_bytes()).hexdigest(),
+                "input_manifest_sha256": state["manifest_sha256"],
+                "source_commit": manifest["source_commit"],
+                "policy_version": version,
+                "failure_preserved": copy.deepcopy(state.get("failure")),
+                "rejected_group_trained": False,
+            },
+        }
+    return result
 
 
 def audit_passed(report_path: Path, group: dict) -> dict:
@@ -638,6 +719,7 @@ def initialize_run(arguments) -> dict:
         },
         "speed_reward_weight": 0.1,
         "bootstrap_dir": str(arguments.bootstrap_dir) if arguments.bootstrap_dir else None,
+        "continuation_parent": state.get("continuation_parent"),
         "replay_source": str(arguments.replay_source)
         if getattr(arguments, "replay_source", None)
         else None,
@@ -706,6 +788,8 @@ def write_report(arguments, state: dict, budget: dict) -> None:
         "optimizer_steps": state["policy_version"],
         "current_policy_version": state["policy_version"],
         "current_checkpoint": state.get("checkpoint"),
+        "resumed_from": state.get("continuation_parent", {}).get("run_id"),
+        "resume_step": state.get("continuation_parent", {}).get("policy_version"),
         "groups": groups,
         "results": state["results"],
         "failure": state.get("failure"),
@@ -986,6 +1070,7 @@ def main() -> None:
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--inference-python", required=True)
     parser.add_argument("--bootstrap-dir", type=Path)
+    parser.add_argument("--parent-run-dir", type=Path)
     parser.add_argument("--replay-source", type=Path)
     parser.add_argument("--max-groups", type=int)
     parser.add_argument("--resume", action="store_true")
