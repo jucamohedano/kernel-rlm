@@ -99,7 +99,6 @@ def test_python_path_and_source_hashes_include_rlm_core(curriculum, tmp_path):
     training_package = tmp_path / "repo/training/src/rlm_train"
     training_package.mkdir(parents=True)
     (training_package / "__init__.py").write_text("worker")
-
     configured = curriculum.python_path(source_root, "/existing/path")
     hashes = curriculum.source_hashes(source_root)
 
@@ -122,6 +121,11 @@ def test_training_environment_sets_arch_before_gpu_hidden_compile(curriculum, tm
     (source_root / "kernel_trl").mkdir(parents=True)
     (source_root.parent.parent.parent / "rlm").mkdir(parents=True)
     (source_root.parent.parent / "src/rlm_train").mkdir(parents=True)
+    header_root = tmp_path / "python-headers/usr/include"
+    (header_root / "python3.12").mkdir(parents=True)
+    (header_root / "x86_64-linux-gnu/python3.12").mkdir(parents=True)
+    (header_root / "python3.12/Python.h").touch()
+    (header_root / "x86_64-linux-gnu/python3.12/pyconfig.h").touch()
 
     environment = curriculum.training_environment(
         str(python), source_root, "8.9", {"PATH": "/usr/bin"}
@@ -130,6 +134,7 @@ def test_training_environment_sets_arch_before_gpu_hidden_compile(curriculum, tm
     assert environment["TORCH_CUDA_ARCH_LIST"] == "8.9"
     assert str(python.parent) in environment["PATH"]
     assert str(source_root.parent.parent.parent) in environment["PYTHONPATH"]
+    assert str(header_root / "python3.12") in environment["CPATH"]
 
 
 def test_collection_record_requires_one_group(curriculum, tmp_path):

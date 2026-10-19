@@ -95,7 +95,7 @@ def training_environment(
     result = runtime_environment(python, environment)
     result["PYTHONPATH"] = python_path(source_root, result.get("PYTHONPATH"))
     result["TORCH_CUDA_ARCH_LIST"] = cuda_arch_list
-    return result
+    return python_header_environment(python, result)
 
 
 def curriculum_order(dataset: Path, first_task: str | None = None) -> list[str]:
@@ -172,11 +172,8 @@ def runtime_environment(python: str, environment: dict[str, str] | None = None) 
     return result
 
 
-def inference_environment(
-    inference_python: str, environment: dict[str, str] | None = None
-) -> dict[str, str]:
-    result = runtime_environment(inference_python, environment)
-    python_executable = Path(inference_python).absolute()
+def python_header_environment(python: str, environment: dict[str, str]) -> dict[str, str]:
+    python_executable = Path(python).absolute()
     runtime_root = python_executable.parents[2]
     header_root = runtime_root / "python-headers/usr/include"
     include_directory = header_root / "python3.12"
@@ -185,12 +182,22 @@ def inference_environment(
         not (include_directory / "Python.h").is_file()
         or not (multiarch_directory / "pyconfig.h").is_file()
     ):
-        raise FileNotFoundError("Cached Python 3.12 headers are required for vLLM LoRA JIT")
+        raise FileNotFoundError(
+            "Cached Python 3.12 headers are required for native extension builds"
+        )
     cpath = [str(include_directory), str(header_root)]
-    if result.get("CPATH"):
-        cpath.append(result["CPATH"])
-    result["CPATH"] = os.pathsep.join(cpath)
-    return result
+    if environment.get("CPATH"):
+        cpath.append(environment["CPATH"])
+    environment["CPATH"] = os.pathsep.join(cpath)
+    return environment
+
+
+def inference_environment(
+    inference_python: str, environment: dict[str, str] | None = None
+) -> dict[str, str]:
+    return python_header_environment(
+        inference_python, runtime_environment(inference_python, environment)
+    )
 
 
 def read_json(path: Path) -> dict:
