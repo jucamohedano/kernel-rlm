@@ -169,7 +169,20 @@ on these two L40S GPUs:
 
 The driver records each task result, policy version, reward group, audit summary,
 checkpoint, telemetry and spend estimate. It stops for diagnosis when a group
-has weak or zero-variance reward. `--resume` continues a paused run from its
+has weak or zero-variance reward by default. With `--continue-weak-groups`, it
+instead defers a fully scored group with weak or zero-variance reward and no
+final infrastructure errors. Deferred tasks remain untrained and visible in the
+report; their rewards, sampled policy and traces are preserved. The next task
+uses the same checkpoint. Failed audits and infrastructure errors still stop
+the driver. Neither option changes the reward function or admission rules.
+
+Use `--max-updates 3` to cap successful optimizer updates independently of weak
+groups. `--max-groups` caps attempted groups instead. Both caps apply per driver
+invocation; after a pause, subtract completed updates from the authorized block
+before resuming. If all remaining tasks are deferred, the pass pauses; it does
+not claim completion or retry the deferred tasks automatically.
+
+`--resume` continues a paused run from its
 latest validated checkpoint and reuses saved groups; a run lock prevents a
 second driver from launching against the same directory. Do not resume until
 the VM has no leftover GPU worker processes.
@@ -230,7 +243,8 @@ failures blindly.
 For a bounded continuation test, use `--bootstrap-dir` with a successful
 step-1 run and `--max-groups 1`. Remove `--max-groups` for the remaining L1
 curriculum. Run the same command with `--resume` after a clean paused boundary.
-Keep `--budget-file` pointed to the original $40 authorization record; each
+Keep `--budget-file` pointed to the operator-approved authorization record with
+the original spending baseline; each
 GPU phase checks the remaining allowance before it starts.
 
 An authorization record may also set `stop_at_unix_seconds`. A phase starts only

@@ -998,6 +998,13 @@ def render_run(root: Path, run_id: str, trajectory: int = 0, tab: str = "trace")
         )
         for key in ("prompt_tokens", "completion_tokens")
     }
+    curriculum_coverage = ""
+    if "completed_task_count" in report:
+        curriculum_coverage = (
+            f"<dt>TRAINED TASKS</dt><dd>{text(report['completed_task_count'])} / "
+            f"{text(report.get('target_task_count', 'Not recorded'))}</dd>"
+            f"<dt>DEFERRED · NOT TRAINED</dt><dd>{text(report.get('deferred_task_count', 0))}</dd>"
+        )
     summary = (
         f'<aside class="sidebar"><a href="{back}">← {text(back_label)}</a><div class="card">'
         f"<h2>{text(report.get('model_id', 'Kernel-RLM'))}</h2>"
@@ -1008,6 +1015,7 @@ def render_run(root: Path, run_id: str, trajectory: int = 0, tab: str = "trace")
         f"<dt>NONEMPTY SUBMISSIONS</dt><dd>{submitted} / {len(traces)}</dd>"
         f"<dt>ADMITTED FOR TRAINING</dt><dd>{normalized['admitted'] if normalized['admitted'] is not None else 'Not recorded'}</dd>"
         f"<dt>OPTIMIZER STEP</dt><dd>{normalized['optimizer_step'] if normalized['optimizer_step'] is not None else 'Not recorded'}</dd>"
+        f"{curriculum_coverage}"
         f"<dt>INPUT / OUTPUT TOKENS</dt><dd>{tokens['prompt_tokens']:,} / {tokens['completion_tokens']:,}</dd>"
         f"<dt>HARDWARE</dt><dd>{text(report.get('gpu_topology', 'Not recorded'))}</dd>"
         f"<dt>RUN ID</dt><dd>{text(run_id)}</dd></dl>"

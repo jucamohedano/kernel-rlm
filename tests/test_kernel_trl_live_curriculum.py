@@ -4,6 +4,7 @@ import importlib
 import json
 import shutil
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -122,6 +123,140 @@ def test_new_snapshot_continuation_rejects_inconsistent_parent(
     curriculum.write_json(arguments.parent_run_dir / "state.json", state)
     with pytest.raises(ValueError):
         curriculum.continuation_state(arguments, order)
+
+
+def rejected_group(task_id, policy_version=5, reason="weak_signal", rewards=None):
+    return {
+        "task_id": task_id,
+        "status": "needs_diagnosis",
+        "policy_version": policy_version,
+        "optimizer_step": None,
+        "trace_directory": f"preserved/{task_id}",
+        "group_record": {
+            "task": task_id,
+            "policy_version": policy_version,
+            "reason": reason,
+            "rewards": [0.1] * 8 if rewards is None else rewards,
+            "admitted": False,
+            "infrastructure_errors": [],
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "reason,rewards", [("weak_signal", [0, 0.1] * 4), ("zero_variance", [0.8] * 8)]
+)
+def test_deferral_preserves_failed_rewards_without_advancing_policy(curriculum, reason, rewards):
+    state = {"task_order": ["pending"], "completed_task_ids": [], "policy_version": 5}
+    result = rejected_group("pending", reason=reason, rewards=rewards)
+    original = json.dumps(result, sort_keys=True)
+
+    assert curriculum.defer_uninformative_group(state, result)
+    assert state["deferred_task_ids"] == ["pending"]
+    assert state["completed_task_ids"] == []
+    assert state["policy_version"] == 5
+    assert state["deferred_groups"][0]["rewards"] == rewards
+    assert state["deferred_groups"][0]["optimizer_update"] is False
+    assert json.dumps(result, sort_keys=True) == original
+    assert curriculum.defer_uninformative_group(state, result)
+    assert len(state["deferred_groups"]) == 1
+
+
+@pytest.mark.parametrize(
+    "fault", ["infrastructure", "audit", "admitted", "signal", "nonfinite", "incomplete"]
+)
+def test_deferral_never_bypasses_safety_failures_or_useful_signal(curriculum, fault):
+    state = {"task_order": ["pending"], "completed_task_ids": [], "policy_version": 5}
+    result = rejected_group("pending")
+    group = result["group_record"]
+    if fault == "infrastructure":
+        group["infrastructure_errors"] = [{"verification_status": "timeout"}]
+    elif fault == "audit":
+        result["status"] = "failed"
+    elif fault == "admitted":
+        group["admitted"] = True
+    elif fault == "signal":
+        group["rewards"] = [0.1, 0.8] * 4
+    elif fault == "nonfinite":
+        group["rewards"][0] = float("nan")
+    else:
+        group["rewards"] = [0.1] * 7
+    assert not curriculum.defer_uninformative_group(state, result)
+    assert not state.get("deferred_task_ids")
+
+
+@pytest.mark.parametrize("handling", ["continue", "stop", "infrastructure"])
+def test_curriculum_filters_weak_groups_and_caps_successful_updates(
+    curriculum, tmp_path, monkeypatch, handling
+):
+    order = [f"task-{index}" for index in range(50)]
+    state = {
+        "status": "ready",
+        "run_id": "test",
+        "target_task_count": 50,
+        "task_order": order,
+        "completed_task_ids": order[:5],
+        "policy_version": 5,
+        "results": [],
+        "checkpoint": "preserved-step-5",
+    }
+    budget_path = tmp_path / "budget.json"
+    budget_path.write_text(
+        json.dumps(
+            {
+                "budget_usd": 60,
+                "displayed_pair_rate_usd_per_hour": 1.26,
+                "goal_started_unix_seconds": time.time() - 60,
+            }
+        )
+    )
+    arguments = SimpleNamespace(
+        output_dir=tmp_path / "run",
+        run_id="test",
+        python=sys.executable,
+        source_root=tmp_path,
+        cuda_arch_list="8.9",
+        resume=False,
+        budget_file=budget_path,
+        max_groups=None,
+        max_updates=3,
+        continue_weak_groups=handling != "stop",
+    )
+    calls = []
+
+    async def train(arguments, budget, current, task_id):
+        calls.append(task_id)
+        if task_id == order[5]:
+            result = rejected_group(task_id)
+            if handling == "infrastructure":
+                result["group_record"]["reason"] = "infrastructure_error"
+                result["group_record"]["infrastructure_errors"] = [
+                    {"verification_status": "timeout"}
+                ]
+            current.update(status="needs_diagnosis", failure=result)
+            current["results"].append(result)
+            return False
+        current["policy_version"] += 1
+        current["completed_task_ids"].append(task_id)
+        current["results"].append({"task_id": task_id, "status": "trained"})
+        return True
+
+    monkeypatch.setattr(curriculum, "training_environment", lambda *args: {})
+    monkeypatch.setattr(curriculum, "initialize_run", lambda *args: state)
+    monkeypatch.setattr(curriculum, "train_task", train)
+    report = asyncio.run(curriculum.run(arguments))
+    if handling == "continue":
+        assert calls == order[5:9]
+        assert report["optimizer_steps"] == 8
+        assert report["completed_task_count"] == 8
+        assert report["deferred_task_ids"] == [order[5]]
+        assert order[5] not in report["completed_task_ids"]
+        assert report["status"] == "paused"
+    else:
+        assert calls == [order[5]]
+        assert report["optimizer_steps"] == 5
+        assert not report["deferred_task_ids"]
+        assert report["failure"]["task_id"] == order[5]
 
 
 def test_server_serves_the_base_or_exact_saved_lora(curriculum, tmp_path):

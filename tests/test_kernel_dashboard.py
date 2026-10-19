@@ -53,6 +53,24 @@ def test_empty_run_and_out_of_range_selection(tmp_path):
     assert "Run not found" in dashboard.render_run(tmp_path, "missing")
 
 
+def test_curriculum_distinguishes_deferred_and_trained_tasks(tmp_path):
+    directory = tmp_path / "curriculum"
+    directory.mkdir()
+    (directory / "report.json").write_text(
+        json.dumps(
+            {
+                "run_id": "curriculum",
+                "target_task_count": 50,
+                "completed_task_count": 5,
+                "deferred_task_count": 1,
+            }
+        )
+    )
+    page = dashboard.render_run(tmp_path, "curriculum")
+    assert "<dt>TRAINED TASKS</dt><dd>5 / 50</dd>" in page
+    assert "<dt>DEFERRED · NOT TRAINED</dt><dd>1</dd>" in page
+
+
 def test_failed_trace_without_final_transcript():
     page = dashboard.render_timeline(
         {

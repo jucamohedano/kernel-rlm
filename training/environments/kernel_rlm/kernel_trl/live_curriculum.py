@@ -6,6 +6,7 @@ import copy
 import fcntl
 import hashlib
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -15,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import aiohttp
+from kernel_skyrl.contract import has_signal
 from kernel_skyrl.preflight import load_tasks
 
 from kernel_trl.checkpoint_state import checkpoint_metadata
@@ -367,6 +369,8 @@ def continuation_state(arguments, task_order: list[str]) -> dict:
             "results": copy.deepcopy(state["results"]),
             "task_order": list(task_order),
             "attempts": copy.deepcopy(state.get("attempts", {})),
+            "deferred_task_ids": copy.deepcopy(state.get("deferred_task_ids", [])),
+            "deferred_groups": copy.deepcopy(state.get("deferred_groups", [])),
             "continuation_parent": {
                 "run_id": state["run_id"],
                 "directory": str(parent),
@@ -379,6 +383,46 @@ def continuation_state(arguments, task_order: list[str]) -> dict:
             },
         }
     return result
+
+
+def defer_uninformative_group(state: dict, result: dict) -> bool:
+    group = result.get("group_record", {})
+    task_id = result.get("task_id")
+    rewards = group.get("rewards", [])
+    reason = group.get("reason")
+    if (
+        result.get("status") != "needs_diagnosis"
+        or task_id not in state["task_order"]
+        or task_id in state["completed_task_ids"]
+        or result.get("optimizer_step") is not None
+        or group.get("task") != task_id
+        or group.get("policy_version") != result.get("policy_version")
+        or group.get("admitted") is not False
+        or group.get("infrastructure_errors") != []
+        or not isinstance(rewards, list)
+        or len(rewards) != GROUP_SIZE
+        or any(type(value) not in (int, float) or not math.isfinite(value) for value in rewards)
+        or reason not in {"weak_signal", "zero_variance"}
+    ):
+        return False
+    if (reason == "weak_signal" and max(rewards) > 0.1) or (
+        reason == "zero_variance" and has_signal(rewards)
+    ):
+        return False
+    deferred = state.setdefault("deferred_task_ids", [])
+    if task_id not in deferred:
+        deferred.append(task_id)
+        state.setdefault("deferred_groups", []).append(
+            {
+                "task_id": task_id,
+                "sampled_policy_version": result["policy_version"],
+                "reason": reason,
+                "rewards": list(rewards),
+                "trace_directory": result["trace_directory"],
+                "optimizer_update": False,
+            }
+        )
+    return True
 
 
 def audit_passed(report_path: Path, group: dict) -> dict:
@@ -675,6 +719,9 @@ def record_training_result(
 def initialize_run(arguments) -> dict:
     ordered = curriculum_order(arguments.dataset)
     state = bootstrap_state(arguments, ordered)
+    if getattr(arguments, "continue_weak_groups", False):
+        for result in state["results"]:
+            defer_uninformative_group(state, result)
     manifest = {
         "run_id": arguments.run_id,
         "experiment_id": "trl-l1-grpo-baseline",
@@ -724,6 +771,9 @@ def initialize_run(arguments) -> dict:
         if getattr(arguments, "replay_source", None)
         else None,
         "final_scoring_after_inference_exit": True,
+        "weak_group_handling": "defer"
+        if getattr(arguments, "continue_weak_groups", False)
+        else "stop",
     }
     dataset_copy = arguments.output_dir / "inputs/lvl1_seed42.jsonl"
     dataset_copy.parent.mkdir(parents=True, exist_ok=True)
@@ -754,6 +804,9 @@ def load_state(arguments) -> dict:
         raise ValueError("Dataset bytes changed since this run started")
     if manifest.get("source_commit") != arguments.source_commit:
         raise ValueError("Source commit changed since this run started")
+    requested_handling = "defer" if getattr(arguments, "continue_weak_groups", False) else "stop"
+    if manifest.get("weak_group_handling", "stop") != requested_handling:
+        raise ValueError("Weak-group scheduling changed since this run started")
     if manifest.get("cuda_arch_list") != arguments.cuda_arch_list:
         raise ValueError("CUDA architecture target changed since this run started")
     checkpoint = state.get("checkpoint")
@@ -785,6 +838,9 @@ def write_report(arguments, state: dict, budget: dict) -> None:
         "target_task_count": state["target_task_count"],
         "completed_task_count": len(state["completed_task_ids"]),
         "completed_task_ids": state["completed_task_ids"],
+        "deferred_task_ids": state.get("deferred_task_ids", []),
+        "deferred_task_count": len(state.get("deferred_task_ids", [])),
+        "deferred_groups": state.get("deferred_groups", []),
         "optimizer_steps": state["policy_version"],
         "current_policy_version": state["policy_version"],
         "current_checkpoint": state.get("checkpoint"),
@@ -1030,15 +1086,36 @@ async def run(arguments) -> dict:
         record_event(arguments.output_dir, "driver_started", policy_version=state["policy_version"])
 
         remaining = [
-            task for task in state["task_order"] if task not in state["completed_task_ids"]
+            task
+            for task in state["task_order"]
+            if task not in state["completed_task_ids"]
+            and task not in state.get("deferred_task_ids", [])
         ]
         already_run = 0
+        initial_version = state["policy_version"]
         for task_id in remaining:
             if arguments.max_groups is not None and already_run >= arguments.max_groups:
                 break
-            if not await train_task(arguments, budget, state, task_id):
+            max_updates = getattr(arguments, "max_updates", None)
+            if max_updates is not None and state["policy_version"] - initial_version >= max_updates:
                 break
+            trained = await train_task(arguments, budget, state, task_id)
             already_run += 1
+            if not trained:
+                if getattr(arguments, "continue_weak_groups", False) and defer_uninformative_group(
+                    state, state.get("failure", {})
+                ):
+                    state["status"] = "running"
+                    state.pop("failure", None)
+                    write_json(arguments.output_dir / "state.json", state)
+                    write_report(arguments, state, budget)
+                    record_event(
+                        arguments.output_dir,
+                        "task_deferred_without_update",
+                        **state["deferred_groups"][-1],
+                    )
+                    continue
+                break
             write_report(arguments, state, budget)
         if state["status"] == "running":
             state["status"] = "completed" if len(state["completed_task_ids"]) == 50 else "paused"
@@ -1073,8 +1150,12 @@ def main() -> None:
     parser.add_argument("--parent-run-dir", type=Path)
     parser.add_argument("--replay-source", type=Path)
     parser.add_argument("--max-groups", type=int)
+    parser.add_argument("--max-updates", type=int)
+    parser.add_argument("--continue-weak-groups", action="store_true")
     parser.add_argument("--resume", action="store_true")
     arguments = parser.parse_args()
+    if arguments.max_updates is not None and arguments.max_updates < 1:
+        raise ValueError("The optimizer-update cap must be positive")
     print(json.dumps(asyncio.run(run(arguments)), indent=2), flush=True)
 
 
