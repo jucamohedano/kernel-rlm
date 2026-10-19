@@ -42,31 +42,6 @@ def submission_compile_lock(submission_code: str) -> Path:
     return COMPILE_LOCK_PATH.with_name(f"{COMPILE_LOCK_PATH.name}-{digest}")
 
 
-def _run_verifier_process(
-    command: list[str], *, timeout_s: float, cwd: str | None, env: dict[str, str] | None
-) -> subprocess.CompletedProcess:
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd=cwd,
-        env=env,
-        start_new_session=True,
-    )
-    try:
-        stdout, stderr = process.communicate(timeout=timeout_s)
-    except subprocess.TimeoutExpired as timeout_error:
-        stdout, stderr = _terminate_process_group(process)
-        raise subprocess.TimeoutExpired(
-            command, timeout_s, output=stdout, stderr=stderr
-        ) from timeout_error
-    except BaseException:
-        _terminate_process_group(process)
-        raise
-    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
-
-
 _RUNNER = textwrap.dedent(
     """
     import importlib.util
@@ -819,6 +794,9 @@ def _run_verifier_process(
         raise subprocess.TimeoutExpired(
             command, timeout_s, output=stdout, stderr=stderr
         ) from timeout_error
+    except BaseException:
+        _terminate_process_group(process)
+        raise
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 

@@ -1,4 +1,6 @@
 import asyncio
+import os
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -149,3 +151,44 @@ def test_precompile_worker_refuses_visible_gpus(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["precompile", "--episode", "/unused"])
     with pytest.raises(ValueError, match="CUDA_VISIBLE_DEVICES"):
         precompile.main()
+
+
+def test_cancelling_precompile_reaps_worker_and_compiler(tmp_path, monkeypatch):
+    from kernel_trl.precompile import FinalPrecompiler
+
+    monkeypatch.setenv("PYTHONPATH", str(ROOT))
+    monkeypatch.setenv("WANDB_API_KEY", "fixture-secret-must-not-reach-builder")
+    compiler_pid = tmp_path / "compiler.pid"
+    child = f"import os,time; from pathlib import Path; Path({str(compiler_pid)!r}).write_text(str(os.getpid())); time.sleep(60)"
+    worker = (
+        "import os,signal,sys; "
+        "from kernel_trl.precompile import cancelled; "
+        "from kernel_rlm.verifier import _run_verifier_process; "
+        "assert os.environ['CUDA_VISIBLE_DEVICES']==''; "
+        "assert 'WANDB_API_KEY' not in os.environ; "
+        "signal.signal(signal.SIGTERM,cancelled); "
+        f"_run_verifier_process([sys.executable,'-c',{child!r}],timeout_s=60,cwd=None,env=None)"
+    )
+    create = asyncio.create_subprocess_exec
+
+    async def launch(*args, **kwargs):
+        return await create(sys.executable, "-c", worker, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", launch)
+    builder = FinalPrecompiler()
+
+    async def check():
+        builder.submit({}, {"submission": "source"}, tmp_path)
+        try:
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                if compiler_pid.exists():
+                    break
+                await asyncio.sleep(0.01)
+            assert compiler_pid.exists()
+        finally:
+            await builder.close()
+        with pytest.raises(ProcessLookupError):
+            os.kill(int(compiler_pid.read_text()), 0)
+
+    asyncio.run(check())

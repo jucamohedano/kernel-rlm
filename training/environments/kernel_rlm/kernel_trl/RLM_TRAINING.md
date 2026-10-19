@@ -69,8 +69,19 @@ The next optimizations to validate, in order, are:
 
 Both flags are opt-in and immutable on resume. Per-episode `precompile.json` and
 `precompile-error.json`, plus `inference-lifecycle.jsonl`, record their actual work.
+Cancelling preparation terminates the worker and its compiler process group;
+a real CPU subprocess regression checks cleanup and credential stripping.
 The fixed-policy ABBA scheduling diagnostic measures component savings; its
 short synthetic requests do not measure complete GRPO throughput or quality.
+
+On 19 October, the policy-8 GPU diagnostic measured 66.13 seconds for process
+startup and 2.11 seconds for median same-process wake. Its serial/overlap/overlap/
+serial trials averaged 99.51 versus 69.85 seconds per fixed-workload cycle
+(29.8% less time). All four independent CUDA checks passed, with no optimizer
+updates. The same candidate used fresh extension caches in each trial; actual
+training with already-cached feedback builds may gain less. This is not a full
+eight-rollout RLM or GRPO throughput measurement. See
+`notes/results/20261019-scheduling-probe.json` in the project notes.
 
 Keep inference and optimizer updates phase-separated until those memory checks
 pass. The last bounded block spent about 955 seconds in native rank-0 training

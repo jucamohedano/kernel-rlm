@@ -10,7 +10,20 @@
 <p class="muted">Status snapshot: 19 October 2026. This is not a live job or billing monitor.</p></header>
 <nav aria-label="Guide sections"><a href="#now">Start here</a><a href="#next">Next run</a><a href="#decisions">Decisions</a><a href="#evidence">Results</a><a href="#learn">Learn the loop</a><a href="#project">Project brief</a><a href="#references">References</a><a href="http://127.0.0.1:7790/">Experiment runs</a><button id="collapse" type="button">Close all details</button></nav>
 
-<section id="now" class="latest"><span class="tag">Infrastructure repair · 19 October · CPU-only validation</span><h2>Feedback repairs implemented. Training stays paused at step 8.</h2><ul>
+<section id="now" class="latest"><span class="tag">GPU scheduling diagnostic · 19 October · policy 8 unchanged</span><h2>Both optimizations work. The measured pipeline took 29.8% less time.</h2><ul>
+<li><strong>Reuse inference:</strong> process startup took <strong>66.1 seconds</strong>; waking the same loaded policy took a median <strong>2.1 seconds</strong>. This saves about 64 seconds per avoided reload on this cached VM. The server PID stayed unchanged through all trials.</li>
+<li><strong>Overlap CPU builds:</strong> the matched pipeline averaged <strong>99.5 seconds serial</strong> versus <strong>69.9 seconds overlapped</strong>: 29.8% less elapsed time, or 1.42× throughput in this diagnostic. Post-inference compilation fell from about 50–53 seconds to 2.3–2.4 seconds because the CPU build was already prepared.</li>
+<li><strong>Checks:</strong> all four independent CUDA verifications passed. The diagnostic made zero optimizer updates, shut down its inference server, and left both GPUs at zero allocated process memory. Original checkpoint 8 passed all four file hashes again.</li>
+<li><strong>Use next:</strong> <code>--reuse-inference --precompile-finals</code> are opt-in for a new immutable run. Weak groups can reuse the sleeping engine; admitted groups still close inference before audit and learner work. No simultaneous learner/inference residency was enabled.</li>
+<li><strong>Scope:</strong> this was a short fixed-policy component test, <strong>not a measurement of full GRPO training speed</strong>. Real gains depend on weak-group frequency, rollout length and existing build-cache hits. Evidence: <code>notes/results/20261019-scheduling-probe.json</code>.</li>
+<li><strong>Status and cost:</strong> training and the hourly monitor remain paused at <strong>8 / 50 tasks trained</strong>. <a href="http://127.0.0.1:7861/">Trackio</a> is online. The 7 minute 41 second diagnostic used approximately <strong>$0.16</strong> of pair rental; total estimated spend reached $28.97 of the original $60. Estimates are not invoices; the idle VM still bills.</li>
+</ul><details><summary>Read the timing comparison correctly</summary><ul>
+<li><strong>Matched setup:</strong> serial → overlap → overlap → serial. Each trial used the same policy-8 checkpoint, known-correct task 0035 candidate, 256-token request, seed and independent final verification. Each trial had a new empty extension-build cache.</li>
+<li><strong>Small sample:</strong> two trials per variant and one process startup. This does not establish a confidence interval or a speedup across all 50 tasks. Cold startup here excludes fresh VM provisioning and model download.</li>
+<li><strong>Still required:</strong> a bounded full-rollout integration check before extending training. Live child-cancellation latency and repaired intermediate-feedback deadlines were not exercised by this separate component test. Sleeping inference beside the learner remains untested and disabled.</li>
+</ul></details></section>
+
+<section id="feedback-repair-history"><details><summary>Previous CPU repair · cancellation, contracts and feedback deadlines</summary><h2>Feedback repairs implemented. Training stays paused at step 8.</h2><ul>
 <li><strong>Cancellation:</strong> the completion bridge now owns GPU admission and cancels its backend transport when the caller disconnects. The reader lock stays held through cleanup. Cancelled child responses never become root training targets.</li>
 <li><strong>Contract feedback:</strong> a bounded CPU/meta check can reject state-key, wrapper-signature and supported C++ binding errors before compilation. Unsupported cases still reach the independent CUDA verifier. Reward coefficients and numerical tests are unchanged.</li>
 <li><strong>Deadlines:</strong> exclusive feedback starts draining inference during CPU compilation. Lock waits reduce one shared deadline. Feedback has 180 seconds plus cleanup allowance; two optional children fit the enclosing 630/660-second REPL/backend bounds.</li>
@@ -21,7 +34,7 @@
 <li><strong>GPU gate:</strong> validate real cancellation, feedback queue/execution timing and memory in a new bounded source snapshot before extending training. Do not edit or relaunch the immutable old run with changed source.</li>
 <li><strong>Not fixed here:</strong> recovery output caps, model instruction following and kernel arithmetic. Five previously recorded broader tests still expect old prompt/reasoning behavior. Their assertions are separate from these repairs.</li>
 <li><strong>Memory caution:</strong> sleeping vLLM workers may retain CUDA contexts and communication buffers. Do not assume they can coexist with the tightly packed learner. Both phases still need the L40S pair.</li>
-</ul></details></section>
+</ul></details></details></section>
 
 <section id="step8-history"><details><summary>Completed baseline block · step 8 and verified checkpoint</summary><h2>Step 8 saved. Training paused as planned.</h2><ul>
 <li><strong>Current:</strong> <a href="/?run=20261019T160431Z-context-resume">Context-safe continuation</a> finished its third authorized update at <strong>21:33 Madrid</strong> on task <code>0035</code>. The driver exited normally; no GPU process remains. No new training or evaluation job was launched.</li>
