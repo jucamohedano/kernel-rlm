@@ -196,8 +196,10 @@ That baseline used a 4,096-token reply cap and a 12,288-token context cap.
 
 ## Longer context for new TRL runs
 
-The new-run CLI default is 16,384 total prompt-plus-reply tokens. Use
-`--context-tokens 16384` explicitly in the launch record. Root replies stay at
+The new-run CLI default is 14,336 total prompt-plus-reply tokens. Use
+`--context-tokens 14336` explicitly in the launch record. A 16,384-token native
+backward check passed but left under 0.5 GiB device-free memory and triggered
+allocator retries, so it is not the safe default. Root replies stay at
 4,096; recovery stays at 1,024; children keep their existing 2,048-token caps.
 The same context value reaches vLLM, exact token counting, the RLM generator,
 durable generation manifests, final scoring, training rows and dashboard

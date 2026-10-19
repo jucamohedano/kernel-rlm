@@ -28,6 +28,11 @@ def test_context_bounds_are_explicit(modules, value):
         modules.context.validate_context_tokens(value)
 
 
+def test_default_leaves_margin_below_the_tight_16k_probe(modules):
+    assert modules.context.DEFAULT_CONTEXT_TOKENS == 14336
+    assert modules.context.validate_context_tokens(16384) == 16384
+
+
 def test_server_and_credit_share_the_selected_context(modules, tmp_path):
     arguments = SimpleNamespace(
         inference_python="python", checkpoint=tmp_path, context_tokens=16384
