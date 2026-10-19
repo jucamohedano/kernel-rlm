@@ -371,7 +371,7 @@ def layout(title: str, body: str, active: str = "experiments") -> str:
         for key, label, url in (
             ("overview", "Overview", "/"),
             ("experiments", "Experiments", "/?view=experiments"),
-            ("guide", "Learning report", "/guide"),
+            ("guide", "Guide", "/guide"),
         )
     )
     return f"""<!doctype html>
@@ -385,16 +385,14 @@ def layout(title: str, body: str, active: str = "experiments") -> str:
 
 
 def render_project_guide() -> str:
-    path = Path(__file__).resolve().parents[5] / "PROJECT_TRACKER.html"
+    path = Path(__file__).with_name("guide.html")
     return path.read_text(encoding="utf-8")
 
 
 def render_guide_workspace() -> str:
     document = render_project_guide()
     article = document.split("<main>", 1)[1].split("</main>", 1)[0]
-    return layout(
-        "Kernel-RLM · Learning report", '<article class="guide">' + article + "</article>", "guide"
-    )
+    return layout("KernelRLM · Guide", '<article class="guide">' + article + "</article>", "guide")
 
 
 def render_run_table(runs: list[dict]) -> str:
@@ -1155,9 +1153,14 @@ def make_handler(root: Path):
     class DashboardHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             request = urlparse(self.path)
+            if request.path in {"/PROJECT_TRACKER.html", "/guide/"}:
+                self.send_response(302)
+                self.send_header("Location", "/guide")
+                self.end_headers()
+                return
             project_root = Path(__file__).resolve().parents[5]
             static_pages = {
-                "/guide": ("PROJECT_TRACKER.html", "text/html"),
+                "/guide": (str(Path(__file__).with_name("guide.html")), "text/html"),
                 "/PROJECT_TRACKER_ARCHIVE.html": ("PROJECT_TRACKER_ARCHIVE.html", "text/html"),
                 "/notes/datasets.md": ("notes/datasets.md", "text/markdown"),
                 "/notes/reward-design.md": ("notes/reward-design.md", "text/markdown"),

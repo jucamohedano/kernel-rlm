@@ -126,6 +126,26 @@ def test_project_guide_is_available_from_dashboard():
     assert "Project brief" in page
 
 
+def test_guide_has_one_canonical_source():
+    source = SERVER.with_name("guide.html")
+    assert dashboard.render_project_guide() == source.read_text()
+
+
+def test_legacy_guide_routes_redirect_without_reading_external_files(tmp_path):
+    handler = dashboard.make_handler(tmp_path)
+    for route in ("/PROJECT_TRACKER.html", "/guide/"):
+        request = handler.__new__(handler)
+        request.path = route
+        responses = []
+        headers = {}
+        request.send_response = responses.append
+        request.send_header = lambda name, value, captured=headers: captured.__setitem__(name, value)
+        request.end_headers = lambda: None
+        request.do_GET()
+        assert responses == [302]
+        assert headers["Location"] == "/guide"
+
+
 def test_dates_sort_across_categories_and_legacy_ids_still_open(tmp_path):
     older = tmp_path / "z-contract" / "20261007T120000Z-old"
     newer = tmp_path / "a-training" / "20261016T120000Z-new"
@@ -335,7 +355,7 @@ def test_main_navigation_has_only_three_sections(tmp_path):
     assert navigation.count("<a ") == 3
     assert "Overview" in navigation
     assert "Experiments" in navigation
-    assert "Learning report" in navigation
+    assert "Guide" in navigation
     assert "Provenance" not in navigation
     assert "Lineage" not in navigation
     assert "<h2>Intent</h2>" in page

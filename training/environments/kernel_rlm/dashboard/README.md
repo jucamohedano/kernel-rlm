@@ -1,7 +1,9 @@
 # Kernel-RLM experiment dashboard
 
-This is a local, CPU-only viewer for downloaded Modal artifacts. The canonical
-project plan and learning report is the repository-root `PROJECT_TRACKER.html`.
+This is a local, CPU-only workspace for downloaded Modal and CloudRift artifacts.
+The canonical project plan and learning report is `dashboard/guide.html`, served
+inside KernelRLM at `/guide`. The repository-root `PROJECT_TRACKER.html` is only
+a compatibility redirect, not a second maintained report.
 This viewer organizes questions, run attempts and trajectory evidence:
 
 - reward, loss, and entropy curves from `metrics.jsonl`;
@@ -26,7 +28,7 @@ inspired by Microsoft's pre-training article, inside the same navigation.
 - `/?run=RUN_ID&tab=setup`: Inputs & setup for that execution: code, dataset,
   model, settings, notes and captured small source files. Historical gaps stay explicit.
 - `/?run=RUN_ID&tab=artifacts`: Files & checkpoints. The viewer does not fetch weights.
-- `/guide`: the canonical root HTML report, rendered inside the workspace.
+- `/guide`: the canonical `dashboard/guide.html`, rendered inside the workspace.
 
 Main navigation has only Overview, Experiments and Learning report. Run attempts
 belong to their experiment. The optional `/?view=runs` cross-experiment index and
@@ -81,11 +83,26 @@ python -m dashboard.server --root logs --port 7790
 
 The server must stay running while the browser uses `http://127.0.0.1:7790/`.
 If the page does not load, restart the command above. It does not start by
-opening `PROJECT_TRACKER.html` directly.
+opening the legacy `PROJECT_TRACKER.html` redirect directly.
 
 Open `http://127.0.0.1:7790/guide` for the consolidated project plan and
 learning report. The dashboard navigation links between the guide and saved
 experiment reports.
+
+Training syncs must also verify Trackio at `http://127.0.0.1:7861/`. Its separate
+CPU service reads the VM's `trackio-live` directory through a private SSH tunnel.
+Restore a missing UI service or tunnel without restarting GPU training. Keep
+both dashboards bound to localhost and never enable public sharing for a sync.
+
+For an automatically reconnecting private tunnel, run this CPU-only supervisor:
+
+```bash
+python -m dashboard.trackio_tunnel --host 118.163.199.138 --state-dir logs/runtime
+```
+
+It holds a singleton lock, refuses a duplicate local listener, uses SSH keepalives
+and reconnects after disconnects. It cannot rent GPUs or control training. Check
+the remote Trackio CPU service as well as the tunnel on every hourly sync.
 
 To inspect a downloaded Modal run, place its directory below `logs/` and reload
 the page. The viewer never starts a model, verifier, or GPU job.
