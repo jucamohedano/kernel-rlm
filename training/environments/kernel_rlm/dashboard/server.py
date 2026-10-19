@@ -374,12 +374,21 @@ def layout(title: str, body: str, active: str = "experiments") -> str:
             ("guide", "Guide", "/guide"),
         )
     )
+    current = next((item for item in experiment_catalog() if item.get("current_run_id")), None)
+    training_navigation = ""
+    if current:
+        training_navigation = (
+            '<nav aria-label="Current training">'
+            f'<a href="/?experiment={quote(current["id"])}">Current training experiment</a>'
+            f'<a href="/?run={quote(current["current_run_id"])}">Current training attempt</a>'
+            '<a href="http://127.0.0.1:7861/">Trackio · live metrics</a></nav>'
+        )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{text(title)}</title><style>{styles}</style></head>
 <body><div class="app-frame"><aside class="app-nav"><a class="brand" href="/">Kernel<span>RLM</span><small>Research workspace</small></a>
-<nav aria-label="Workspace">{navigation}</nav><div class="local-note"><span class="status-dot"></span> Local artifacts only<br>No GPU jobs or API calls</div></aside>
+<nav aria-label="Workspace">{navigation}</nav>{training_navigation}<div class="local-note"><span class="status-dot"></span> Local artifacts only<br>No GPU jobs or API calls</div></aside>
 <main>{body}<footer>Saved evidence, not a live monitor. Missing measurements are not zero.
  · <a href="/guide">Project guide</a></footer></main></div><script>{script}</script></body></html>"""
 
@@ -580,17 +589,22 @@ def render_index(
             else render_experiment(selected, runs)
         )
     else:
+        current = next((item for item in experiments if item.get("current_run_id")), None)
+        current_summary = (
+            '<section class="hero-result"><span class="pill success">Current training · saved snapshot</span>'
+            f"<h2>{text(current['title'])}</h2><p>{text(current['conclusion'])}</p>"
+            f'<a href="/?experiment={quote(current["id"])}">Experiment and decisions →</a> · '
+            f'<a href="/?run={quote(current["current_run_id"])}">Current attempt and traces →</a>'
+            f"<p><code>{text(current['current_run_id'])}</code></p></section>"
+            if current
+            else "<p>No current training attempt is registered. Historical runs remain available.</p>"
+        )
         content = (
             '<header><div><div class="eyebrow">Kernel generation · Laguna XS.2</div>'
             '<h1>Research overview</h1><p class="lede">What works, what remains untested, and what to run next.</p></div></header>'
-            '<section class="hero-result"><span class="pill success">Latest verified milestone</span>'
-            "<h2>GRPO resumed. Step 2 is durable.</h2><p>Three of four admitted cummax kernels passed. "
-            "The compact checkpoint passed CPU read-back. These are workflow checks, not a held-out learning gain.</p>"
-            '<a href="/?experiment=checkpoint-resume">Read the evidence →</a></section>'
-            '<div class="decision-grid"><section><h2>Prepared, not tested live</h2><p>4,096-token normal replies and clearer optional subcall guidance. '
-            "Context, recovery limits and hardware are unchanged.</p></section>"
-            "<section><h2>Next validation</h2><p>Restart from the compact checkpoint before a longer run. "
-            "Measure end-to-end throughput and evaluate held-out tasks before claiming improvement.</p></section></div>"
+            + current_summary
+            + "<p>KernelRLM shows downloaded evidence. Trackio shows live phase metrics. "
+            '<a href="/guide#dashboards">Learn which run and metrics to select.</a></p>'
             '<p><a class="button-link" href="/?view=runs">Browse all runs</a></p>'
         )
     return layout(

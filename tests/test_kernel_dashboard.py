@@ -131,6 +131,32 @@ def test_guide_has_one_canonical_source():
     assert dashboard.render_project_guide() == source.read_text()
 
 
+def test_current_training_links_are_visible_on_historical_runs(tmp_path):
+    page = dashboard.render_run(tmp_path, "missing")
+    assert "Current training experiment" in page
+    assert "Current training attempt" in page
+    assert 'href="/?run=20261019T083616Z-phased"' in page
+    assert "Trackio · live metrics" in page
+
+
+def test_overview_uses_current_registry_instead_of_historical_milestone(tmp_path):
+    page = dashboard.render_index(tmp_path)
+    assert "L1 curriculum · TRL + Muon" in page
+    assert "Current training · saved snapshot" in page
+    assert "GRPO resumed. Step 2 is durable." not in page
+    assert "cummax kernels passed" not in page
+    assert "Learn which run and metrics to select" in page
+
+
+def test_dashboard_guide_distinguishes_absent_kl_and_separate_metric_runs():
+    page = dashboard.render_project_guide()
+    assert 'id="dashboards"' in page
+    assert "train/clip_ratio/region_mean" in page
+    assert "Missing is not zero" in page
+    assert "one loss point" in page
+    assert "It does not mean all 50 curriculum tasks were covered" in page
+
+
 def test_legacy_guide_routes_redirect_without_reading_external_files(tmp_path):
     handler = dashboard.make_handler(tmp_path)
     for route in ("/PROJECT_TRACKER.html", "/guide/"):
@@ -139,7 +165,9 @@ def test_legacy_guide_routes_redirect_without_reading_external_files(tmp_path):
         responses = []
         headers = {}
         request.send_response = responses.append
-        request.send_header = lambda name, value, captured=headers: captured.__setitem__(name, value)
+        request.send_header = lambda name, value, captured=headers: captured.__setitem__(
+            name, value
+        )
         request.end_headers = lambda: None
         request.do_GET()
         assert responses == [302]

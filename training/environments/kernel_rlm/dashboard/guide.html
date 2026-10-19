@@ -11,15 +11,15 @@
 <nav aria-label="Guide sections"><a href="#now">Start here</a><a href="#next">Next run</a><a href="#decisions">Decisions</a><a href="#evidence">Results</a><a href="#learn">Learn the loop</a><a href="#project">Project brief</a><a href="#references">References</a><a href="http://127.0.0.1:7790/">Experiment runs</a><button id="collapse" type="button">Close all details</button></nav>
 
 <section id="now" class="latest"><span class="tag">Hourly monitoring · user-supervised training · 19 October</span><h2>Step 3 saved. Hardswish is running.</h2><ul>
-<li><strong>Current:</strong> subtraction, sigmoid and softplus have optimizer updates: <strong>3 of 50 tasks</strong>. The driver is running hardswish, task 0023, with policy version 3. The latest live check saw three submissions and no premature final scoring.</li>
+<li><strong>Current:</strong> <a href="/?experiment=trl-l1-grpo-baseline">L1 curriculum · TRL + Muon</a>, attempt <a href="/?run=20261019T083616Z-phased">20261019T083616Z-phased</a>. At 11:45 Madrid, subtraction, sigmoid and softplus have saved updates: <strong>3 of 50 tasks</strong>. Hardswish has eight generated and scored submissions. Its step-4 optimizer phase is running; that checkpoint is not yet confirmed.</li>
 <li><strong>Softplus milestone:</strong> all eight fresh trajectories submitted. Four kernels passed correctness and four failed compilation. The group passed its gates and produced checkpoint step 3. This is training progress, not a held-out quality result.</li>
 <li><strong>New flow:</strong> generate all eight trajectories → stop inference → score final submissions sequentially → audit sampled probabilities → update → checkpoint → next task. Four generation slots remain active. Intermediate CUDA feedback is unchanged.</li>
 <li><strong>Recovery proof:</strong> reused every saved sigmoid trajectory and seven completed scores. Only the timed-out final check was rerun. Seven kernels passed correctness; one failed compilation. The repaired check waited less than a millisecond for the verifier slot, instead of timing out after 238 seconds.</li>
 <li><strong>Update proof:</strong> the root-only audit passed on 18,333 tokens. Both ranks restored the adapter, Muon momentum, RNG and scheduler. The real update changed all 320 adapter tensors and wrote a compact step-2 checkpoint. This proves continuation, not a model-quality gain.</li>
 <li><strong>Backups verified:</strong> compact checkpoints for steps 2 and 3 are also saved locally. All four manifest checksums pass for each; originals remain on the VM. The sync did not interrupt training. KernelRLM now has 16 completed trajectories and three optimizer metric points.</li>
-<li><strong>Live metrics:</strong> <a href="http://127.0.0.1:7861/">Trackio</a> now separates generation progress, final scores and native optimizer metrics. Reused scores are marked. Loss is available for the real step-2 update, not only the earlier historical logging check.</li>
+<li><strong>Live metrics:</strong> <a href="http://127.0.0.1:7861/">Trackio</a> has real loss, entropy and clipping metrics for steps 2 and 3. Each update is a separate run with one loss point, not a continuous curve. Reference KL is not computed. <a href="#dashboards">How to find and read the metrics →</a></li>
 <li><strong>Authorization:</strong> the user raised the total safety ceiling to <strong>$60</strong>, keeping the original cost baseline. The updated authorization file is saved. The running process still holds its earlier cached guard; it will pick up the new ceiling at a checkpoint-safe resume. Do not interrupt healthy training just to reload it. There is no morning stop.</li>
-<li><strong>Monitoring and cost:</strong> check and sync <strong>once per hour</strong>. Keep Trackio available at every sync. The latest spend estimate was $13.66, including idle rental and all retries; it is not an invoice. No new GPU was rented.</li>
+<li><strong>Monitoring and cost:</strong> check and sync <strong>once per hour</strong>. Keep Trackio available at every sync. The latest spend estimate was $14.03, including idle rental and all retries; it is not an invoice. No new GPU was rented.</li>
 <li><strong>One guide:</strong> this KernelRLM page is the current learning report. Its only maintained source is <code>dashboard/guide.html</code>. The old <code>PROJECT_TRACKER.html</code> opens a redirect here; it is not a second report.</li>
 <li><strong>Limits:</strong> this is an automatic continuous process, not simultaneous inference and backpropagation. The fresh phase split now works. Three intermediate feedback calls still timed out; uncached compilation also takes tens of seconds. No reply truncation or recovery turn occurred in softplus. Learner VRAM remains tight, and full-curriculum throughput is not yet proven.</li>
 <li><strong>Code and evidence:</strong> the running training snapshot is <code>405036f — Separate generation from final scoring</code>; its 110 CPU regressions pass. Details remain in <code>notes/results/20261019-phased-training.json</code>. Repeated infrastructure failures, failed audits and the authorized ceiling still stop unsafe optimization. UI edits do not change the live training snapshot.</li>
@@ -61,6 +61,41 @@
 <li><strong>Recovery:</strong> CPU-tested cap increased from 512 to 1,024 tokens. Normal replies remain 4,096; total context remains 12,288. Live behavior is not yet retested.</li>
 <li><strong>Hardware:</strong> retain the existing two L40S GPUs. Alternate inference and training; true overlapping async GRPO remains a memory-feasibility question, not a promised speedup.</li>
 </ul></details><p class="muted">Original runs, scores, sampled tokens, child traces and checkpoints are preserved. The active immutable run is <code>20261019T083616Z-phased</code>; its actor samples for the recovered group came from <code>20261019T073353Z-recovery</code>. Future updates keep using the newly saved policy, not the initial adapter. Model-quality improvement requires a separate evaluation.</p></section>
+
+<section id="dashboards"><h2>Read the two dashboards</h2>
+<p><strong>One experiment, several phases.</strong> The experiment is <a href="/?experiment=trl-l1-grpo-baseline">L1 curriculum · TRL + Muon</a>. Its current attempt is <a href="/?run=20261019T083616Z-phased">20261019T083616Z-phased</a>. An October 16 run is an older Modal checkpoint test, not today's CloudRift training.</p>
+<div class="grid"><article class="card"><h3>KernelRLM: understand the evidence</h3><ul>
+<li><strong>Experiment:</strong> question, decisions, related attempts and limitations.</li>
+<li><strong>Attempt:</strong> one driver execution. This attempt continues the checkpoint chain; it does not start training from scratch.</li>
+<li><strong>Trajectory:</strong> one root agent episode, including REPL observations and any child calls.</li>
+<li><strong>Freshness:</strong> downloaded snapshots. An unfinished task can be running on the VM before its traces appear here.</li>
+</ul></article><article class="card"><h3>Trackio: watch the phase metrics</h3><ol>
+<li>Open <a href="http://127.0.0.1:7861/">Trackio</a>. Select project <code>laguna-kernel-rlm</code>.</li>
+<li>Filter run names by <code>20261019T083616Z-phased</code>.</li>
+<li>For loss, select a completed trainer run ending in <code>-step-2</code> or <code>-step-3</code>, not a rollout or scoring run.</li>
+<li>Open <strong>Metrics</strong>, then find the <strong>train</strong> section below profiling and rollout plots. Enter <code>^train/</code> in <strong>Metric Filter</strong> to hide unrelated plots. Keep <strong>Latest only</strong> off when comparing completed updates.</li>
+<li>For the active task, select its rollout, final-scoring or trainer run according to the current phase.</li>
+</ol></article></div>
+<details><summary>Run names: generation, final scoring and optimizer update</summary><dl>
+<dt><code>…-step-004-lvl1-seed42-0023-attempt-01-rollouts</code></dt><dd>Generate eight hardswish episodes. Read <code>rollout/completed</code> and <code>rollout/root_turns</code>. Final reward is deferred; this run has no optimizer loss.</dd>
+<dt><code>…-lvl1-seed42-0023-final-scoring</code></dt><dd>Verify submitted kernels after inference stops. Read <code>rollout/reward</code>, <code>verification/correct</code> and <code>verification/reused</code>. Each point is one final score, not an optimizer step.</dd>
+<dt><code>…-step-4</code></dt><dd>Audit and update the policy. Native loss appears only after the optimizer update completes. Before that, profiling records do not imply that a loss point is missing or training has failed.</dd>
+</dl></details>
+<details><summary>Which RL metrics matter, and what do they mean?</summary><dl>
+<dt><code>train/loss</code></dt><dd>The clipped GRPO/DAPO policy objective. Step 3: 0.101964. Its sign is not an accuracy score. Values from different task groups do not prove improvement.</dd>
+<dt><code>train/rollout/reward_mean</code> and <code>train/rollout/reward_max</code></dt><dd>The group's final verifier rewards used for this update. Inspect correctness and speed alongside them; do not confuse submission-only reward with correct execution.</dd>
+<dt><code>train/entropy</code></dt><dd>Native policy uncertainty on the training tokens. Step 3: 0.148731. Lower is not automatically better; very low values can indicate reduced exploration.</dd>
+<dt><code>train/clip_ratio/region_mean</code></dt><dd>The fraction of training tokens where the signed policy update is clipped. Step 3: 0.014427, about 1.44%. This is not the separate sampler/learner probability audit.</dd>
+<dt><code>train/grad_norm</code> and <code>train/learning_rate</code></dt><dd>Update diagnostics. Step 3: gradient norm 0.029237; learning rate 0.00001. Non-finite gradients require investigation.</dd>
+<dt>Reference KL divergence</dt><dd><strong>Not computed.</strong> The run uses <code>beta=0</code>, so native TRL does not calculate or log KL to a reference policy. Missing is not zero. Do not change the training objective just to populate a chart.</dd>
+</dl><p>These numbers are measured step-3 values, not targets. Source: the live Trackio SQLite metrics, read without changing training. All native means retain TRL's microbatch aggregation semantics.</p></details>
+<details><summary>Why is there no continuous loss curve?</summary><ul>
+<li>Our memory-safe driver starts a separate one-update trainer process for each task.</li>
+<li>Each <code>-step-N</code> Trackio run therefore has one loss point, with a local <code>train/global_step=1</code>. The run-name suffix is the curriculum optimizer step.</li>
+<li>Select several completed <code>-step-N</code> runs to compare their points. They do not yet form one global-step curve. A consolidated metrics stream remains an observability gap.</li>
+<li>The <code>historical-step-1-native-logging-check</code> run replays an earlier measured loss for logging validation. It is not another optimizer update.</li>
+<li>The native <code>train/epoch=1</code> is local to the one-group trainer. It does not mean all 50 curriculum tasks were covered.</li>
+</ul></details></section>
 
 <section id="rotary-fix"><details><summary>What changed: rotary settings and stateful tasks · 19 October</summary><h2>The learner and sampler now use matching rotary geometry.</h2><dl>
 <dt>Cause</dt><dd>The checkpoint has an old top-level rotary fraction of 0.5, plus per-layer fractions of 0.5 for global attention and 1.0 for sliding attention. Native Transformers normalized the legacy value into both types. vLLM retained the sliding value. Their first sliding-attention outputs diverged before the first MoE block.</dd>
