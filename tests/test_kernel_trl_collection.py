@@ -171,6 +171,17 @@ def test_startup_smoke_owns_its_inference_admission(collector, tmp_path, monkeyp
     assert entries == [module.INFERENCE_ADMISSION_TIMEOUT_S]
 
 
+def test_collection_passes_larger_context_to_generator_and_training(collector, tmp_path):
+    module, observed = collector
+    observed["rewards"] = [0.1, 0.8] * 4
+    settings = arguments(tmp_path)
+    settings.context_tokens = 16384
+    asyncio.run(module.collect(settings))
+    assert observed["generator_kwargs"]["limits"]["max_context_tokens"] == 16384
+    group = json.loads((settings.output_dir / "training-group.json").read_text())
+    assert group["context_tokens"] == 16384
+
+
 def test_deferred_generation_saves_all_trajectories_without_final_scoring(
     collector, tmp_path, monkeypatch
 ):

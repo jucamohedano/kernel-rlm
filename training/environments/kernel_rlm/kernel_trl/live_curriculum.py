@@ -20,6 +20,11 @@ from kernel_skyrl.contract import has_signal
 from kernel_skyrl.preflight import load_tasks
 
 from kernel_trl.checkpoint_state import checkpoint_metadata
+from kernel_trl.context import (
+    DEFAULT_CONTEXT_TOKENS,
+    LEGACY_CONTEXT_TOKENS,
+    validate_context_tokens,
+)
 from kernel_trl.live_driver import execute, stop_group
 from kernel_trl.probability_audit import require_probability_agreement
 from kernel_trl.spending import phase_deadline, spending_snapshot
@@ -135,7 +140,7 @@ def server_command(arguments, policy_version: int, checkpoint: Path | None) -> l
         "--gpu-memory-utilization",
         "0.85",
         "--max-model-len",
-        "12288",
+        str(validate_context_tokens(getattr(arguments, "context_tokens", LEGACY_CONTEXT_TOKENS))),
         "--max-num-seqs",
         "4",
         "--max-num-batched-tokens",
@@ -555,6 +560,8 @@ async def collect_task(
             "--task-ids",
             task_id,
             "--defer-scoring",
+            "--context-tokens",
+            str(getattr(arguments, "context_tokens", LEGACY_CONTEXT_TOKENS)),
         ]
         collect_timeout = min(COLLECTION_LIMIT_SECONDS, deadline - time.time())
         try:
@@ -735,7 +742,9 @@ def initialize_run(arguments) -> dict:
         "cuda_arch_list": arguments.cuda_arch_list,
         "rollouts_per_task": GROUP_SIZE,
         "initial_concurrency": INFLIGHT,
-        "context_tokens": 12288,
+        "context_tokens": validate_context_tokens(
+            getattr(arguments, "context_tokens", LEGACY_CONTEXT_TOKENS)
+        ),
         "normal_reply_tokens": 4096,
         "recovery_reply_tokens": 1024,
         "max_turns": 8,
@@ -805,6 +814,10 @@ def load_state(arguments) -> dict:
     if manifest.get("source_commit") != arguments.source_commit:
         raise ValueError("Source commit changed since this run started")
     requested_handling = "defer" if getattr(arguments, "continue_weak_groups", False) else "stop"
+    if manifest.get("context_tokens", LEGACY_CONTEXT_TOKENS) != getattr(
+        arguments, "context_tokens", LEGACY_CONTEXT_TOKENS
+    ):
+        raise ValueError("Resume cannot change the immutable run context limit")
     if manifest.get("weak_group_handling", "stop") != requested_handling:
         raise ValueError("Weak-group scheduling changed since this run started")
     if manifest.get("cuda_arch_list") != arguments.cuda_arch_list:
@@ -843,6 +856,7 @@ def write_report(arguments, state: dict, budget: dict) -> None:
         "deferred_groups": state.get("deferred_groups", []),
         "optimizer_steps": state["policy_version"],
         "current_policy_version": state["policy_version"],
+        "context_tokens": getattr(arguments, "context_tokens", LEGACY_CONTEXT_TOKENS),
         "current_checkpoint": state.get("checkpoint"),
         "resumed_from": state.get("continuation_parent", {}).get("run_id"),
         "resume_step": state.get("continuation_parent", {}).get("policy_version"),
@@ -1143,6 +1157,7 @@ def main() -> None:
     parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--cuda-arch-list", default=DEFAULT_CUDA_ARCH_LIST)
+    parser.add_argument("--context-tokens", type=int, default=DEFAULT_CONTEXT_TOKENS)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--inference-python", required=True)
@@ -1154,6 +1169,7 @@ def main() -> None:
     parser.add_argument("--continue-weak-groups", action="store_true")
     parser.add_argument("--resume", action="store_true")
     arguments = parser.parse_args()
+    validate_context_tokens(arguments.context_tokens)
     if arguments.max_updates is not None and arguments.max_updates < 1:
         raise ValueError("The optimizer-update cap must be positive")
     print(json.dumps(asyncio.run(run(arguments)), indent=2), flush=True)

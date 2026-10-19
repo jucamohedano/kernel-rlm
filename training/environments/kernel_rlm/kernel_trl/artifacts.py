@@ -334,7 +334,7 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
             if report.get("groups")
             else None,
             "root_tokens": 4096,
-            "context": 12288,
+            "context": captured.get("context_tokens", 12288),
             "max_turns": 8,
             "children": 2,
             "max_optimizer_steps": report.get("optimizer_steps", 0),

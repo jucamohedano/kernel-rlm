@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 
-@pytest.mark.parametrize("mode", ["train", "audit", "readback"])
+@pytest.mark.parametrize("mode", ["train", "audit", "readback", "memory"])
 def test_native_tracking_is_local_and_audit_only_is_not_training(monkeypatch, tmp_path, mode):
     root = Path(__file__).parents[1] / "training/environments/kernel_rlm"
     monkeypatch.syspath_prepend(str(root))
@@ -14,6 +14,7 @@ def test_native_tracking_is_local_and_audit_only_is_not_training(monkeypatch, tm
         output_dir=tmp_path / "run" / "groups" / "step-002-task" / "update",
         audit_only=mode == "audit",
         readback_only=mode == "readback",
+        memory_probe_tokens=16384 if mode == "memory" else None,
     )
     result = module.tracking_configuration(arguments, 1)
     assert result["report_to"] == ("trackio" if mode == "train" else "none")

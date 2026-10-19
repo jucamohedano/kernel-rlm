@@ -13,6 +13,11 @@ from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_re
 from kernel_skyrl.contract import exact_sample, has_signal
 from kernel_skyrl.preflight import load_tasks
 
+from kernel_trl.context import (
+    DEFAULT_CONTEXT_TOKENS,
+    LEGACY_CONTEXT_TOKENS,
+    validate_context_tokens,
+)
 from kernel_trl.scoring import capture_generation
 from kernel_trl.turn_credit import training_rows
 
@@ -23,10 +28,11 @@ KernelGenerator = None
 class InferenceClient:
     """Transport REPL-admitted requests without acquiring a second reader lock."""
 
-    def __init__(self, session, endpoint, trace):
+    def __init__(self, session, endpoint, trace, context_tokens=LEGACY_CONTEXT_TOKENS):
         self.session = session
         self.endpoint = endpoint
         self.trace = trace
+        self.context_tokens = validate_context_tokens(context_tokens)
 
     async def chat_completion(self, payload):
         return await self.request_completion(payload)
@@ -45,7 +51,7 @@ class InferenceClient:
             token_response.raise_for_status()
             tokenized = await token_response.json()
         requested = body["max_tokens"]
-        body["max_tokens"] = min(requested, 12288 - tokenized["count"])
+        body["max_tokens"] = min(requested, self.context_tokens - tokenized["count"])
         if body["max_tokens"] < 128 and requested >= 128:
             raise ValueError("Insufficient exact context headroom for a useful reply")
         async with self.session.post(self.endpoint + "/v1/chat/completions", json=body) as response:
@@ -100,8 +106,13 @@ async def collect(arguments):
     model_timeout = getattr(arguments, "model_timeout_s", DEFAULT_MODEL_TIMEOUT_SECONDS)
     request_timeout = getattr(arguments, "inference_http_timeout_s", model_timeout + 30)
     timeout = aiohttp.ClientTimeout(total=request_timeout)
+    context_tokens = validate_context_tokens(
+        getattr(arguments, "context_tokens", LEGACY_CONTEXT_TOKENS)
+    )
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        client = InferenceClient(session, arguments.endpoint, directory / "requests.jsonl")
+        client = InferenceClient(
+            session, arguments.endpoint, directory / "requests.jsonl", context_tokens
+        )
         started = time.monotonic()
         smoke_request = {
             "model": arguments.adapter_name,
@@ -120,7 +131,7 @@ async def collect(arguments):
         }
         async with inference_request_slot(INFERENCE_ADMISSION_TIMEOUT_S):
             smoke = await client.chat_completion({"json": smoke_request})
-        sample = exact_sample(smoke, 12288)
+        sample = exact_sample(smoke, context_tokens)
         (directory / "inference-smoke.json").write_text(
             json.dumps(
                 {
@@ -158,9 +169,10 @@ async def collect(arguments):
             directory,
             episode_timeout_s=getattr(arguments, "episode_timeout_s", 700),
             limits={
+                "max_context_tokens": context_tokens,
                 "model_timeout_s": getattr(
                     arguments, "model_timeout_s", DEFAULT_MODEL_TIMEOUT_SECONDS
-                )
+                ),
             },
             defer_scoring=getattr(arguments, "defer_scoring", False),
         )
@@ -212,7 +224,11 @@ async def collect(arguments):
                     await asyncio.gather(*jobs, return_exceptions=True)
                 if getattr(arguments, "defer_scoring", False):
                     capture_generation(
-                        directory, task_id, arguments.policy_version, arguments.rollouts
+                        directory,
+                        task_id,
+                        arguments.policy_version,
+                        arguments.rollouts,
+                        context_tokens=context_tokens,
                     )
                     print(
                         json.dumps(
@@ -255,7 +271,7 @@ async def collect(arguments):
                         "No reward above 0.1; inspect saved trajectories before continuing"
                     )
                 if admitted:
-                    group = training_rows(episodes, arguments.policy_version)
+                    group = training_rows(episodes, arguments.policy_version, context_tokens)
                     group["task"] = task_id
                     (directory / "training-group.json").write_text(json.dumps(group, indent=2))
                     print(
@@ -282,6 +298,7 @@ async def collect(arguments):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--endpoint", default="http://127.0.0.1:8006")
+    parser.add_argument("--context-tokens", type=int, default=DEFAULT_CONTEXT_TOKENS)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)

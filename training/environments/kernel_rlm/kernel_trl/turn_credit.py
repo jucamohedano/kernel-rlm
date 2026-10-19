@@ -5,8 +5,13 @@ import statistics
 
 from kernel_skyrl.contract import RootSample, has_signal
 
+from kernel_trl.context import LEGACY_CONTEXT_TOKENS, validate_context_tokens
 
-def training_rows(episodes: list[dict], policy_version: int = 0) -> dict:
+
+def training_rows(
+    episodes: list[dict], policy_version: int = 0, context_tokens: int = LEGACY_CONTEXT_TOKENS
+) -> dict:
+    validate_context_tokens(context_tokens)
     if len(episodes) not in {4, 8}:
         raise ValueError("TRL requires four or eight complete trajectories")
     if type(policy_version) is not int or policy_version < 0:
@@ -32,7 +37,7 @@ def training_rows(episodes: list[dict], policy_version: int = 0) -> dict:
                 raise ValueError("Incomplete root sample")
             if not all(math.isfinite(value) and value <= 0 for value in sample.logprobs):
                 raise ValueError("Invalid sampled-token log probabilities")
-            if len(sample.prompt_ids) + len(sample.response_ids) > 12288:
+            if len(sample.prompt_ids) + len(sample.response_ids) > context_tokens:
                 raise ValueError("Exact sampled context exceeds the configured limit")
             rows.append(
                 {
@@ -58,6 +63,7 @@ def training_rows(episodes: list[dict], policy_version: int = 0) -> dict:
         "rewards": rewards,
         "advantages": advantages,
         "policy_version": policy_version,
+        "context_tokens": context_tokens,
         "normalization": "sum root-token PPO losses / real root tokens; no turn-count reward normalization",
         "padding": "duplicates a real root row with exactly zero advantage and no auxiliary loss",
     }

@@ -67,8 +67,8 @@ class KernelGenerator:
             raise ValueError("Root output cap must be between 1 and 4096 tokens")
         if not 1 <= self.limits["max_turns"] <= 8:
             raise ValueError("At most eight root turns are supported")
-        if self.limits["max_context_tokens"] != 12288:
-            raise ValueError("The first L40S adapter keeps the existing 12288-token context")
+        if not 12288 <= self.limits["max_context_tokens"] <= 16384:
+            raise ValueError("The L40S adapter supports 12288 to 16384 context tokens")
         if not 0 <= self.limits["max_subcalls"] <= 2:
             raise ValueError("At most two child calls are supported")
         self.max_sample_batches = max_sample_batches

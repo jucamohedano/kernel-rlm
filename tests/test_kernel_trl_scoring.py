@@ -53,6 +53,22 @@ def saved(monkeypatch, tmp_path):
     return module, directory, task
 
 
+def test_long_context_survives_durable_scoring(saved):
+    module, directory, _task = saved
+    path = directory / "group-0-trajectory-0/calls.jsonl"
+    calls = [json.loads(line) for line in path.read_text().splitlines()]
+    calls[0]["response"]["prompt_token_ids"] = [2] * 13000
+    path.write_text("\n".join(json.dumps(call) for call in calls))
+    (directory / "generation-manifest.json").unlink()
+    module.capture_generation(directory, "task-a", 1, 4, context_tokens=16384)
+    scorer = AsyncMock(return_value=(0.85, {"verification_status": "completed", "correct": True}))
+    result = asyncio.run(module.score_generated(directory, 1, "task-a", scorer))
+    assert result["admitted"] is True
+    group = json.loads((directory / "training-group.json").read_text())
+    assert group["context_tokens"] == 16384
+    assert len(group["rows"][0]["prompt_ids"]) == 13000
+
+
 def test_rechecks_only_failed_verification_and_never_resamples(saved):
     module, directory, _task = saved
     scorer = AsyncMock(return_value=(0.85, {"verification_status": "completed", "correct": True}))

@@ -192,7 +192,29 @@ loading: one root response took 138.5 seconds and another hit the 150-second
 timeout. The collector's HTTP client also had a separate fixed 180-second cap.
 The live driver now allows 600 seconds for a model request, 630 seconds for
 the HTTP client, 1,500 seconds for a trajectory and 2,400 seconds for a group.
-The reply cap stays at 4,096 tokens and the context cap stays at 12,288 tokens.
+That baseline used a 4,096-token reply cap and a 12,288-token context cap.
+
+## Longer context for new TRL runs
+
+The new-run CLI default is 16,384 total prompt-plus-reply tokens. Use
+`--context-tokens 16384` explicitly in the launch record. Root replies stay at
+4,096; recovery stays at 1,024; children keep their existing 2,048-token caps.
+The same context value reaches vLLM, exact token counting, the RLM generator,
+durable generation manifests, final scoring, training rows and dashboard
+provenance. Historical manifests without this field still mean 12,288 tokens.
+Resuming an existing immutable run with a different context is rejected; keep
+`--context-tokens 12288` for those old runs and prepare a new snapshot for a
+larger-context continuation.
+
+Inference KV-cache headroom is not proof that training fits. Before enabling a
+larger limit on the two L40S GPUs, run a bounded native FSDP2/TRL loss memory
+check with `kernel_trl.rlm_update --memory-probe-tokens 16384 --resume-from
+<checkpoint>`. This mode restores real adapters and Muon state, accumulates two
+synthetic full-length backward passes, performs zero optimizer steps, disables
+training tracking and writes no checkpoint. It reports allocated/reserved VRAM
+and free device memory. Synthetic inputs test one routing pattern, not every
+possible real trajectory. Keep the independent context-exhaustion and sibling
+cancellation repairs as open work; a larger cap cannot guarantee termination.
 
 The runtime must expose `ninja` on `PATH` for both REPL compilation and vLLM
 LoRA kernels. The driver adds the training virtual environment's `bin` directory

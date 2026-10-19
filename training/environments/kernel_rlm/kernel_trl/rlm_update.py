@@ -11,7 +11,9 @@ from pathlib import Path
 def tracking_configuration(arguments, version: int) -> dict:
     return {
         "report_to": "none"
-        if arguments.audit_only or arguments.readback_only
+        if arguments.audit_only
+        or arguments.readback_only
+        or getattr(arguments, "memory_probe_tokens", None)
         else getattr(arguments, "report_to", "trackio"),
         "project": "laguna-kernel-rlm",
         "trackio_space_id": None,
@@ -49,6 +51,14 @@ def run(arguments) -> dict:
     from kernel_trl.replay_trainer import rlm_grpo_trainer
 
     group = json.loads(arguments.group.read_text()) if arguments.group else None
+    memory_tokens = getattr(arguments, "memory_probe_tokens", None)
+    if memory_tokens:
+        from kernel_trl.memory_probe import probe_group
+
+        if group is not None or arguments.resume_from is None:
+            raise ValueError("Memory-only checks require a checkpoint and no sampled group")
+        version = json.loads((arguments.resume_from / "metadata.json").read_text())["step"]
+        group = probe_group(memory_tokens, version)
     if arguments.readback_only:
         if group is not None or arguments.resume_from is None:
             raise ValueError("Readback requires only a checkpoint, not sampled trajectories")
@@ -67,9 +77,9 @@ def run(arguments) -> dict:
         raise ValueError("Nonzero policy version requires its checkpoint")
     if arguments.resume_from:
         checkpoint_metadata(arguments.resume_from, version)
-    if group and not arguments.audit_only and max(group["rewards"]) <= 0.1:
+    if group and not arguments.audit_only and not memory_tokens and max(group["rewards"]) <= 0.1:
         raise ValueError("No reward above 0.1: inspect trajectories before further updates")
-    if group and not arguments.audit_only:
+    if group and not arguments.audit_only and not memory_tokens:
         require_probability_agreement(arguments.audit_report, group)
     if int(os.environ["WORLD_SIZE"]) != 2 or torch.cuda.device_count() != 2:
         raise ValueError("Exactly two allocated GPUs are required")
@@ -158,6 +168,7 @@ def run(arguments) -> dict:
         resumed = {}
         audit = {}
         readback = {}
+        memory = {}
 
         class PhaseStart(TrainerCallback):
             def on_train_begin(self, args, state, control, **kwargs):
@@ -167,6 +178,12 @@ def run(arguments) -> dict:
                 if arguments.readback_only:
                     output = save_training_state(trainer, directory, version)
                     readback.update(checkpoint=output.name)
+                    raise AuditComplete()
+                if memory_tokens:
+                    from kernel_trl.memory_probe import measure_backward
+
+                    memory.update(measure_backward(trainer, group))
+                    event(directory, "memory_probe_complete", **memory)
                     raise AuditComplete()
                 if arguments.audit_only:
                     audit.update(audit_group(trainer, group, directory))
@@ -189,12 +206,17 @@ def run(arguments) -> dict:
             if updates:
                 raise ValueError("Audit-only execution performed an optimizer update") from None
             return {
-                "status": "readback" if arguments.readback_only else "audited",
+                "status": "memory_checked"
+                if memory_tokens
+                else "readback"
+                if arguments.readback_only
+                else "audited",
                 "global_step": version,
                 "optimizer_steps": 0,
                 "probability_audit": audit,
                 "resume": resumed,
                 **readback,
+                **memory,
                 "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
                 "peak_reserved_bytes": torch.cuda.max_memory_reserved(),
                 "elapsed_seconds": time.monotonic() - started,
@@ -245,6 +267,7 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--audit-only", action="store_true")
     mode.add_argument("--readback-only", action="store_true")
+    mode.add_argument("--memory-probe-tokens", type=int)
     arguments = parser.parse_args()
     arguments.output_dir.mkdir(parents=True, exist_ok=True)
     result = run(arguments)

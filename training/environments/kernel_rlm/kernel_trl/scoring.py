@@ -11,6 +11,7 @@ from pathlib import Path
 from kernel_skyrl.contract import exact_sample, has_signal
 from kernel_skyrl.generator import score_submission
 
+from kernel_trl.context import LEGACY_CONTEXT_TOKENS, validate_context_tokens
 from kernel_trl.turn_credit import training_rows
 
 INFRASTRUCTURE_STATUSES = {
@@ -35,7 +36,14 @@ def write_json(path: Path, value):
     temporary.replace(path)
 
 
-def capture_generation(directory: Path, task_id: str, version: int, rollouts: int) -> dict:
+def capture_generation(
+    directory: Path,
+    task_id: str,
+    version: int,
+    rollouts: int,
+    context_tokens: int = LEGACY_CONTEXT_TOKENS,
+) -> dict:
+    validate_context_tokens(context_tokens)
     if rollouts not in {4, 8}:
         raise ValueError("Require a complete four- or eight-trajectory group")
     entries = []
@@ -46,6 +54,8 @@ def capture_generation(directory: Path, task_id: str, version: int, rollouts: in
         }
         entries.append({"directory": episode.name, "sha256": files})
     manifest = {"task": task_id, "policy_version": version, "episodes": entries}
+    if context_tokens != LEGACY_CONTEXT_TOKENS:
+        manifest["context_tokens"] = context_tokens
     destination = directory / "generation-manifest.json"
     if destination.exists() and read_json(destination) != manifest:
         raise ValueError("Generated trajectories changed since capture")
@@ -55,6 +65,7 @@ def capture_generation(directory: Path, task_id: str, version: int, rollouts: in
 
 def load_episodes(directory: Path, manifest: dict) -> list[dict]:
     episodes = []
+    context_tokens = validate_context_tokens(manifest.get("context_tokens", LEGACY_CONTEXT_TOKENS))
     if len(manifest["episodes"]) not in {4, 8}:
         raise ValueError("Incomplete generated group")
     for entry in manifest["episodes"]:
@@ -69,7 +80,9 @@ def load_episodes(directory: Path, manifest: dict) -> list[dict]:
         if any(call.get("policy_version") != manifest["policy_version"] for call in calls):
             raise ValueError("Saved calls have a different sampled policy version")
         samples = [
-            exact_sample(call["response"], 12288) for call in calls if call.get("branch") == "root"
+            exact_sample(call["response"], context_tokens)
+            for call in calls
+            if call.get("branch") == "root"
         ]
         if not samples:
             raise ValueError("No exact sampled root calls")
@@ -161,7 +174,9 @@ async def score_generated(
     }
     write_json(directory / "groups.json", [record])
     if admitted:
-        group = training_rows(episodes, version)
+        group = training_rows(
+            episodes, version, manifest.get("context_tokens", LEGACY_CONTEXT_TOKENS)
+        )
         group.update(task=task_id, generation_sha256=digest(manifest_path))
         write_json(directory / "training-group.json", group)
     return record
@@ -221,7 +236,13 @@ def import_saved_group(
         raise ValueError("Refusing to replay an existing trainable group")
     write_json(destination / "recovery-source.json", provenance)
     shutil.copy2(destination / "groups.json", destination / "groups-original.json")
-    capture_generation(destination, task["name"], version, rollouts)
+    saved_manifest = source / "generation-manifest.json"
+    context_tokens = (
+        read_json(saved_manifest).get("context_tokens", LEGACY_CONTEXT_TOKENS)
+        if saved_manifest.exists()
+        else LEGACY_CONTEXT_TOKENS
+    )
+    capture_generation(destination, task["name"], version, rollouts, context_tokens)
 
 
 def main():
