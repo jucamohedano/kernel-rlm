@@ -150,3 +150,36 @@ design. Full traces remain on the VM and ignored local log directories; aggregat
 results are in `notes/results/20261018-trl-live.json` in the parent project.
 The single- and two-rank native CPU proofs matched direct reference gradients;
 the two-rank maximum parameter error was about `7.3e-12`.
+
+## Resumable CloudRift curriculum driver
+
+`live_curriculum.py` runs one L1 task group at a time. It alternates between
+two phases because vLLM inference and FSDP2 training cannot fit together safely
+on these two L40S GPUs:
+
+1. Start TP2 vLLM and load the current LoRA adapter by its local checkpoint path.
+2. Generate eight trajectories, four at a time, for one dataset task.
+3. Stop inference. Keep the complete request, REPL, feedback and verifier traces.
+4. Run the no-update, exact-group sampler/learner probability audit.
+5. Run one TRL/Muon update only when the group has valid reward variance and the
+   exact audit passes.
+6. Save a compact adapter/Muon checkpoint, advance the policy version, and use
+   that checkpoint for the next task.
+
+The driver records each task result, policy version, reward group, audit summary,
+checkpoint, telemetry and spend estimate. It stops for diagnosis when a group
+has weak or zero-variance reward. `--resume` continues a paused run from its
+latest validated checkpoint and reuses saved groups; a run lock prevents a
+second driver from launching against the same directory. Do not resume until
+the VM has no leftover GPU worker processes.
+
+The runtime must expose `ninja` on `PATH` while vLLM loads a trained LoRA. The
+driver adds the dedicated inference virtual environment's `bin` directory.
+This fixes the first adapter-reload startup failure without installing a new
+package or enabling vLLM's runtime-update API.
+
+For a bounded continuation test, use `--bootstrap-dir` with a successful
+step-1 run and `--max-groups 1`. Remove `--max-groups` for the remaining L1
+curriculum. Run the same command with `--resume` after a clean paused boundary.
+Keep `--budget-file` pointed to the original $40 authorization record; each
+GPU phase checks the remaining allowance before it starts.
