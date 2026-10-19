@@ -135,7 +135,8 @@ def test_current_training_links_are_visible_on_historical_runs(tmp_path):
     page = dashboard.render_run(tmp_path, "missing")
     assert "Current training experiment" in page
     assert "Current training attempt" in page
-    assert 'href="/?run=20261019T083616Z-phased"' in page
+    current = next(item for item in dashboard.experiment_catalog() if item.get("current_run_id"))
+    assert f'href="/?run={current["current_run_id"]}"' in page
     assert "Trackio · live metrics" in page
 
 
