@@ -28,6 +28,14 @@ def fake_client(content="CUDA advice", finish="stop"):
     return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
 
 
+def test_task_prompt_requires_a_contract_checklist(subcalls):
+    from kernel_rlm.submission_contract import KERNEL_TASK_INSTRUCTION
+
+    assert "record a short contract checklist" in KERNEL_TASK_INSTRUCTION
+    assert "output type and arity" in KERNEL_TASK_INSTRUCTION
+    assert "parameter or buffer names" in KERNEL_TASK_INSTRUCTION
+
+
 def test_budget_and_trace(subcalls):
     client = fake_client()
     records = []
@@ -177,5 +185,6 @@ def test_prompt_example_runs_through_real_worker_and_proxy(subcalls):
     assert len(records) == 1
     assert "thread-to-element mapping" in records[0]["prompt"]
     assert "if (index < length)" in records[0]["prompt"]
-    assert "Delegation is optional" in instruction
+    assert "make one focused child call before coding" in instruction
+    assert "not a kernel" in instruction
     assert "final verification measures speed" in instruction

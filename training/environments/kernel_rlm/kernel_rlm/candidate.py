@@ -34,11 +34,32 @@ def candidate_forward(submission, reference_model, init_inputs, device):
 def compare_outputs(reference, candidate, atol: float, rtol: float) -> tuple[bool, float, str]:
     import torch
 
+    def describe_output(value):
+        if torch.is_tensor(value):
+            return f"Tensor(shape={tuple(value.shape)}, dtype={value.dtype})"
+        if isinstance(value, tuple):
+            return f"tuple[{len(value)}]"
+        if isinstance(value, list):
+            return f"list[{len(value)}]"
+        if isinstance(value, dict):
+            return f"dict(keys={list(value)[:5]!r})"
+        return type(value).__name__
+
     if torch.is_tensor(reference):
         if not torch.is_tensor(candidate):
-            return False, 0.0, "output must be a tensor"
+            return (
+                False,
+                0.0,
+                f"output structure mismatch: expected {describe_output(reference)}, "
+                f"got {describe_output(candidate)}",
+            )
         if reference.shape != candidate.shape or reference.dtype != candidate.dtype:
-            return False, 0.0, "output shape or dtype mismatch"
+            return (
+                False,
+                0.0,
+                f"output tensor mismatch: expected {describe_output(reference)}, "
+                f"got {describe_output(candidate)}",
+            )
         if reference.device != candidate.device:
             return False, 0.0, "output device mismatch"
         expected, actual = reference.reshape(-1), candidate.reshape(-1)
@@ -64,13 +85,28 @@ def compare_outputs(reference, candidate, atol: float, rtol: float) -> tuple[boo
         if not isinstance(candidate, (tuple, list)) or isinstance(reference, list) != isinstance(
             candidate, list
         ):
-            return False, 0.0, "output sequence type mismatch"
+            return (
+                False,
+                0.0,
+                f"output structure mismatch: expected {describe_output(reference)}, "
+                f"got {describe_output(candidate)}",
+            )
         if len(reference) != len(candidate):
-            return False, 0.0, "output sequence length mismatch"
+            return (
+                False,
+                0.0,
+                f"output structure mismatch: expected {describe_output(reference)}, "
+                f"got {describe_output(candidate)}",
+            )
         pairs = zip(reference, candidate, strict=True)
     elif isinstance(reference, dict):
         if not isinstance(candidate, dict) or reference.keys() != candidate.keys():
-            return False, 0.0, "output mapping keys mismatch"
+            return (
+                False,
+                0.0,
+                f"output mapping mismatch: expected {describe_output(reference)}, "
+                f"got {describe_output(candidate)}",
+            )
         pairs = ((reference[key], candidate[key]) for key in reference)
     else:
         correct = type(reference) is type(candidate) and reference == candidate

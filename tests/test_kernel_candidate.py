@@ -25,9 +25,9 @@ def test_clone_keeps_nested_constructor_inputs_independent(candidate):
 @pytest.mark.parametrize(
     "expected,actual,error",
     [
-        ((1, 2), [1, 2], "sequence type"),
-        ([1, 2], [1], "sequence length"),
-        ({"a": 1}, {"b": 1}, "mapping keys"),
+        ((1, 2), [1, 2], "structure mismatch"),
+        ([1, 2], [1], "structure mismatch"),
+        ({"a": 1}, {"b": 1}, "mapping mismatch"),
         (1, True, "metadata"),
     ],
 )
@@ -40,6 +40,25 @@ def test_output_structure_differences_are_not_ignored(candidate, expected, actua
 def test_nested_metadata_can_match_without_changing_values(candidate):
     value = {"out": (1, [2, 3])}
     assert candidate.compare_outputs(value, value, 1e-3, 1e-4) == (True, 0.0, "")
+
+
+def test_sequence_mismatch_feedback_identifies_expected_and_actual_contract(candidate):
+    from sys import modules
+
+    class FakeTensor:
+        shape = (2, 3)
+        dtype = "float32"
+
+    modules["torch"].is_tensor = lambda value: isinstance(value, FakeTensor)
+    expected = (FakeTensor(), FakeTensor(), FakeTensor())
+    actual = FakeTensor()
+
+    correct, difference, message = candidate.compare_outputs(expected, actual, 1e-3, 1e-4)
+
+    assert not correct and difference == 0
+    assert message == (
+        "output structure mismatch: expected tuple[3], got Tensor(shape=(2, 3), dtype=float32)"
+    )
 
 
 def test_legacy_function_remains_the_direct_entrypoint(candidate):
