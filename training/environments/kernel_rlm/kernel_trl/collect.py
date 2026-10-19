@@ -9,10 +9,12 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 from kernel_skyrl.contract import exact_sample, has_signal
-from kernel_skyrl.generator import KernelGenerator
 from kernel_skyrl.preflight import load_tasks
 
 from kernel_trl.turn_credit import training_rows
+
+DEFAULT_MODEL_TIMEOUT_SECONDS = 150
+KernelGenerator = None
 
 
 class InferenceClient:
@@ -64,6 +66,10 @@ class InferenceClient:
 
 
 async def collect(arguments):
+    generator_class = KernelGenerator
+    if generator_class is None:
+        from kernel_skyrl.generator import KernelGenerator as generator_class
+
     directory = arguments.output_dir
     directory.mkdir(parents=True, exist_ok=False)
     timeout = aiohttp.ClientTimeout(total=180)
@@ -115,12 +121,17 @@ async def collect(arguments):
         runner = web.AppRunner(admin, shutdown_timeout=1)
         await runner.setup()
         await web.TCPSite(runner, "127.0.0.1", 8016).start()
-        generator = KernelGenerator(
+        generator = generator_class(
             client,
             arguments.adapter_name,
             str(arguments.checkpoint),
             directory,
-            episode_timeout_s=700,
+            episode_timeout_s=getattr(arguments, "episode_timeout_s", 700),
+            limits={
+                "model_timeout_s": getattr(
+                    arguments, "model_timeout_s", DEFAULT_MODEL_TIMEOUT_SECONDS
+                )
+            },
         )
         tasks = {task["name"]: task for task in load_tasks(arguments.dataset)}
         attempts = []
@@ -196,6 +207,9 @@ def main():
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--rollouts", type=int, choices=(4, 8), default=4)
+    parser.add_argument("--model-timeout-s", type=float, default=DEFAULT_MODEL_TIMEOUT_SECONDS)
+    parser.add_argument("--episode-timeout-s", type=float, default=700)
+    parser.add_argument("--group-timeout-s", type=float)
     parser.add_argument("--policy-version", type=int, default=0)
     parser.add_argument("--adapter-name", default="kernel-base")
     parser.add_argument(
@@ -210,7 +224,13 @@ def main():
         raise ValueError("A nonzero policy requires an explicitly loaded trained adapter")
     if len(arguments.task_ids) > 3 or not arguments.endpoint.startswith("http://127.0.0.1:"):
         raise ValueError("Use loopback inference and at most three groups")
-    asyncio.run(asyncio.wait_for(collect(arguments), timeout=900 * (arguments.rollouts // 4)))
+    if arguments.model_timeout_s <= 0 or arguments.episode_timeout_s <= 0:
+        raise ValueError("Model and trajectory timeouts must be positive")
+    if arguments.group_timeout_s is None:
+        arguments.group_timeout_s = 900 * (arguments.rollouts // 4)
+    if arguments.group_timeout_s <= 0:
+        raise ValueError("Group timeout must be positive")
+    asyncio.run(asyncio.wait_for(collect(arguments), timeout=arguments.group_timeout_s))
 
 
 if __name__ == "__main__":

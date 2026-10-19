@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -24,8 +25,10 @@ MODEL_REVISION = "a397bde04501591d0ac3d74a5d9d0a4ec298ffb8"
 GROUP_SIZE = 8
 WORLD_SIZE = 2
 INFLIGHT = 4
-COLLECTION_LIMIT_SECONDS = 1800
+COLLECTION_LIMIT_SECONDS = 2400
 PHASE_LIMIT_SECONDS = 600
+MODEL_TIMEOUT_SECONDS = 600
+EPISODE_TIMEOUT_SECONDS = 1500
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -253,6 +256,13 @@ def bootstrap_state(arguments, task_order: list[str]) -> dict:
                 "optimizer_step": version,
                 "rewards": group["rewards"],
                 "probability_audit": audit_summary,
+                "metrics": report.get("metrics", {}),
+                "update_summary": {
+                    "updates": report.get("updates", []),
+                    "native_loss": report.get("native_loss"),
+                    "peak_allocated_bytes": report.get("peak_allocated_bytes"),
+                    "peak_reserved_bytes": report.get("peak_reserved_bytes"),
+                },
                 "source_run": str(bootstrap),
                 "quality_improvement_claimed": False,
             }
@@ -376,6 +386,12 @@ async def collect_task(
             str(output_directory),
             "--rollouts",
             str(GROUP_SIZE),
+            "--model-timeout-s",
+            str(MODEL_TIMEOUT_SECONDS),
+            "--episode-timeout-s",
+            str(EPISODE_TIMEOUT_SECONDS),
+            "--group-timeout-s",
+            str(COLLECTION_LIMIT_SECONDS),
             "--policy-version",
             str(version),
             "--adapter-name",
@@ -514,6 +530,7 @@ def record_training_result(
         "trainable_tokens": group["trainable_tokens"],
         "probability_audit": audit_summary,
         "update_reports": update["reports"],
+        "metrics": update["reports"][0].get("metrics", {}),
         "checkpoint": update["checkpoint"],
         "checkpoint_bytes": sum(
             (Path(update["checkpoint"]) / name).stat().st_size
@@ -550,6 +567,7 @@ def initialize_run(arguments) -> dict:
         "backend": "trl",
         "model_revision": MODEL_REVISION,
         "dataset_sha256": hashlib.sha256(arguments.dataset.read_bytes()).hexdigest(),
+        "dataset_path": str(arguments.dataset),
         "source_sha256": source_hashes(arguments.source_root),
         "source_commit": arguments.source_commit,
         "rollouts_per_task": GROUP_SIZE,
@@ -558,6 +576,9 @@ def initialize_run(arguments) -> dict:
         "normal_reply_tokens": 4096,
         "recovery_reply_tokens": 1024,
         "max_turns": 8,
+        "model_request_timeout_seconds": MODEL_TIMEOUT_SECONDS,
+        "episode_timeout_seconds": EPISODE_TIMEOUT_SECONDS,
+        "group_collection_timeout_seconds": COLLECTION_LIMIT_SECONDS,
         "max_child_calls": 2,
         "one_update_per_admitted_task_group": True,
         "inference_training_overlap": False,
@@ -582,6 +603,9 @@ def initialize_run(arguments) -> dict:
         "speed_reward_weight": 0.1,
         "bootstrap_dir": str(arguments.bootstrap_dir) if arguments.bootstrap_dir else None,
     }
+    dataset_copy = arguments.output_dir / "inputs/lvl1_seed42.jsonl"
+    dataset_copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(arguments.dataset, dataset_copy)
     write_json(arguments.output_dir / "inputs.json", manifest)
     state.update(
         {

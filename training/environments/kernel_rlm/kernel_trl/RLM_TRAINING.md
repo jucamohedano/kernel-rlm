@@ -173,6 +173,12 @@ latest validated checkpoint and reuses saved groups; a run lock prevents a
 second driver from launching against the same directory. Do not resume until
 the VM has no leftover GPU worker processes.
 
+The base 150-second model-call deadline proved too short after policy-1 adapter
+loading: one root response took 138.5 seconds and another hit the 150-second
+timeout. The live curriculum driver now uses a 600-second request deadline, a
+1,500-second trajectory deadline and a 2,400-second group deadline. The reply
+cap stays at 4,096 tokens and the context cap stays at 12,288 tokens.
+
 The runtime must expose `ninja` on `PATH` while vLLM loads a trained LoRA. The
 driver adds the dedicated inference virtual environment's `bin` directory.
 The VM's cached Python 3.12 headers are also required by Triton's generated

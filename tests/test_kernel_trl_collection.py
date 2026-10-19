@@ -26,7 +26,13 @@ def collector(monkeypatch):
             }
         ],
     }
-    observed = {"active": 0, "peak": 0, "versions": [], "adapters": []}
+    observed = {
+        "active": 0,
+        "peak": 0,
+        "versions": [],
+        "adapters": [],
+        "generator_kwargs": None,
+    }
 
     class Session:
         async def __aenter__(self):
@@ -38,6 +44,7 @@ def collector(monkeypatch):
     class Generator:
         def __init__(self, client, adapter, *args, **kwargs):
             observed["adapters"].append(adapter)
+            observed["generator_kwargs"] = kwargs
 
         async def run_episode(self, task, directory, version):
             observed["active"] += 1
@@ -78,6 +85,9 @@ def arguments(tmp_path):
         policy_version=7,
         rollouts=8,
         task_ids=["task-a"],
+        model_timeout_s=600,
+        episode_timeout_s=1500,
+        group_timeout_s=2400,
     )
 
 
@@ -92,6 +102,8 @@ def test_eight_rollouts_use_two_waves_and_one_policy(collector, tmp_path):
     result = json.loads((args.output_dir / "training-group.json").read_text())
     assert len(result["rewards"]) == 8
     assert result["policy_version"] == 7
+    assert observed["generator_kwargs"]["limits"]["model_timeout_s"] == 600
+    assert observed["generator_kwargs"]["episode_timeout_s"] == 1500
 
 
 @pytest.mark.parametrize("rewards", [[0.1] * 8, [0.0, 0.1] * 4])
