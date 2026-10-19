@@ -77,12 +77,27 @@ def load_episodes(directory: Path, manifest: dict) -> list[dict]:
         if task.get("name") != manifest["task"]:
             raise ValueError("Saved task differs from generated group")
         calls = [json.loads(line) for line in (episode / "calls.jsonl").read_text().splitlines()]
+        record = read_json(episode / "submission.json")
         if any(call.get("policy_version") != manifest["policy_version"] for call in calls):
             raise ValueError("Saved calls have a different sampled policy version")
+        roots = [call for call in calls if call.get("branch") == "root"]
+        if any(call.get("outcome") not in {None, "context_exhausted"} for call in roots):
+            raise ValueError("Unknown saved root outcome")
+        exhausted = [
+            index for index, call in enumerate(roots) if call.get("outcome") == "context_exhausted"
+        ]
+        if exhausted and (
+            exhausted != [len(roots) - 1]
+            or record.get("termination_reason") != "context_exhausted"
+            or roots[-1].get("context_exhaustion") != record.get("context_exhaustion")
+            or "response" in roots[-1]
+            or "error" in roots[-1]
+        ):
+            raise ValueError("Context exhaustion is not a matching terminal root outcome")
         samples = [
             exact_sample(call["response"], context_tokens)
-            for call in calls
-            if call.get("branch") == "root"
+            for call in roots
+            if call.get("outcome") != "context_exhausted"
         ]
         if not samples:
             raise ValueError("No exact sampled root calls")
@@ -90,7 +105,7 @@ def load_episodes(directory: Path, manifest: dict) -> list[dict]:
             {
                 "directory": episode,
                 "task": task,
-                "record": read_json(episode / "submission.json"),
+                "record": record,
                 "samples": samples,
             }
         )

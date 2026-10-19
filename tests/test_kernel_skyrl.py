@@ -257,6 +257,54 @@ async def test_real_repl_program_with_child_and_cpu_feedback_fixture(tmp_path, m
 
 
 @run_async
+async def test_exact_capacity_exhaustion_ends_episode_without_infrastructure_failure(
+    tmp_path, monkeypatch
+):
+    from kernel_rlm.capacity import ContextExhaustedError
+    from kernel_skyrl.generator import KernelGenerator
+
+    monkeypatch.setenv(
+        "PYTHONPATH", os.pathsep.join([str(ENVIRONMENT), str(ROOT / "training/src"), str(ROOT)])
+    )
+    script = (
+        "import asyncio,json; from pathlib import Path; import kernel_rlm_v1.program as program; "
+        "program.load_token_counter=lambda model: (lambda text: 1); "
+        "asyncio.run(program.run(json.loads(Path('task.json').read_text())))"
+    )
+
+    class ExhaustingClient(FakeClient):
+        async def chat_completion(self, payload):
+            if self.root_calls:
+                raise ContextExhaustedError(14300, 14336, 4096)
+            return await super().chat_completion(payload)
+
+    client = ExhaustingClient()
+    generator = KernelGenerator(
+        client,
+        "adapter",
+        "fixture",
+        tmp_path,
+        program_command=[sys.executable, "-c", script],
+        episode_timeout_s=30,
+        limits={"enable_subcall": False, "max_context_tokens": 14336},
+        defer_scoring=True,
+    )
+    directory = tmp_path / "exhausted"
+    episode = await generator.run_episode(
+        {"name": "fixture", "context": "source", "prompt": "Use the REPL"}, directory, 5
+    )
+    assert episode["record"]["termination_reason"] == "context_exhausted"
+    assert episode["record"]["model_calls"][-1]["status"] == "context_exhausted"
+    assert len(episode["samples"]) == 1
+    assert episode["reward"] is None
+    assert not (directory / "failure.json").exists()
+    calls = [json.loads(line) for line in (directory / "calls.jsonl").read_text().splitlines()]
+    assert calls[-1]["outcome"] == "context_exhausted"
+    assert "response" not in calls[-1]
+    assert len(client.finished) == 1
+
+
+@run_async
 async def test_stepwise_filter_and_oversampling_never_cut_a_trajectory(tmp_path):
     from kernel_skyrl.contract import RootSample
     from kernel_skyrl.generator import KernelGenerator

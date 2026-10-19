@@ -196,6 +196,24 @@ That baseline used a 4,096-token reply cap and a 12,288-token context cap.
 
 ## Longer context for new TRL runs
 
+Exact context exhaustion is a typed episode outcome. The bridge returns a
+specific HTTP 400 code with the exact prompt count, not a transport failure.
+The root saves its completed sampled replies and terminates without inventing
+a model reply. A missing submission keeps the existing zero terminal reward.
+Durable scoring accepts only a matching final exhaustion marker and excludes
+that marker from token targets. Real bridge/transport failures still block
+training. The collector lets independent siblings finish and records every
+infrastructure failure before rejecting the group; the overall group deadline
+still cancels outstanding work.
+
+After an explicitly authorized retry of an incomplete failed attempt, select
+the validated saved-checkpoint ancestor with `--parent-run-dir` and record the
+failed descendant with `--preserved-incomplete-run`. Its checkpoint, coverage,
+dataset, policy version and ancestor must match. Complete generated groups
+cannot be discarded through this option. Old partial files are hashed and kept,
+attempt counts are retained, and a fresh complete group is generated under the
+new context/source. No partial group is trained or counted as completed.
+
 The new-run CLI default is 14,336 total prompt-plus-reply tokens. Use
 `--context-tokens 14336` explicitly in the launch record. Both 14,336 and 16,384
 passed two native backward passes with real checkpoint-5 Muon state. The smaller

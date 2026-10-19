@@ -53,6 +53,40 @@ def saved(monkeypatch, tmp_path):
     return module, directory, task
 
 
+@pytest.mark.parametrize("matching", [True, False])
+def test_terminal_capacity_outcome_is_not_a_fabricated_token_sample(saved, matching):
+    module, directory, _task = saved
+    episode = directory / "group-0-trajectory-0"
+    details = {"prompt_tokens": 12200, "context_tokens": 12288, "requested_tokens": 4096}
+    record = {
+        "submission": "",
+        "termination_reason": "context_exhausted",
+        "context_exhaustion": details,
+    }
+    (episode / "submission.json").write_text(json.dumps(record))
+    path = episode / "calls.jsonl"
+    calls = [json.loads(line) for line in path.read_text().splitlines()]
+    calls.append(
+        {
+            "policy_version": 1,
+            "branch": "root",
+            "outcome": "context_exhausted",
+            "context_exhaustion": details if matching else {},
+        }
+    )
+    path.write_text("\n".join(json.dumps(call) for call in calls))
+    (directory / "generation-manifest.json").unlink()
+    manifest = module.capture_generation(directory, "task-a", 1, 4)
+    if matching:
+        episodes = module.load_episodes(directory, manifest)
+        assert len(episodes) == 4
+        assert len(episodes[0]["samples"]) == 1
+        assert not episodes[0]["record"]["submission"]
+    else:
+        with pytest.raises(ValueError, match="matching terminal root"):
+            module.load_episodes(directory, manifest)
+
+
 def test_long_context_survives_durable_scoring(saved):
     module, directory, _task = saved
     path = directory / "group-0-trajectory-0/calls.jsonl"

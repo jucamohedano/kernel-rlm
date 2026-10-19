@@ -9,6 +9,7 @@ from pathlib import Path
 
 import aiohttp
 from aiohttp import web
+from kernel_rlm.capacity import ContextExhaustedError
 from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_request_slot
 from kernel_skyrl.contract import exact_sample, has_signal
 from kernel_skyrl.preflight import load_tasks
@@ -53,7 +54,19 @@ class InferenceClient:
         requested = body["max_tokens"]
         body["max_tokens"] = min(requested, self.context_tokens - tokenized["count"])
         if body["max_tokens"] < 128 and requested >= 128:
-            raise ValueError("Insufficient exact context headroom for a useful reply")
+            with self.trace.open("a") as stream:
+                stream.write(
+                    json.dumps(
+                        {
+                            "outcome": "context_exhausted",
+                            "tokenized_count": tokenized["count"],
+                            "context_tokens": self.context_tokens,
+                            "requested_max_tokens": requested,
+                        }
+                    )
+                    + "\n"
+                )
+            raise ContextExhaustedError(tokenized["count"], self.context_tokens, requested)
         async with self.session.post(self.endpoint + "/v1/chat/completions", json=body) as response:
             data = await response.json()
             with self.trace.open("a") as stream:
@@ -216,12 +229,36 @@ async def collect(arguments):
                     for index in range(arguments.rollouts)
                 ]
                 try:
-                    episodes = await asyncio.gather(*jobs)
+                    episodes = await asyncio.gather(*jobs, return_exceptions=True)
                 finally:
                     for job in jobs:
                         if not job.done():
                             job.cancel()
                     await asyncio.gather(*jobs, return_exceptions=True)
+                failures = [
+                    {
+                        "trajectory": index,
+                        "error_type": type(episode).__name__,
+                        "error": str(episode),
+                    }
+                    for index, episode in enumerate(episodes)
+                    if isinstance(episode, BaseException)
+                ]
+                if failures:
+                    (directory / "collection-failures.json").write_text(
+                        json.dumps(
+                            {
+                                "policy_version": arguments.policy_version,
+                                "failures": failures,
+                                "successful_episodes_preserved": len(episodes) - len(failures),
+                                "optimizer_update_allowed": False,
+                            },
+                            indent=2,
+                        )
+                    )
+                    raise RuntimeError(
+                        "Episode infrastructure failed; independent siblings preserved"
+                    )
                 if getattr(arguments, "defer_scoring", False):
                     capture_generation(
                         directory,

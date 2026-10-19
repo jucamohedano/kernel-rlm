@@ -20,6 +20,7 @@ from kernel_rlm.actions import (
     recovery_budget,
     repl_actions,
 )
+from kernel_rlm.capacity import context_exhaustion_details
 from kernel_rlm.feedback import build_local_feedback_bootstrap
 from kernel_rlm.subcalls import (
     KERNEL_SYSTEM,
@@ -213,6 +214,7 @@ async def run(task: dict) -> None:
                     request_started = time.monotonic()
                     response = await client.chat.completions.create(**request_args)
             except Exception as error:
+                exhaustion = context_exhaustion_details(error)
                 elapsed_seconds = time.monotonic() - (
                     request_started if request_started is not None else admission_started
                 )
@@ -221,7 +223,9 @@ async def run(task: dict) -> None:
                         "turn": turn + 1,
                         "phase": phase,
                         "requested_max_tokens": requested_tokens,
-                        "status": "admission_timeout"
+                        "status": "context_exhausted"
+                        if exhaustion is not None
+                        else "admission_timeout"
                         if request_started is None and isinstance(error, TimeoutError)
                         else "timeout"
                         if "timeout" in type(error).__name__.lower()
@@ -236,6 +240,10 @@ async def run(task: dict) -> None:
                         "error": str(error)[:500],
                     }
                 )
+                if exhaustion is not None:
+                    record["termination_reason"] = "context_exhausted"
+                    record["context_exhaustion"] = exhaustion
+                    break
                 raise
             choice = response.choices[0]
             raw_message = choice.message.model_dump(exclude_none=True)

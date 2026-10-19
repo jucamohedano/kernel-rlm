@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 
 from aiohttp import web
+from kernel_rlm.capacity import ContextExhaustedError
 from kernel_rlm.subcalls import CHILD_SYSTEM
 
 from kernel_skyrl.contract import exact_sample
@@ -100,6 +101,18 @@ class CompletionBridge:
             else:
                 self.samples.append(sample)
             return web.json_response(response)
+        except ContextExhaustedError as error:
+            record.update(outcome="context_exhausted", context_exhaustion=error.details)
+            return web.json_response(
+                {
+                    "error": {
+                        "code": "context_exhausted",
+                        "message": str(error),
+                        "details": error.details,
+                    }
+                },
+                status=400,
+            )
         except Exception as error:
             message = f"{type(error).__name__}: {error}"
             self.failures.append(message)

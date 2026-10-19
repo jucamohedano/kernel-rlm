@@ -182,6 +182,28 @@ def test_collection_passes_larger_context_to_generator_and_training(collector, t
     assert group["context_tokens"] == 16384
 
 
+def test_infrastructure_failure_does_not_cancel_independent_siblings(collector, tmp_path):
+    module, observed = collector
+    observed["rewards"] = [0.1, 0.8] * 4
+    finished = []
+
+    async def episode_hook(index):
+        if index == 0:
+            raise RuntimeError("actual transport failure")
+        await asyncio.sleep(0.01)
+        finished.append(index)
+
+    observed["episode_hook"] = episode_hook
+    settings = arguments(tmp_path)
+    with pytest.raises(RuntimeError, match="independent siblings preserved"):
+        asyncio.run(module.collect(settings))
+    assert sorted(finished) == list(range(1, 8))
+    saved = json.loads((settings.output_dir / "collection-failures.json").read_text())
+    assert saved["successful_episodes_preserved"] == 7
+    assert saved["optimizer_update_allowed"] is False
+    assert saved["failures"][0]["trajectory"] == 0
+
+
 def test_deferred_generation_saves_all_trajectories_without_final_scoring(
     collector, tmp_path, monkeypatch
 ):
@@ -286,7 +308,7 @@ def test_free_slot_starts_next_rollout_before_slowest_finishes(collector, tmp_pa
     assert observed["active"] == 0
 
 
-def test_episode_failure_cancels_active_and_queued_rollouts(collector, tmp_path):
+def test_group_deadline_cancels_active_and_queued_rollouts(collector, tmp_path):
     module, observed = collector
     observed["rewards"] = [0.0, 0.3, 0.7, 1.0] * 2
 
@@ -300,7 +322,7 @@ def test_episode_failure_cancels_active_and_queued_rollouts(collector, tmp_path)
             await never.wait()
 
         observed["episode_hook"] = episode_hook
-        with pytest.raises(RuntimeError, match="injected episode failure"):
+        with pytest.raises(TimeoutError):
             await asyncio.wait_for(module.collect(arguments(tmp_path)), 1)
         assert observed["active"] == 0
 

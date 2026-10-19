@@ -376,6 +376,7 @@ def continuation_state(arguments, task_order: list[str]) -> dict:
             "attempts": copy.deepcopy(state.get("attempts", {})),
             "deferred_task_ids": copy.deepcopy(state.get("deferred_task_ids", [])),
             "deferred_groups": copy.deepcopy(state.get("deferred_groups", [])),
+            "preserved_incomplete_runs": copy.deepcopy(state.get("preserved_incomplete_runs", [])),
             "continuation_parent": {
                 "run_id": state["run_id"],
                 "directory": str(parent),
@@ -388,6 +389,74 @@ def continuation_state(arguments, task_order: list[str]) -> dict:
             },
         }
     return result
+
+
+def preserve_incomplete_run(arguments, state: dict) -> None:
+    selected = getattr(arguments, "preserved_incomplete_run", None)
+    if selected is None:
+        return
+    directory = selected.resolve()
+    with (directory / "driver.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        original = read_json(directory / "state.json")
+        manifest = read_json(directory / "inputs.json")
+        task = original.get("pending_task_id")
+        if (
+            original.get("status") != "failed"
+            or original.get("policy_version") != state["policy_version"]
+            or original.get("completed_task_ids") != state["completed_task_ids"]
+            or original.get("task_order") != state["task_order"]
+            or original.get("checkpoint") != state["checkpoint"]
+            or task not in state["task_order"]
+            or task in state["completed_task_ids"]
+            or manifest.get("dataset_sha256")
+            != hashlib.sha256(arguments.dataset.read_bytes()).hexdigest()
+            or manifest.get("model_revision") != MODEL_REVISION
+            or original.get("manifest_sha256")
+            != hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
+            or original.get("continuation_parent", {}).get("run_id")
+            != state.get("continuation_parent", {}).get("run_id")
+        ):
+            raise ValueError("Incomplete run differs from the validated checkpoint/coverage parent")
+        pending = Path(original["pending_directory"]).resolve()
+        if not pending.is_relative_to(directory) or not pending.is_dir():
+            raise ValueError("Incomplete samples must remain inside their original run")
+        if (pending / "collection/rollouts/generation-manifest.json").exists():
+            raise ValueError("A complete generated group must be scored, not discarded")
+        saved = {
+            "run_id": original["run_id"],
+            "directory": str(directory),
+            "state_sha256": hashlib.sha256((directory / "state.json").read_bytes()).hexdigest(),
+            "input_manifest_sha256": original["manifest_sha256"],
+            "source_commit": manifest["source_commit"],
+            "task_id": task,
+            "sampled_policy_version": original["policy_version"],
+            "failure": original.get("failure"),
+            "preserved_files_sha256": {
+                str(path.relative_to(directory)): hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in sorted(pending.rglob("*"))
+                if path.is_file()
+                and not path.is_symlink()
+                and path.suffix in {".json", ".jsonl", ".log", ".csv"}
+            },
+            "fresh_generation_reason": "Explicit continuation after capacity/cancellation repair and context-limit change",
+            "incomplete_samples_used_for_training": False,
+        }
+        state.setdefault("preserved_incomplete_runs", []).append(saved)
+        state.setdefault("attempts", {})[task] = max(
+            state.get("attempts", {}).get(task, 0), original.get("attempts", {}).get(task, 0)
+        )
+        state["results"].append(
+            {
+                "task_id": task,
+                "status": "incomplete_preserved",
+                "policy_version": state["policy_version"],
+                "optimizer_step": None,
+                "trace_directory": str(pending / "collection/rollouts"),
+                "source_run": original["run_id"],
+                "failure": original.get("failure"),
+            }
+        )
 
 
 def defer_uninformative_group(state: dict, result: dict) -> bool:
@@ -726,6 +795,7 @@ def record_training_result(
 def initialize_run(arguments) -> dict:
     ordered = curriculum_order(arguments.dataset)
     state = bootstrap_state(arguments, ordered)
+    preserve_incomplete_run(arguments, state)
     if getattr(arguments, "continue_weak_groups", False):
         for result in state["results"]:
             defer_uninformative_group(state, result)
@@ -776,6 +846,7 @@ def initialize_run(arguments) -> dict:
         "speed_reward_weight": 0.1,
         "bootstrap_dir": str(arguments.bootstrap_dir) if arguments.bootstrap_dir else None,
         "continuation_parent": state.get("continuation_parent"),
+        "preserved_incomplete_runs": state.get("preserved_incomplete_runs", []),
         "replay_source": str(arguments.replay_source)
         if getattr(arguments, "replay_source", None)
         else None,
@@ -859,6 +930,7 @@ def write_report(arguments, state: dict, budget: dict) -> None:
         "context_tokens": getattr(arguments, "context_tokens", LEGACY_CONTEXT_TOKENS),
         "current_checkpoint": state.get("checkpoint"),
         "resumed_from": state.get("continuation_parent", {}).get("run_id"),
+        "preserved_incomplete_runs": state.get("preserved_incomplete_runs", []),
         "resume_step": state.get("continuation_parent", {}).get("policy_version"),
         "groups": groups,
         "results": state["results"],
@@ -1163,6 +1235,7 @@ def main() -> None:
     parser.add_argument("--inference-python", required=True)
     parser.add_argument("--bootstrap-dir", type=Path)
     parser.add_argument("--parent-run-dir", type=Path)
+    parser.add_argument("--preserved-incomplete-run", type=Path)
     parser.add_argument("--replay-source", type=Path)
     parser.add_argument("--max-groups", type=int)
     parser.add_argument("--max-updates", type=int)

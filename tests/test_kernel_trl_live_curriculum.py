@@ -76,6 +76,53 @@ def continuation_parent(curriculum, tmp_path):
     return arguments, state, order
 
 
+@pytest.mark.parametrize("fault", [None, "coverage", "checkpoint", "completed_group"])
+def test_explicit_incomplete_run_preservation_does_not_reset_coverage(
+    curriculum, continuation_parent, tmp_path, fault
+):
+    import copy
+
+    arguments, original, order = continuation_parent
+    directory = tmp_path / "incomplete"
+    pending = directory / "groups/step-005"
+    (pending / "collection/rollouts").mkdir(parents=True)
+    (pending / "collection/rollouts/task.json").write_text("preserved sample")
+    manifest = curriculum.read_json(arguments.parent_run_dir / "inputs.json")
+    manifest["source_commit"] = "failed-source"
+    stopped = copy.deepcopy(original)
+    stopped.update(
+        status="failed",
+        pending_task_id=order[4],
+        pending_directory=str(pending),
+        attempts={order[4]: 2},
+        continuation_parent={"run_id": "parent-run"},
+        manifest_sha256=hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest(),
+    )
+    state = copy.deepcopy(original)
+    state["continuation_parent"] = {"run_id": "parent-run"}
+    if fault == "coverage":
+        stopped["completed_task_ids"] = order[:3]
+    if fault == "checkpoint":
+        stopped["checkpoint"] = "different-checkpoint"
+    if fault == "completed_group":
+        (pending / "collection/rollouts/generation-manifest.json").write_text("{}")
+    curriculum.write_json(directory / "inputs.json", manifest)
+    curriculum.write_json(directory / "state.json", stopped)
+    before = (directory / "state.json").read_bytes()
+    arguments.preserved_incomplete_run = directory
+    if fault:
+        with pytest.raises(ValueError):
+            curriculum.preserve_incomplete_run(arguments, state)
+        return
+    curriculum.preserve_incomplete_run(arguments, state)
+    assert state["completed_task_ids"] == order[:4]
+    assert state["policy_version"] == 4
+    assert state["attempts"][order[4]] == 2
+    assert state["results"][-1]["status"] == "incomplete_preserved"
+    assert state["preserved_incomplete_runs"][0]["preserved_files_sha256"]
+    assert (directory / "state.json").read_bytes() == before
+
+
 def test_new_snapshot_continuation_keeps_all_coverage_and_rejected_history(
     curriculum, continuation_parent, monkeypatch
 ):
