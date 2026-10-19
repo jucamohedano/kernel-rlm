@@ -149,10 +149,24 @@ def inference_environment(
     inference_python: str, environment: dict[str, str] | None = None
 ) -> dict[str, str]:
     result = os.environ.copy() if environment is None else environment.copy()
-    executable_directory = str(Path(inference_python).absolute().parent)
+    python_executable = Path(inference_python).absolute()
+    executable_directory = str(python_executable.parent)
     result["PATH"] = os.pathsep.join([executable_directory, result.get("PATH", "")]).rstrip(
         os.pathsep
     )
+    runtime_root = python_executable.parents[2]
+    header_root = runtime_root / "python-headers/usr/include"
+    include_directory = header_root / "python3.12"
+    multiarch_directory = header_root / "x86_64-linux-gnu/python3.12"
+    if (
+        not (include_directory / "Python.h").is_file()
+        or not (multiarch_directory / "pyconfig.h").is_file()
+    ):
+        raise FileNotFoundError("Cached Python 3.12 headers are required for vLLM LoRA JIT")
+    cpath = [str(include_directory), str(header_root)]
+    if result.get("CPATH"):
+        cpath.append(result["CPATH"])
+    result["CPATH"] = os.pathsep.join(cpath)
     return result
 
 

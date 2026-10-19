@@ -59,9 +59,20 @@ def test_inference_environment_exposes_venv_binaries(curriculum, tmp_path):
     ninja = python.parent / "ninja"
     ninja.touch()
     ninja.chmod(0o755)
+    runtime = python.parents[2]
+    python_include = runtime / "python-headers/usr/include/python3.12"
+    multiarch_include = runtime / "python-headers/usr/include/x86_64-linux-gnu/python3.12"
+    python_include.mkdir(parents=True)
+    multiarch_include.mkdir(parents=True)
+    (python_include / "Python.h").touch()
+    (multiarch_include / "pyconfig.h").touch()
     result = curriculum.inference_environment(str(python), {"PATH": "/usr/bin"})
 
     assert shutil.which("ninja", path=result["PATH"]) == str(ninja)
+    assert result["CPATH"].split(":")[:2] == [
+        str(python_include),
+        str(runtime / "python-headers/usr/include"),
+    ]
 
 
 def test_python_path_and_source_hashes_include_rlm_core(curriculum, tmp_path):

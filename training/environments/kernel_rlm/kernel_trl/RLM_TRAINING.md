@@ -175,10 +175,13 @@ the VM has no leftover GPU worker processes.
 
 The runtime must expose `ninja` on `PATH` while vLLM loads a trained LoRA. The
 driver adds the dedicated inference virtual environment's `bin` directory.
+The VM's cached Python 3.12 headers are also required by Triton's generated
+launcher; the driver adds their normal and multiarch include directories to
+`CPATH`. This uses the cached header package, not a system package install.
 The training Python path includes the environment source, the repository's
 `training/src` package tree (`rlm_train`), and the RLM repository root.
-This fixes the first adapter-reload startup failure without installing a new
-package or enabling vLLM's runtime-update API.
+This keeps vLLM's runtime-update API disabled and the local service bound to
+loopback.
 
 For a bounded continuation test, use `--bootstrap-dir` with a successful
 step-1 run and `--max-groups 1`. Remove `--max-groups` for the remaining L1
