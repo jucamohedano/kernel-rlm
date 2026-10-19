@@ -253,8 +253,9 @@ def test_bootstrap_requires_a_real_completed_update(curriculum, monkeypatch, tmp
     assert state["completed_task_ids"] == ["task-first"]
 
 
+@pytest.mark.parametrize("mode", ["inline", "deferred", "resume_generated"])
 def test_resumed_task_collects_audits_and_advances_one_policy_version(
-    curriculum, monkeypatch, tmp_path
+    curriculum, monkeypatch, tmp_path, mode
 ):
     monkeypatch.syspath_prepend(str(ROOT))
     credit = importlib.import_module("kernel_trl.probability_audit")
@@ -324,11 +325,16 @@ def test_resumed_task_collects_audits_and_advances_one_policy_version(
         "trainable_tokens": 2,
     }
     arguments.output_dir.mkdir()
+    phases = []
 
     async def collect(*args):
+        phases.append("collect")
         step_directory = args[2]
         output = step_directory / "collection/rollouts"
         output.mkdir(parents=True)
+        if mode == "deferred":
+            (output / "generation-manifest.json").write_text("{}")
+            return {"status": "generated"}
         (output / "training-group.json").write_text(json.dumps(group))
         (output / "groups.json").write_text(
             json.dumps([{"task": "task-next", "admitted": True, "rewards": group["rewards"]}])
@@ -336,9 +342,18 @@ def test_resumed_task_collects_audits_and_advances_one_policy_version(
         return {"status": "admitted", "task": "task-next", "admitted": True}
 
     async def run_phase(arguments, budget, command, log_path, telemetry_path, timeout):
+        if "kernel_trl.scoring" in command:
+            phases.append("score")
+            output = Path(command[command.index("--directory") + 1])
+            (output / "training-group.json").write_text(json.dumps(group))
+            (output / "groups.json").write_text(
+                json.dumps([{"task": "task-next", "admitted": True, "rewards": group["rewards"]}])
+            )
+            return
         output = Path(command[command.index("--output-dir") + 1])
         output.mkdir(parents=True)
         if "--audit-only" in command:
+            phases.append("audit")
             summary = {
                 "group_sha256": credit.group_digest(group),
                 "policy_version": 1,
@@ -353,6 +368,7 @@ def test_resumed_task_collects_audits_and_advances_one_policy_version(
                     json.dumps({"status": "audited", "probability_audit": summary})
                 )
             return
+        phases.append("update")
         checkpoint_output = output / "checkpoint-step-2"
         checkpoint_output.mkdir()
         weights = checkpoint_output / "adapter.safetensors"
@@ -382,6 +398,12 @@ def test_resumed_task_collects_audits_and_advances_one_policy_version(
     monkeypatch.setattr(curriculum, "collect_task", collect)
     monkeypatch.setattr(curriculum, "run_torch_phase", run_phase)
     monkeypatch.setattr(curriculum, "phase_deadline", lambda *args, **kwargs: 1e20)
+    if mode == "resume_generated":
+        preserved = arguments.output_dir / "groups/preserved"
+        output = preserved / "collection/rollouts"
+        output.mkdir(parents=True)
+        (output / "generation-manifest.json").write_text("{}")
+        state.update(pending_task_id="task-next", pending_directory=str(preserved))
 
     completed = asyncio.run(
         curriculum.train_task(arguments, {"budget_usd": 40}, state, "task-next")
@@ -391,3 +413,6 @@ def test_resumed_task_collects_audits_and_advances_one_policy_version(
     assert state["policy_version"] == 2
     assert state["completed_task_ids"] == ["task-first", "task-next"]
     assert Path(state["checkpoint"]).name == "checkpoint-step-2"
+    assert phases == (["collect"] if mode != "resume_generated" else []) + (
+        ["score"] if mode != "inline" else []
+    ) + ["audit", "update"]

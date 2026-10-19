@@ -429,6 +429,7 @@ async def collect_task(
             adapter_name,
             "--task-ids",
             task_id,
+            "--defer-scoring",
         ]
         collect_timeout = min(COLLECTION_LIMIT_SECONDS, deadline - time.time())
         try:
@@ -442,6 +443,8 @@ async def collect_task(
                 collection_error=f"{type(error).__name__}: {error}",
             )
             return result
+        if (output_directory / "generation-manifest.json").exists():
+            return {"status": "generated", "task": task_id, "policy_version": version}
         result = collection_record(output_directory)
         if result is None:
             raise ValueError("Collector exited without a group record")
@@ -635,6 +638,10 @@ def initialize_run(arguments) -> dict:
         },
         "speed_reward_weight": 0.1,
         "bootstrap_dir": str(arguments.bootstrap_dir) if arguments.bootstrap_dir else None,
+        "replay_source": str(arguments.replay_source)
+        if getattr(arguments, "replay_source", None)
+        else None,
+        "final_scoring_after_inference_exit": True,
     }
     dataset_copy = arguments.output_dir / "inputs/lvl1_seed42.jsonl"
     dataset_copy.parent.mkdir(parents=True, exist_ok=True)
@@ -715,7 +722,10 @@ async def train_task(arguments, budget: dict, state: dict, task_id: str) -> bool
     pending_directory = state.get("pending_directory")
     if state.get("pending_task_id") == task_id and pending_directory:
         candidate = Path(pending_directory)
-        if candidate.exists() and (candidate / "collection/rollouts/training-group.json").exists():
+        if candidate.exists() and any(
+            (candidate / "collection/rollouts" / name).exists()
+            for name in ("training-group.json", "generation-manifest.json")
+        ):
             step_directory = candidate
             attempt = state.get("attempts", {}).get(task_id, 1)
         else:
@@ -752,9 +762,55 @@ async def train_task(arguments, budget: dict, state: dict, task_id: str) -> bool
                 "admitted" if group.get("policy_version") == version else "needs_diagnosis"
             )
         else:
-            collection = await collect_task(
-                arguments, budget, step_directory, task_id, version, checkpoint
-            )
+            output = step_directory / "collection/rollouts"
+            replay = getattr(arguments, "replay_source", None)
+            if replay and not state.get("replay_source_consumed"):
+                from kernel_trl.scoring import import_saved_group
+
+                task = next(
+                    task for task in load_tasks(arguments.dataset) if task["name"] == task_id
+                )
+                import_saved_group(
+                    replay, output, task, version, GROUP_SIZE, checkpoint, MODEL_REVISION
+                )
+                state["replay_source_consumed"] = True
+                write_json(arguments.output_dir / "state.json", state)
+                record_event(
+                    arguments.output_dir,
+                    "saved_group_imported",
+                    task_id=task_id,
+                    source=str(replay),
+                )
+            if (output / "generation-manifest.json").exists():
+                collection = {"status": "generated"}
+            else:
+                collection = await collect_task(
+                    arguments, budget, step_directory, task_id, version, checkpoint
+                )
+            if collection.get("status") == "generated":
+                record_event(arguments.output_dir, "final_scoring_started", task_id=task_id)
+                await run_torch_phase(
+                    arguments,
+                    budget,
+                    [
+                        arguments.python,
+                        "-m",
+                        "kernel_trl.scoring",
+                        "--directory",
+                        str(output),
+                        "--policy-version",
+                        str(version),
+                        "--task-id",
+                        task_id,
+                    ],
+                    step_directory / "scoring.log",
+                    step_directory / "scoring-telemetry.csv",
+                    GROUP_SIZE * 480 + 60,
+                )
+                collection = collection_record(output) or {}
+                collection["status"] = (
+                    "admitted" if collection.get("admitted") else "needs_diagnosis"
+                )
         if collection.get("status") != "admitted" or not group_path.exists():
             result = {
                 "task_id": task_id,
@@ -767,8 +823,11 @@ async def train_task(arguments, budget: dict, state: dict, task_id: str) -> bool
             state["results"].append(result)
             state["failure"] = result
             state["status"] = "needs_diagnosis"
-            state.pop("pending_task_id", None)
-            state.pop("pending_directory", None)
+            if collection.get("reason") == "infrastructure_error":
+                state["status"] = "paused"
+            else:
+                state.pop("pending_task_id", None)
+                state.pop("pending_directory", None)
             write_json(arguments.output_dir / "state.json", state)
             record_event(
                 arguments.output_dir,
@@ -927,6 +986,7 @@ def main() -> None:
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--inference-python", required=True)
     parser.add_argument("--bootstrap-dir", type=Path)
+    parser.add_argument("--replay-source", type=Path)
     parser.add_argument("--max-groups", type=int)
     parser.add_argument("--resume", action="store_true")
     arguments = parser.parse_args()

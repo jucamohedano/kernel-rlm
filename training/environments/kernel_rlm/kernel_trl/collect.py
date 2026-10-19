@@ -13,6 +13,7 @@ from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_re
 from kernel_skyrl.contract import exact_sample, has_signal
 from kernel_skyrl.preflight import load_tasks
 
+from kernel_trl.scoring import capture_generation
 from kernel_trl.turn_credit import training_rows
 
 DEFAULT_MODEL_TIMEOUT_SECONDS = 150
@@ -159,6 +160,7 @@ async def collect(arguments):
                     arguments, "model_timeout_s", DEFAULT_MODEL_TIMEOUT_SECONDS
                 )
             },
+            defer_scoring=getattr(arguments, "defer_scoring", False),
         )
         tasks = {task["name"]: task for task in load_tasks(arguments.dataset)}
         attempts = []
@@ -181,7 +183,11 @@ async def collect(arguments):
                             tracker.log(
                                 {
                                     "rollout/completed": completed_episodes,
-                                    "rollout/reward": episode["reward"],
+                                    **(
+                                        {"rollout/reward": episode["reward"]}
+                                        if episode["reward"] is not None
+                                        else {}
+                                    ),
                                     "rollout/root_turns": len(episode["samples"]),
                                     "verifier/infrastructure_error": int(
                                         episode.get("verification", {}).get("verification_status")
@@ -202,6 +208,17 @@ async def collect(arguments):
                         if not job.done():
                             job.cancel()
                     await asyncio.gather(*jobs, return_exceptions=True)
+                if getattr(arguments, "defer_scoring", False):
+                    capture_generation(
+                        directory, task_id, arguments.policy_version, arguments.rollouts
+                    )
+                    print(
+                        json.dumps(
+                            {"status": "generated", "task": task_id, "trajectories": len(episodes)}
+                        ),
+                        flush=True,
+                    )
+                    return
                 rewards = [episode["reward"] for episode in episodes]
                 infrastructure_errors = [
                     {"trajectory": index, "verification": episode["verification"]}
@@ -274,12 +291,15 @@ def main():
     parser.add_argument("--policy-version", type=int, default=0)
     parser.add_argument("--adapter-name", default="kernel-base")
     parser.add_argument("--report-to", choices=("trackio", "none"), default="trackio")
+    parser.add_argument("--defer-scoring", action="store_true")
     parser.add_argument(
         "--task-ids",
         nargs="+",
         default=["lvl1-seed42-0038", "lvl1-seed42-0011", "lvl1-seed42-0044"],
     )
     arguments = parser.parse_args()
+    if arguments.defer_scoring and len(arguments.task_ids) != 1:
+        raise ValueError("Deferred scoring requires one complete task group")
     if arguments.policy_version < 0 or (
         arguments.policy_version > 0 and arguments.adapter_name == "kernel-base"
     ):

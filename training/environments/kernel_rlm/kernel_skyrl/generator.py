@@ -53,6 +53,7 @@ class KernelGenerator:
         episode_timeout_s: float = 720,
         scorer=score_submission,
         program_command: list[str] | None = None,
+        defer_scoring: bool = False,
     ):
         if not 1 <= max_sample_batches <= 3 or episode_timeout_s <= 0:
             raise ValueError("Use a positive timeout and at most three sampled groups")
@@ -73,6 +74,7 @@ class KernelGenerator:
         self.max_sample_batches = max_sample_batches
         self.episode_timeout_s = episode_timeout_s
         self.scorer = scorer
+        self.defer_scoring = defer_scoring
         self.program_command = program_command or [
             sys.executable,
             "-m",
@@ -119,6 +121,8 @@ class KernelGenerator:
             if process.returncode or bridge.failures:
                 raise RuntimeError(f"REPL transport/program failed; see {directory}")
             record = json.loads((directory / "submission.json").read_text())
+            if self.defer_scoring:
+                return {"samples": bridge.samples, "reward": None, "record": record}
             reward, verification = await self.scorer(task, record)
             (directory / "score.json").write_text(
                 json.dumps(

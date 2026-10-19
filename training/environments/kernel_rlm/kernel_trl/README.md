@@ -16,6 +16,22 @@ required before claiming the OOM issue is solved. Historical gates follow.
 
 ## Live metrics and infrastructure failures
 
+The curriculum now uses automatic phases: generate the complete group, stop
+vLLM, score final submissions sequentially, audit exact probabilities, update,
+and checkpoint. Intermediate `cuda_feedback` remains available during generation.
+The two GPUs alternate roles; this does not promise simultaneous generation and
+backpropagation or constant optimizer utilization.
+
+Generation manifests preserve exact root calls, task context and submissions.
+Final scoring persists each result, reuses completed checks and permits at most
+two attempts for an infrastructure failure. Resuming a generated group does not
+call the model again. A rejected saved group can seed a new immutable run through
+`--replay-source`; model revision, adapter checkpoint, policy version, task context
+and sampled-file hashes must match. Original runs and original scores are retained.
+Child responses remain outside the loss. Reward definitions and task shapes do
+not change. Persistent infrastructure errors or a failed probability audit still
+stop optimization safely instead of manufacturing a usable batch.
+
 Install the pinned `tracking` extra. Live collection writes real per-trajectory
 rewards and progress to local Trackio. Optimizer updates use TRL's native
 `report_to="trackio"`; audit and checkpoint-readback phases do not create fake

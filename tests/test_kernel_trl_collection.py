@@ -123,6 +123,32 @@ def test_eight_rollouts_use_four_slots_and_one_policy(collector, tmp_path):
     assert observed["inference_http_timeout"] == 630
 
 
+def test_deferred_generation_saves_all_trajectories_without_final_scoring(
+    collector, tmp_path, monkeypatch
+):
+    module, observed = collector
+
+    class Generator:
+        def __init__(self, *args, **kwargs):
+            assert kwargs["defer_scoring"] is True
+
+        async def run_episode(self, task, directory, version):
+            directory.mkdir(parents=True)
+            (directory / "task.json").write_text(json.dumps(task))
+            (directory / "submission.json").write_text(json.dumps({"submission": "source"}))
+            (directory / "calls.jsonl").write_text("saved exact calls")
+            return {"reward": None, "samples": [object()]}
+
+    monkeypatch.setattr(module, "KernelGenerator", Generator)
+    args = arguments(tmp_path)
+    args.defer_scoring = True
+    asyncio.run(module.collect(args))
+    manifest = json.loads((args.output_dir / "generation-manifest.json").read_text())
+    assert len(manifest["episodes"]) == 8
+    assert not list(args.output_dir.glob("*/score.json"))
+    assert not (args.output_dir / "training-group.json").exists()
+
+
 def test_inference_waits_for_verifier_and_releases_its_slot(collector, tmp_path, monkeypatch):
     _module, observed = collector
     from kernel_rlm import verifier_slot
