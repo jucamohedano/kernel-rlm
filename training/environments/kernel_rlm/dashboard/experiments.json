@@ -17,6 +17,26 @@
   },
   "experiments": [
     {
+      "id": "trl-l1-grpo-baseline",
+      "follows_experiments": ["trl-rlm-l40s"],
+      "title": "L1 GRPO baseline · eight rollouts · $40",
+      "status": "open",
+      "intent": "Train the pinned Laguna policy through TRL across all 50 materialized L1 tasks, retaining exact root-turn credit and inspecting weak reward groups within a $40 total compute ceiling.",
+      "change": "Checkpoint-correct rotary settings; constructor-aware CUDA verification; eight trajectories at initial concurrency four; 1,024-token recovery; phase-shared inference and training on the existing two L40S GPUs.",
+      "conclusion": "Readiness gates pass: the corrected full-token probability audit meets unchanged limits, and a real stateful CUDA component check passes with its negative control rejected. A fresh eight-rollout admission group is running; no new training update or quality improvement is claimed.",
+      "decision": "Inspect the admission group's real correctness and speed rewards before updates. Preserve coverage of all 50 tasks, checkpoint continuity and separate before/after evaluation without exceeding $40 from the original start.",
+      "evidence_file": "notes/results/20261019-trl-rotary-fix.json",
+      "limitations": ["The admission collector is not a completed 50-task training run.", "Actual trained-adapter tensor coverage and a resumed update still need verification.", "Dollar costs use the displayed rate, not an invoice. The VM continues billing when GPU processes stop.", "The registry UI entry was added during admission startup; it is not claimed to be part of the earlier source snapshot."],
+      "runs": ["20261018T235332Z-4b40f63d"],
+      "provenance": {
+        "dataset_ids": ["ops6k-l1-seed42"],
+        "code_paths": ["rlm/training/environments/kernel_rlm/kernel_skyrl/laguna_policy.py", "rlm/training/environments/kernel_rlm/kernel_trl/collect.py", "rlm/training/environments/kernel_rlm/kernel_trl/rlm_update.py", "rlm/training/environments/kernel_rlm/kernel_trl/spending.py", "rlm/training/environments/kernel_rlm/kernel_rlm/candidate.py", "rlm/training/environments/kernel_rlm/kernel_rlm/verifier.py"],
+        "notes": ["notes/results/20261019-l1-budget.json", "rlm/training/environments/kernel_rlm/kernel_trl/ROTARY_COMPATIBILITY.md", "rlm/training/environments/kernel_rlm/kernel_rlm/STATEFUL_TASKS.md"],
+        "documented_change_commits": ["0d19bc5", "20b430e", "9108299"],
+        "historical_attestation": "The user authorized this goal before admission. Committed model/environment source and dataset hashes were captured before generation; the UI registration was added during startup, not backfilled as a launch-snapshot attestation. Admission source commit: 9108299."
+      }
+    },
+    {
       "id": "trl-rlm-l40s",
       "follows_experiments": ["checkpoint-resume"],
       "title": "Train exact RLM turns with TRL on two L40S",
