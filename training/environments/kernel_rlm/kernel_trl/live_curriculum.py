@@ -22,6 +22,7 @@ from kernel_trl.probability_audit import require_probability_agreement
 from kernel_trl.spending import phase_deadline, spending_snapshot
 
 MODEL_REVISION = "a397bde04501591d0ac3d74a5d9d0a4ec298ffb8"
+DEFAULT_CUDA_ARCH_LIST = "8.9"
 GROUP_SIZE = 8
 WORLD_SIZE = 2
 INFLIGHT = 4
@@ -83,6 +84,18 @@ def python_path(source_root: Path, existing: str | None = None) -> str:
     if existing:
         paths.append(existing)
     return os.pathsep.join(paths)
+
+
+def training_environment(
+    python: str,
+    source_root: Path,
+    cuda_arch_list: str,
+    environment: dict[str, str] | None = None,
+) -> dict[str, str]:
+    result = runtime_environment(python, environment)
+    result["PYTHONPATH"] = python_path(source_root, result.get("PYTHONPATH"))
+    result["TORCH_CUDA_ARCH_LIST"] = cuda_arch_list
+    return result
 
 
 def curriculum_order(dataset: Path, first_task: str | None = None) -> list[str]:
@@ -579,6 +592,7 @@ def initialize_run(arguments) -> dict:
         "dataset_path": str(arguments.dataset),
         "source_sha256": source_hashes(arguments.source_root),
         "source_commit": arguments.source_commit,
+        "cuda_arch_list": arguments.cuda_arch_list,
         "rollouts_per_task": GROUP_SIZE,
         "initial_concurrency": INFLIGHT,
         "context_tokens": 12288,
@@ -642,6 +656,8 @@ def load_state(arguments) -> dict:
         raise ValueError("Dataset bytes changed since this run started")
     if manifest.get("source_commit") != arguments.source_commit:
         raise ValueError("Source commit changed since this run started")
+    if manifest.get("cuda_arch_list") != arguments.cuda_arch_list:
+        raise ValueError("CUDA architecture target changed since this run started")
     checkpoint = state.get("checkpoint")
     version = state.get("policy_version", 0)
     if version:
@@ -830,8 +846,13 @@ async def train_task(arguments, budget: dict, state: dict, task_id: str) -> bool
 
 async def run(arguments) -> dict:
     arguments.output_dir.mkdir(parents=True, exist_ok=True)
-    os.environ["PATH"] = runtime_environment(arguments.python)["PATH"]
-    os.environ["PYTHONPATH"] = python_path(arguments.source_root, os.environ.get("PYTHONPATH"))
+    os.environ.update(
+        training_environment(
+            arguments.python,
+            arguments.source_root,
+            arguments.cuda_arch_list,
+        )
+    )
     lock_path = arguments.output_dir / "driver.lock"
     lock_stream = lock_path.open("a")
     try:
@@ -891,6 +912,7 @@ def main() -> None:
     parser.add_argument("--budget-file", type=Path, required=True)
     parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--cuda-arch-list", default=DEFAULT_CUDA_ARCH_LIST)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--inference-python", required=True)

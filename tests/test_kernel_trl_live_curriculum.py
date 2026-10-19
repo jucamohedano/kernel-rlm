@@ -114,6 +114,24 @@ def test_python_path_and_source_hashes_include_rlm_core(curriculum, tmp_path):
     assert hashes["training/src/rlm_train/__init__.py"]
 
 
+def test_training_environment_sets_arch_before_gpu_hidden_compile(curriculum, tmp_path):
+    python = tmp_path / "training-venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    source_root = tmp_path / "repo/training/environments/kernel_rlm"
+    (source_root / "kernel_trl").mkdir(parents=True)
+    (source_root.parent.parent.parent / "rlm").mkdir(parents=True)
+    (source_root.parent.parent / "src/rlm_train").mkdir(parents=True)
+
+    environment = curriculum.training_environment(
+        str(python), source_root, "8.9", {"PATH": "/usr/bin"}
+    )
+
+    assert environment["TORCH_CUDA_ARCH_LIST"] == "8.9"
+    assert str(python.parent) in environment["PATH"]
+    assert str(source_root.parent.parent.parent) in environment["PYTHONPATH"]
+
+
 def test_collection_record_requires_one_group(curriculum, tmp_path):
     output = tmp_path / "rollouts"
     output.mkdir()

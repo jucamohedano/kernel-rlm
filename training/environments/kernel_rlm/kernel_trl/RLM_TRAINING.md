@@ -183,7 +183,9 @@ The reply cap stays at 4,096 tokens and the context cap stays at 12,288 tokens.
 The runtime must expose `ninja` on `PATH` for both REPL compilation and vLLM
 LoRA kernels. The driver adds the training virtual environment's `bin` directory
 to worker processes and the inference virtual environment's `bin` directory to
-vLLM.
+vLLM. Compile-only feedback hides CUDA devices, so it cannot auto-detect the
+compiler target. The L40S driver sets `TORCH_CUDA_ARCH_LIST=8.9` (`sm_89`); set
+the matching architecture when you move this workflow to different hardware.
 The VM's cached Python 3.12 headers are also required by Triton's generated
 launcher; the driver adds their normal and multiarch include directories to
 `CPATH`. This uses the cached header package, not a system package install.
