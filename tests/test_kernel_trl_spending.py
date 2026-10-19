@@ -49,3 +49,16 @@ def test_invalid_phase_lengths_fail_closed(spending, seconds):
 def test_clock_before_original_start_is_rejected(spending):
     with pytest.raises(ValueError):
         spending.spending_snapshot(configuration(), 999)
+
+
+def test_phase_must_fit_before_stop_time_with_cleanup(spending):
+    values = {**configuration(), "stop_at_unix_seconds": 2000}
+    assert spending.phase_deadline(values, 1000, 900) == 1900
+    with pytest.raises(ValueError, match="stop deadline"):
+        spending.phase_deadline(values, 1100, 900)
+
+
+@pytest.mark.parametrize("deadline", [math.nan, math.inf])
+def test_invalid_stop_time_is_rejected(spending, deadline):
+    with pytest.raises(ValueError, match="finite"):
+        spending.phase_deadline({**configuration(), "stop_at_unix_seconds": deadline}, 1000, 900)

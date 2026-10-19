@@ -199,3 +199,8 @@ step-1 run and `--max-groups 1`. Remove `--max-groups` for the remaining L1
 curriculum. Run the same command with `--resume` after a clean paused boundary.
 Keep `--budget-file` pointed to the original $40 authorization record; each
 GPU phase checks the remaining allowance before it starts.
+
+An authorization record may also set `stop_at_unix_seconds`. A phase starts only
+when its full requested duration plus 30 seconds for cleanup fits before that
+deadline. This preserves the original spending baseline and avoids starting a
+new phase near the user's working-time cutoff.

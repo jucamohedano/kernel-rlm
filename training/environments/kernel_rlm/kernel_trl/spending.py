@@ -35,4 +35,11 @@ def phase_deadline(
     needed = requested_seconds * snapshot["assumed_pair_rate_usd_per_hour"] / 3600
     if needed > available:
         raise ValueError("Insufficient original spending budget for this phase and cleanup reserve")
+    stop_at = configuration.get("stop_at_unix_seconds")
+    if stop_at is not None:
+        stop_at = float(stop_at)
+        if not math.isfinite(stop_at):
+            raise ValueError("Stop deadline must be finite")
+        if now + requested_seconds + 30 > stop_at:
+            raise ValueError("Insufficient time before the authorized stop deadline")
     return now + requested_seconds
