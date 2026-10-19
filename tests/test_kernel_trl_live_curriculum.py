@@ -71,13 +71,22 @@ def test_python_path_and_source_hashes_include_rlm_core(curriculum, tmp_path):
     core = tmp_path / "repo/rlm"
     core.mkdir(parents=True)
     (core / "__init__.py").write_text("core")
+    training_package = tmp_path / "repo/training/src/rlm_train"
+    training_package.mkdir(parents=True)
+    (training_package / "__init__.py").write_text("worker")
 
     configured = curriculum.python_path(source_root, "/existing/path")
     hashes = curriculum.source_hashes(source_root)
 
-    assert configured.split(":") == [str(source_root), str(tmp_path / "repo"), "/existing/path"]
+    assert configured.split(":") == [
+        str(source_root),
+        str(tmp_path / "repo/training/src"),
+        str(tmp_path / "repo"),
+        "/existing/path",
+    ]
     assert hashes["kernel_trl/__init__.py"]
     assert hashes["rlm/__init__.py"]
+    assert hashes["training/src/rlm_train/__init__.py"]
 
 
 def test_collection_record_requires_one_group(curriculum, tmp_path):

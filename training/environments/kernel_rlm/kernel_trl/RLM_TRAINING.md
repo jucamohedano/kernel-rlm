@@ -175,6 +175,8 @@ the VM has no leftover GPU worker processes.
 
 The runtime must expose `ninja` on `PATH` while vLLM loads a trained LoRA. The
 driver adds the dedicated inference virtual environment's `bin` directory.
+The training Python path includes the environment source, the repository's
+`training/src` package tree (`rlm_train`), and the RLM repository root.
 This fixes the first adapter-reload startup failure without installing a new
 package or enabling vLLM's runtime-update API.
 

@@ -49,11 +49,18 @@ def source_hashes(source_root: Path) -> dict[str, str]:
             hashes[str(path.relative_to(source_root))] = hashlib.sha256(
                 path.read_bytes()
             ).hexdigest()
-    core_root = source_root.parents[2] / "rlm"
+    repository_root = source_root.parents[2]
+    core_root = repository_root / "rlm"
     if not core_root.is_dir():
         raise ValueError("The source snapshot must include the RLM core package")
     for path in sorted(core_root.rglob("*.py")):
         relative = Path("rlm") / path.relative_to(core_root)
+        hashes[str(relative)] = hashlib.sha256(path.read_bytes()).hexdigest()
+    training_package = repository_root / "training/src/rlm_train"
+    if not training_package.is_dir():
+        raise ValueError("The source snapshot must include training/src/rlm_train")
+    for path in sorted(training_package.rglob("*.py")):
+        relative = Path("training/src/rlm_train") / path.relative_to(training_package)
         hashes[str(relative)] = hashlib.sha256(path.read_bytes()).hexdigest()
     return hashes
 
@@ -62,7 +69,13 @@ def python_path(source_root: Path, existing: str | None = None) -> str:
     repository_root = source_root.parents[2]
     if not (repository_root / "rlm").is_dir():
         raise ValueError("The source snapshot must include the RLM core package")
-    paths = [str(source_root), str(repository_root)]
+    if not (repository_root / "training/src/rlm_train").is_dir():
+        raise ValueError("The source snapshot must include training/src/rlm_train")
+    paths = [
+        str(source_root),
+        str(repository_root / "training/src"),
+        str(repository_root),
+    ]
     if existing:
         paths.append(existing)
     return os.pathsep.join(paths)
