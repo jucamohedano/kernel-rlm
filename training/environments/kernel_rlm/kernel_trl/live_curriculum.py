@@ -563,25 +563,30 @@ async def collect_task(
     task_id: str,
     version: int,
     checkpoint: Path | None,
+    inference=None,
 ) -> dict:
     deadline = phase_deadline(budget, time.time(), 2400)
     telemetry, telemetry_stream = await start_telemetry(step_directory / "inference-telemetry.csv")
     server = None
     result = {}
     try:
-        environment = inference_environment(arguments.inference_python)
-        server = await asyncio.create_subprocess_exec(
-            *server_command(arguments, version, checkpoint),
-            stdout=(step_directory / "inference.log").open("wb"),
-            stderr=asyncio.subprocess.STDOUT,
-            start_new_session=True,
-            env=environment,
-        )
+        if inference is not None:
+            running_server = await inference.ensure(version, checkpoint, step_directory)
+        else:
+            environment = inference_environment(arguments.inference_python)
+            server = await asyncio.create_subprocess_exec(
+                *server_command(arguments, version, checkpoint),
+                stdout=(step_directory / "inference.log").open("wb"),
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
+                env=environment,
+            )
+            running_server = server
         timeout = min(600, deadline - time.time())
         if timeout <= 0:
             raise TimeoutError("No budget remains for vLLM startup")
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-            await wait_for_server(server, session, time.time() + timeout)
+            await wait_for_server(running_server, session, time.time() + timeout)
             async with session.get("http://127.0.0.1:8006/v1/models") as response:
                 response.raise_for_status()
                 models = await response.json()
@@ -632,6 +637,8 @@ async def collect_task(
             "--context-tokens",
             str(getattr(arguments, "context_tokens", LEGACY_CONTEXT_TOKENS)),
         ]
+        if getattr(arguments, "precompile_finals", False):
+            command.append("--precompile-finals")
         collect_timeout = min(COLLECTION_LIMIT_SECONDS, deadline - time.time())
         try:
             await execute(command, step_directory / "collect.log", collect_timeout)
@@ -850,7 +857,9 @@ def initialize_run(arguments) -> dict:
         "replay_source": str(arguments.replay_source)
         if getattr(arguments, "replay_source", None)
         else None,
-        "final_scoring_after_inference_exit": True,
+        "final_scoring_after_inference_exit": not getattr(arguments, "reuse_inference", False),
+        "reuse_inference": getattr(arguments, "reuse_inference", False),
+        "precompile_finals": getattr(arguments, "precompile_finals", False),
         "weak_group_handling": "defer"
         if getattr(arguments, "continue_weak_groups", False)
         else "stop",
@@ -893,6 +902,9 @@ def load_state(arguments) -> dict:
         raise ValueError("Weak-group scheduling changed since this run started")
     if manifest.get("cuda_arch_list") != arguments.cuda_arch_list:
         raise ValueError("CUDA architecture target changed since this run started")
+    for option in ("reuse_inference", "precompile_finals"):
+        if manifest.get(option, False) != getattr(arguments, option, False):
+            raise ValueError(f"Resume cannot change immutable scheduling option {option}")
     checkpoint = state.get("checkpoint")
     version = state.get("policy_version", 0)
     if version:
@@ -942,7 +954,7 @@ def write_report(arguments, state: dict, budget: dict) -> None:
     write_json(arguments.output_dir / "report.json", report)
 
 
-async def train_task(arguments, budget: dict, state: dict, task_id: str) -> bool:
+async def train_task(arguments, budget: dict, state: dict, task_id: str, inference=None) -> bool:
     version = state["policy_version"]
     checkpoint = Path(state["checkpoint"]) if state.get("checkpoint") else None
     pending_directory = state.get("pending_directory")
@@ -1011,9 +1023,17 @@ async def train_task(arguments, budget: dict, state: dict, task_id: str) -> bool
                 collection = {"status": "generated"}
             else:
                 collection = await collect_task(
-                    arguments, budget, step_directory, task_id, version, checkpoint
+                    arguments,
+                    budget,
+                    step_directory,
+                    task_id,
+                    version,
+                    checkpoint,
+                    **({"inference": inference} if inference is not None else {}),
                 )
             if collection.get("status") == "generated":
+                if inference is not None:
+                    await inference.sleep()
                 record_event(arguments.output_dir, "final_scoring_started", task_id=task_id)
                 await run_torch_phase(
                     arguments,
@@ -1066,6 +1086,8 @@ async def train_task(arguments, budget: dict, state: dict, task_id: str) -> bool
         group = read_json(group_path)
         if group["policy_version"] != version or group.get("task") != task_id:
             raise ValueError("Collected group does not match the active policy and task")
+        if inference is not None:
+            await inference.close()
         audit_dir = None
         for candidate in sorted(step_directory.glob("audit*")):
             if all((candidate / f"report-rank-{rank}.json").exists() for rank in range(WORLD_SIZE)):
@@ -1156,6 +1178,7 @@ async def run(arguments) -> dict:
         raise RuntimeError("Another curriculum driver holds the run lock") from error
     state = None
     budget = None
+    inference = None
     try:
         if arguments.resume:
             state = load_state(arguments)
@@ -1166,6 +1189,10 @@ async def run(arguments) -> dict:
                 )
             state = initialize_run(arguments)
         budget = read_json(arguments.budget_file)
+        if getattr(arguments, "reuse_inference", False):
+            from kernel_trl.inference_lifecycle import WarmInference
+
+            inference = WarmInference(arguments, budget)
         state["status"] = "running"
         write_json(arguments.output_dir / "state.json", state)
         write_report(arguments, state, budget)
@@ -1185,7 +1212,13 @@ async def run(arguments) -> dict:
             max_updates = getattr(arguments, "max_updates", None)
             if max_updates is not None and state["policy_version"] - initial_version >= max_updates:
                 break
-            trained = await train_task(arguments, budget, state, task_id)
+            trained = await train_task(
+                arguments,
+                budget,
+                state,
+                task_id,
+                **({"inference": inference} if inference is not None else {}),
+            )
             already_run += 1
             if not trained:
                 if getattr(arguments, "continue_weak_groups", False) and defer_uninformative_group(
@@ -1218,6 +1251,9 @@ async def run(arguments) -> dict:
             if budget is not None:
                 write_report(arguments, state, budget)
         raise
+    finally:
+        if inference is not None:
+            await inference.close()
 
 
 def main() -> None:
@@ -1240,6 +1276,8 @@ def main() -> None:
     parser.add_argument("--max-groups", type=int)
     parser.add_argument("--max-updates", type=int)
     parser.add_argument("--continue-weak-groups", action="store_true")
+    parser.add_argument("--reuse-inference", action="store_true")
+    parser.add_argument("--precompile-finals", action="store_true")
     parser.add_argument("--resume", action="store_true")
     arguments = parser.parse_args()
     validate_context_tokens(arguments.context_tokens)

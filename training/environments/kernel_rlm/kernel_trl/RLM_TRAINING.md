@@ -54,17 +54,23 @@ inference; CUDA correctness checks and uncontended timing require GPU access.
 
 The next optimizations to validate, in order, are:
 
-1. Reuse the same loaded inference engine after a weak group, when the policy did
-   not change. Sleep it for final verification, then wake it for the next task.
-   Today the driver destroys and reloads it even after a no-update group. This
-   is a proposed lifecycle change, not implemented or GPU-validated here.
-2. Prebuild final submissions on CPU while sibling rollouts continue. Use the
-   existing source-isolated build cache and bounded CPU concurrency. Keep final
-   correctness and timing independent; never reuse a child-reported score.
+1. `--reuse-inference` retains the loaded engine after a weak group when policy
+   and checkpoint metadata are unchanged. It sleeps for final verification,
+   wakes for the next task, and closes before audit/learner work or driver exit.
+   Control failure closes the engine rather than permitting unsafe GPU overlap.
+2. `--precompile-finals` starts bounded CPU-only preparation as each rollout
+   submits, while siblings continue. The worker hides CUDA and shares the existing
+   source-isolated build cache. Its reports are not grades. Final correctness and
+   timing still run independently, including after failed CPU preparation.
 3. Only after measuring residual GPU memory, test keeping sleeping inference
    workers across learner phases. Sleep can release weights/KV cache, but CUDA
    contexts and communication buffers may remain. Learner allocation retries
    make simultaneous residency unsafe to assume.
+
+Both flags are opt-in and immutable on resume. Per-episode `precompile.json` and
+`precompile-error.json`, plus `inference-lifecycle.jsonl`, record their actual work.
+The fixed-policy ABBA scheduling diagnostic measures component savings; its
+short synthetic requests do not measure complete GRPO throughput or quality.
 
 Keep inference and optimizer updates phase-separated until those memory checks
 pass. The last bounded block spent about 955 seconds in native rank-0 training

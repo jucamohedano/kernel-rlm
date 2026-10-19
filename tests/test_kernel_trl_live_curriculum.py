@@ -527,8 +527,9 @@ def test_bootstrap_requires_a_real_completed_update(curriculum, monkeypatch, tmp
 
 
 @pytest.mark.parametrize("mode", ["inline", "deferred", "resume_generated"])
+@pytest.mark.parametrize("reuse", [False, True])
 def test_resumed_task_collects_audits_and_advances_one_policy_version(
-    curriculum, monkeypatch, tmp_path, mode
+    curriculum, monkeypatch, tmp_path, mode, reuse
 ):
     monkeypatch.syspath_prepend(str(ROOT))
     credit = importlib.import_module("kernel_trl.probability_audit")
@@ -600,7 +601,7 @@ def test_resumed_task_collects_audits_and_advances_one_policy_version(
     arguments.output_dir.mkdir()
     phases = []
 
-    async def collect(*args):
+    async def collect(*args, **kwargs):
         phases.append("collect")
         step_directory = args[2]
         output = step_directory / "collection/rollouts"
@@ -678,8 +679,21 @@ def test_resumed_task_collects_audits_and_advances_one_policy_version(
         (output / "generation-manifest.json").write_text("{}")
         state.update(pending_task_id="task-next", pending_directory=str(preserved))
 
+    async def sleep():
+        phases.append("sleep")
+
+    async def close():
+        phases.append("close")
+
+    inference = SimpleNamespace(sleep=sleep, close=close)
     completed = asyncio.run(
-        curriculum.train_task(arguments, {"budget_usd": 40}, state, "task-next")
+        curriculum.train_task(
+            arguments,
+            {"budget_usd": 40},
+            state,
+            "task-next",
+            **({"inference": inference} if reuse else {}),
+        )
     )
 
     assert completed is True
@@ -687,5 +701,5 @@ def test_resumed_task_collects_audits_and_advances_one_policy_version(
     assert state["completed_task_ids"] == ["task-first", "task-next"]
     assert Path(state["checkpoint"]).name == "checkpoint-step-2"
     assert phases == (["collect"] if mode != "resume_generated" else []) + (
-        ["score"] if mode != "inline" else []
-    ) + ["audit", "update"]
+        (["sleep"] if reuse else []) + ["score"] if mode != "inline" else []
+    ) + (["close"] if reuse else []) + ["audit", "update"]

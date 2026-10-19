@@ -61,6 +61,9 @@ def _run_verifier_process(
         raise subprocess.TimeoutExpired(
             command, timeout_s, output=stdout, stderr=stderr
         ) from timeout_error
+    except BaseException:
+        _terminate_process_group(process)
+        raise
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
@@ -335,6 +338,7 @@ def verify_cuda(
     benchmark: bool = True,
     collect_phase_events: bool = False,
     allow_feedback_overlap: bool = False,
+    compile_only: bool = False,
 ) -> dict[str, Any]:
     """Preflight interfaces, drain during CPU compilation, then independently verify."""
     if timeout_s <= 0:
@@ -363,7 +367,7 @@ def verify_cuda(
     memory_limit = None
     if shared_gpu and allow_feedback_overlap and not benchmark:
         memory_limit, _reason = overlap_budget(reference_code, submission_code)
-    drain_early = shared_gpu and not benchmark and memory_limit is None
+    drain_early = shared_gpu and not benchmark and memory_limit is None and not compile_only
     try:
         with inference_drain(max(0, deadline - time.monotonic())) if drain_early else nullcontext():
             result = verify_cuda_execution(
@@ -379,6 +383,7 @@ def verify_cuda(
                 collect_phase_events=collect_phase_events,
                 allow_feedback_overlap=allow_feedback_overlap,
                 drain_intent_held=drain_early,
+                compile_only=compile_only,
             )
     except TimeoutError as error:
         result = {
@@ -453,6 +458,7 @@ def verify_cuda_execution(
     collect_phase_events: bool,
     allow_feedback_overlap: bool,
     drain_intent_held: bool,
+    compile_only: bool = False,
 ) -> dict[str, Any]:
     """Compile, run, and benchmark a CUDA submission in a subprocess."""
     python = python or os.environ.get("KERNEL_VERIFY_PYTHON") or sys.executable
@@ -572,6 +578,10 @@ def verify_cuda_execution(
             compile_result["timings"] = timings
             compile_phase = _read_phase(compile_status_path)
             compile_result["verifier_phase"] = compile_phase.get("phase")
+            return compile_result
+        if compile_only:
+            compile_result["verification_status"] = "compile_completed"
+            compile_result.update(correct=None, extension_used=None, timings=timings)
             return compile_result
         timings["total_compile_seconds"] = time.monotonic() - verification_started
         remaining_total = timeout_s - (time.monotonic() - verification_started)

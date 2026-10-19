@@ -162,6 +162,13 @@ async def collect(arguments):
         await runner.setup()
         await web.TCPSite(runner, "127.0.0.1", 8016).start()
         tracker = None
+        precompiler = None
+        if getattr(arguments, "precompile_finals", False):
+            from kernel_trl.precompile import FinalPrecompiler
+
+            if not getattr(arguments, "defer_scoring", False):
+                raise ValueError("CPU precompilation requires deferred independent final scoring")
+            precompiler = FinalPrecompiler()
         if getattr(arguments, "report_to", "none") == "trackio":
             import trackio
 
@@ -205,6 +212,12 @@ async def collect(arguments):
                             directory / f"group-{group_number}-trajectory-{index}",
                             arguments.policy_version,
                         )
+                        if precompiler is not None:
+                            precompiler.submit(
+                                episode_task,
+                                episode.get("record", {}),
+                                directory / f"group-{group_number}-trajectory-{index}",
+                            )
                         completed_episodes += 1
                         if tracker is not None:
                             tracker.log(
@@ -260,6 +273,8 @@ async def collect(arguments):
                         "Episode infrastructure failed; independent siblings preserved"
                     )
                 if getattr(arguments, "defer_scoring", False):
+                    if precompiler is not None:
+                        await precompiler.finish()
                     capture_generation(
                         directory,
                         task_id,
@@ -327,6 +342,8 @@ async def collect(arguments):
                 "All bounded groups had identical terminal rewards; no update allowed"
             )
         finally:
+            if precompiler is not None:
+                await precompiler.close()
             if tracker is not None:
                 tracker.finish()
             await runner.cleanup()
@@ -340,6 +357,7 @@ def main():
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--rollouts", type=int, choices=(4, 8), default=4)
+    parser.add_argument("--precompile-finals", action="store_true")
     parser.add_argument("--model-timeout-s", type=float, default=DEFAULT_MODEL_TIMEOUT_SECONDS)
     parser.add_argument("--inference-http-timeout-s", type=float)
     parser.add_argument("--episode-timeout-s", type=float, default=700)
