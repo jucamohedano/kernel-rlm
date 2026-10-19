@@ -75,6 +75,20 @@ def test_inference_environment_exposes_venv_binaries(curriculum, tmp_path):
     ]
 
 
+def test_runtime_environment_exposes_repl_compiler_tools(curriculum, tmp_path):
+    python = tmp_path / "training-venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    python.chmod(0o755)
+    ninja = python.parent / "ninja"
+    ninja.touch()
+    ninja.chmod(0o755)
+
+    result = curriculum.runtime_environment(str(python), {"PATH": "/usr/bin"})
+
+    assert shutil.which("ninja", path=result["PATH"]) == str(ninja)
+
+
 def test_python_path_and_source_hashes_include_rlm_core(curriculum, tmp_path):
     source_root = tmp_path / "repo/training/environments/kernel_rlm"
     (source_root / "kernel_trl").mkdir(parents=True)

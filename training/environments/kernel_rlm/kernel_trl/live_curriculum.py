@@ -28,6 +28,7 @@ INFLIGHT = 4
 COLLECTION_LIMIT_SECONDS = 2400
 PHASE_LIMIT_SECONDS = 600
 MODEL_TIMEOUT_SECONDS = 600
+INFERENCE_HTTP_TIMEOUT_SECONDS = 630
 EPISODE_TIMEOUT_SECONDS = 1500
 
 
@@ -148,15 +149,21 @@ def server_command(arguments, policy_version: int, checkpoint: Path | None) -> l
     return command
 
 
-def inference_environment(
-    inference_python: str, environment: dict[str, str] | None = None
-) -> dict[str, str]:
+def runtime_environment(python: str, environment: dict[str, str] | None = None) -> dict[str, str]:
     result = os.environ.copy() if environment is None else environment.copy()
-    python_executable = Path(inference_python).absolute()
+    python_executable = Path(python).absolute()
     executable_directory = str(python_executable.parent)
     result["PATH"] = os.pathsep.join([executable_directory, result.get("PATH", "")]).rstrip(
         os.pathsep
     )
+    return result
+
+
+def inference_environment(
+    inference_python: str, environment: dict[str, str] | None = None
+) -> dict[str, str]:
+    result = runtime_environment(inference_python, environment)
+    python_executable = Path(inference_python).absolute()
     runtime_root = python_executable.parents[2]
     header_root = runtime_root / "python-headers/usr/include"
     include_directory = header_root / "python3.12"
@@ -388,6 +395,8 @@ async def collect_task(
             str(GROUP_SIZE),
             "--model-timeout-s",
             str(MODEL_TIMEOUT_SECONDS),
+            "--inference-http-timeout-s",
+            str(INFERENCE_HTTP_TIMEOUT_SECONDS),
             "--episode-timeout-s",
             str(EPISODE_TIMEOUT_SECONDS),
             "--group-timeout-s",
@@ -577,6 +586,7 @@ def initialize_run(arguments) -> dict:
         "recovery_reply_tokens": 1024,
         "max_turns": 8,
         "model_request_timeout_seconds": MODEL_TIMEOUT_SECONDS,
+        "inference_http_timeout_seconds": INFERENCE_HTTP_TIMEOUT_SECONDS,
         "episode_timeout_seconds": EPISODE_TIMEOUT_SECONDS,
         "group_collection_timeout_seconds": COLLECTION_LIMIT_SECONDS,
         "max_child_calls": 2,
@@ -820,6 +830,7 @@ async def train_task(arguments, budget: dict, state: dict, task_id: str) -> bool
 
 async def run(arguments) -> dict:
     arguments.output_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["PATH"] = runtime_environment(arguments.python)["PATH"]
     os.environ["PYTHONPATH"] = python_path(arguments.source_root, os.environ.get("PYTHONPATH"))
     lock_path = arguments.output_dir / "driver.lock"
     lock_stream = lock_path.open("a")

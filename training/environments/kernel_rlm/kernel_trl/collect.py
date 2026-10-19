@@ -72,7 +72,9 @@ async def collect(arguments):
 
     directory = arguments.output_dir
     directory.mkdir(parents=True, exist_ok=False)
-    timeout = aiohttp.ClientTimeout(total=180)
+    model_timeout = getattr(arguments, "model_timeout_s", DEFAULT_MODEL_TIMEOUT_SECONDS)
+    request_timeout = getattr(arguments, "inference_http_timeout_s", model_timeout + 30)
+    timeout = aiohttp.ClientTimeout(total=request_timeout)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         client = InferenceClient(session, arguments.endpoint, directory / "requests.jsonl")
         started = time.monotonic()
@@ -208,6 +210,7 @@ def main():
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--rollouts", type=int, choices=(4, 8), default=4)
     parser.add_argument("--model-timeout-s", type=float, default=DEFAULT_MODEL_TIMEOUT_SECONDS)
+    parser.add_argument("--inference-http-timeout-s", type=float)
     parser.add_argument("--episode-timeout-s", type=float, default=700)
     parser.add_argument("--group-timeout-s", type=float)
     parser.add_argument("--policy-version", type=int, default=0)
@@ -224,7 +227,13 @@ def main():
         raise ValueError("A nonzero policy requires an explicitly loaded trained adapter")
     if len(arguments.task_ids) > 3 or not arguments.endpoint.startswith("http://127.0.0.1:"):
         raise ValueError("Use loopback inference and at most three groups")
-    if arguments.model_timeout_s <= 0 or arguments.episode_timeout_s <= 0:
+    if arguments.inference_http_timeout_s is None:
+        arguments.inference_http_timeout_s = arguments.model_timeout_s + 30
+    if (
+        arguments.model_timeout_s <= 0
+        or arguments.inference_http_timeout_s <= 0
+        or arguments.episode_timeout_s <= 0
+    ):
         raise ValueError("Model and trajectory timeouts must be positive")
     if arguments.group_timeout_s is None:
         arguments.group_timeout_s = 900 * (arguments.rollouts // 4)

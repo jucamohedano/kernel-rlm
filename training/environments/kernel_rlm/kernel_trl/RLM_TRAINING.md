@@ -175,12 +175,15 @@ the VM has no leftover GPU worker processes.
 
 The base 150-second model-call deadline proved too short after policy-1 adapter
 loading: one root response took 138.5 seconds and another hit the 150-second
-timeout. The live curriculum driver now uses a 600-second request deadline, a
-1,500-second trajectory deadline and a 2,400-second group deadline. The reply
-cap stays at 4,096 tokens and the context cap stays at 12,288 tokens.
+timeout. The collector's HTTP client also had a separate fixed 180-second cap.
+The live driver now allows 600 seconds for a model request, 630 seconds for
+the HTTP client, 1,500 seconds for a trajectory and 2,400 seconds for a group.
+The reply cap stays at 4,096 tokens and the context cap stays at 12,288 tokens.
 
-The runtime must expose `ninja` on `PATH` while vLLM loads a trained LoRA. The
-driver adds the dedicated inference virtual environment's `bin` directory.
+The runtime must expose `ninja` on `PATH` for both REPL compilation and vLLM
+LoRA kernels. The driver adds the training virtual environment's `bin` directory
+to worker processes and the inference virtual environment's `bin` directory to
+vLLM.
 The VM's cached Python 3.12 headers are also required by Triton's generated
 launcher; the driver adds their normal and multiarch include directories to
 `CPATH`. This uses the cached header package, not a system package install.

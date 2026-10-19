@@ -32,6 +32,7 @@ def collector(monkeypatch):
         "versions": [],
         "adapters": [],
         "generator_kwargs": None,
+        "inference_http_timeout": None,
     }
 
     class Session:
@@ -58,7 +59,11 @@ def collector(monkeypatch):
                 "samples": [RootSample([2], [index + 3], [-1.0], "stop")],
             }
 
-    monkeypatch.setattr(module.aiohttp, "ClientSession", lambda **kwargs: Session())
+    def client_session(**kwargs):
+        observed["inference_http_timeout"] = kwargs["timeout"].total
+        return Session()
+
+    monkeypatch.setattr(module.aiohttp, "ClientSession", client_session)
     monkeypatch.setattr(
         module,
         "InferenceClient",
@@ -86,6 +91,7 @@ def arguments(tmp_path):
         rollouts=8,
         task_ids=["task-a"],
         model_timeout_s=600,
+        inference_http_timeout_s=630,
         episode_timeout_s=1500,
         group_timeout_s=2400,
     )
@@ -104,6 +110,7 @@ def test_eight_rollouts_use_two_waves_and_one_policy(collector, tmp_path):
     assert result["policy_version"] == 7
     assert observed["generator_kwargs"]["limits"]["model_timeout_s"] == 600
     assert observed["generator_kwargs"]["episode_timeout_s"] == 1500
+    assert observed["inference_http_timeout"] == 630
 
 
 @pytest.mark.parametrize("rewards", [[0.1] * 8, [0.0, 0.1] * 4])
