@@ -17,6 +17,48 @@
   },
   "experiments": [
     {
+      "id": "trl-l1-docs-ten-turn",
+      "follows_experiments": [
+        "trl-l1-grpo-baseline"
+      ],
+      "title": "L1 continuation · searchable CUDA docs · 10 turns",
+      "current_run_id": "20261019T225000Z-docs-turn10",
+      "status": "open",
+      "intent": "Continue the preserved policy8 through unchanged L1 tasks with searchable archived CUDA guidance and a later submission deadline.",
+      "change": "CUDA13.3 reference stored in REPL;8 normal turns plus2 recovery, first deadline warning at8; focused child example; reasoning enabled; inference reuse and CPU precompile.",
+      "conclusion": "Prepared from verified checkpoint8 with8/50 already trained. No new update or quality result is claimed before launch.",
+      "decision": "Continue until20October10:00Europe/Madrid within the ORIGINAL60USD total cap, no arbitrary update/group cap. Preserve weak samples without updates. Diagnose and repair unsafe failures before supported checkpoint-safe resume. Keep all coverage/checkpoints.",
+      "evidence_file": "notes/results/20261020-docs-training.json",
+      "limitations": [
+        "Multiple protocol/infrastructure changes are combined; this is not a single-variable ablation.",
+        "42tasks untrained at launch, including3previous deferrals.",
+        "Child outputs remain context only; root reasoning tokens receive GRPO credit but are not replayed in later context.",
+        "No inference/learner residency overlap. VM rental continues after workload exit."
+      ],
+      "runs": [
+        "20261019T225000Z-docs-turn10"
+      ],
+      "provenance": {
+        "dataset_ids": [
+          "ops6k-l1-seed42"
+        ],
+        "code_paths": [
+          "rlm/training/environments/kernel_rlm/kernel_rlm/cuda_docs.py",
+          "rlm/training/environments/kernel_rlm/kernel_rlm_v1/program.py",
+          "rlm/training/environments/kernel_rlm/kernel_trl/live_curriculum.py"
+        ],
+        "notes": [
+          "notes/results/20261020-docs-training.json",
+          "notes/results/20261019-feedback-repair.json",
+          "notes/results/20261019-scheduling-probe.json"
+        ],
+        "documented_change_commits": [
+          "6c245d8241ea436376b20f4688aec0845b788ef2"
+        ],
+        "historical_attestation": "Registered before GPU dispatch. Execution source6c245d8 and pinned corpus hash are separate from UI metadata; old snapshots are unchanged."
+      }
+    },
+    {
       "id": "trl-l1-grpo-baseline",
       "follows_experiments": ["trl-rlm-l40s"],
       "title": "L1 curriculum · TRL + Muon · eight rollouts",
