@@ -30,7 +30,7 @@ def test_resume_after_verifier_failure(sharing, monkeypatch):
 
     def post(request, timeout):
         calls.append(request.full_url)
-        assert timeout == 10
+        assert 0 < timeout <= 30
         return Response()
 
     monkeypatch.setattr(sharing.urllib.request, "urlopen", post)
@@ -39,6 +39,58 @@ def test_resume_after_verifier_failure(sharing, monkeypatch):
             assert 0 < remaining <= 30
             raise ValueError("CUDA failure")
     assert calls == ["http://127.0.0.1:8100/pause", "http://127.0.0.1:8100/resume"]
+
+
+def test_slow_sleep_reserves_time_to_wake_inference(sharing, monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(sharing.time, "monotonic", lambda: clock[0])
+    calls = []
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def post(request, timeout):
+        calls.append((request.full_url, timeout))
+        clock[0] += 12 if request.full_url.endswith("pause") else 4
+        return Response()
+
+    monkeypatch.setattr(sharing.urllib.request, "urlopen", post)
+    with sharing.paused_inference(40) as remaining:
+        assert remaining == 18
+        clock[0] += remaining
+    assert calls[0][1] == 40
+    assert calls[1][1] == 10
+    assert clock[0] == 34
+
+
+def test_wake_is_attempted_after_execution_exhausts_its_deadline(sharing, monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(sharing.time, "monotonic", lambda: clock[0])
+    calls = []
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def post(request, timeout):
+        calls.append((request.full_url, timeout))
+        return Response()
+
+    monkeypatch.setattr(sharing.urllib.request, "urlopen", post)
+    with sharing.paused_inference(40):
+        clock[0] = 41
+    assert calls[-1] == ("http://127.0.0.1:8100/resume", 10)
 
 
 def test_control_failure_does_not_run_verifier(sharing, monkeypatch):

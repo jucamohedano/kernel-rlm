@@ -31,14 +31,19 @@ def paused_inference(timeout_s: float):
     deadline = time.monotonic() + timeout_s
 
     def post(route):
+        remaining = deadline - time.monotonic()
+        if route == "/resume":
+            remaining = max(remaining, min(30.0, timeout_s / 4))
+        if remaining <= 0:
+            raise TimeoutError("Inference control exhausted verification budget")
         request = urllib.request.Request(url.rstrip("/") + route, data=b"", method="POST")
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with urllib.request.urlopen(request, timeout=min(60.0, remaining)) as response:
             if response.status != 200:
                 raise RuntimeError(f"Inference control failed: {route}")
 
     try:
         post("/pause")
-        remaining = deadline - time.monotonic()
+        remaining = deadline - time.monotonic() - min(30.0, timeout_s / 4)
         if remaining <= 0:
             raise TimeoutError("Inference pause exhausted verification budget")
         yield remaining
