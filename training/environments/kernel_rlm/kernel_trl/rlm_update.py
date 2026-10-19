@@ -8,6 +8,17 @@ from datetime import timedelta
 from pathlib import Path
 
 
+def tracking_configuration(arguments, version: int) -> dict:
+    return {
+        "report_to": "none"
+        if arguments.audit_only or arguments.readback_only
+        else getattr(arguments, "report_to", "trackio"),
+        "project": "laguna-kernel-rlm",
+        "trackio_space_id": None,
+        "run_name": f"{arguments.output_dir.parents[2].name}-step-{version + 1}",
+    }
+
+
 def run(arguments) -> dict:
     import torch
     import torch.distributed as dist
@@ -113,7 +124,7 @@ def run(arguments) -> dict:
             lr_scheduler_type="constant",
             beta=0.0,
             temperature=1.0,
-            report_to="none",
+            **tracking_configuration(arguments, version),
             save_strategy="no",
             logging_steps=1,
             disable_tqdm=True,
@@ -161,6 +172,15 @@ def run(arguments) -> dict:
                     audit.update(audit_group(trainer, group, directory))
                     event(directory, "probability_audit_complete", **audit)
                     raise AuditComplete()
+                trainer.log(
+                    {
+                        "rollout/reward_mean": sum(group["rewards"]) / len(group["rewards"]),
+                        "rollout/reward_max": max(group["rewards"]),
+                        "rollout/root_turns": group["real_rows"],
+                        "rollout/trainable_tokens": group["trainable_tokens"],
+                        "policy/sampled_version": version,
+                    }
+                )
 
         trainer.add_callback(PhaseStart())
         try:
@@ -221,6 +241,7 @@ def main():
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--resume-from", type=Path)
     parser.add_argument("--audit-report", type=Path)
+    parser.add_argument("--report-to", choices=("trackio", "wandb", "none"), default="trackio")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--audit-only", action="store_true")
     mode.add_argument("--readback-only", action="store_true")

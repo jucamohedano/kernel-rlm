@@ -12,6 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 cuda = ["torch>=2.0"]
+tracking = ["trackio==0.40.0"]
 
 [tool.uv.sources]
 rlm-train = { path = "../..", editable = true }

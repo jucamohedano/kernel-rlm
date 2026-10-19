@@ -14,6 +14,25 @@ submissions exhausted verifier memory while inference stayed resident. CPU
 regressions cover the fix; a live L40S sleep/wake and correctness replay is still
 required before claiming the OOM issue is solved. Historical gates follow.
 
+## Live metrics and infrastructure failures
+
+Install the pinned `tracking` extra. Live collection writes real per-trajectory
+rewards and progress to local Trackio. Optimizer updates use TRL's native
+`report_to="trackio"`; audit and checkpoint-readback phases do not create fake
+training runs. No Hugging Face Space is deployed. `TRACKIO_DIR` is stored with
+the curriculum run. W&B can be selected for the update with `--report-to wandb`
+when its package and credentials are configured.
+
+Verifier OOMs carry unknown correctness and an infrastructure-error status.
+Any affected group is preserved and excluded from optimization, even if its
+recorded rewards vary. Replay the retained submission with `kernel_trl.verifier_gate`
+to validate live sleep/wake and memory before retrying. Do not change the original
+task shapes or historical rewards to hide infrastructure failures.
+
+The user removed the 10:00 Madrid cutoff on 19 October. New authorizations omit
+`stop_at_unix_seconds` but retain the original $40 total ceiling and rental start.
+Historical run authorization records remain unchanged.
+
 TRL is a candidate, not yet a Laguna training backend. Keep this separate from
 the Prime and SkyRL environments. Pin v1.9.2 at
 `33f9e462728b98f7f91d38b99328e81adde2faa0`.

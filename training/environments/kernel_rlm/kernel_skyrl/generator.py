@@ -132,7 +132,12 @@ class KernelGenerator:
                     indent=2,
                 )
             )
-            return {"samples": bridge.samples, "reward": reward, "record": record}
+            return {
+                "samples": bridge.samples,
+                "reward": reward,
+                "record": record,
+                "verification": verification,
+            }
         except BaseException as error:
             (directory / "failure.json").write_text(
                 json.dumps(

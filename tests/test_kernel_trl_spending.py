@@ -51,6 +51,11 @@ def test_clock_before_original_start_is_rejected(spending):
         spending.spending_snapshot(configuration(), 999)
 
 
+def test_no_wall_clock_cutoff_when_only_compute_ceiling_is_authorized(spending):
+    now = 1000 + 12 * 3600
+    assert spending.phase_deadline(configuration(), now, 2400) == now + 2400
+
+
 def test_phase_must_fit_before_stop_time_with_cleanup(spending):
     values = {**configuration(), "stop_at_unix_seconds": 2000}
     assert spending.phase_deadline(values, 1000, 900) == 1900

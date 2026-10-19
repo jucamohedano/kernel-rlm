@@ -69,6 +69,7 @@ def test_inference_environment_exposes_venv_binaries(curriculum, tmp_path):
     result = curriculum.inference_environment(str(python), {"PATH": "/usr/bin"})
 
     assert shutil.which("ninja", path=result["PATH"]) == str(ninja)
+    assert result["VLLM_SERVER_DEV_MODE"] == "1"
     assert result["CPATH"].split(":")[:2] == [
         str(python_include),
         str(runtime / "python-headers/usr/include"),

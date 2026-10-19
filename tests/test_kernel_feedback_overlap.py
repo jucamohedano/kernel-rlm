@@ -58,6 +58,26 @@ def test_submission_compilation_caches_are_source_isolated(modules, monkeypatch,
     assert first != second
 
 
+def test_verifier_oom_preserves_unknown_correctness(modules, sources, monkeypatch, tmp_path):
+    monkeypatch.delenv("KERNEL_INFERENCE_ADMIN_URL", raising=False)
+    monkeypatch.setattr(
+        modules.verifier, "verifier_slot", lambda timeout: contextlib.nullcontext(timeout)
+    )
+
+    def run(command, **kwargs):
+        result = {"compiled": True}
+        if command[-1] == "verify":
+            result.update(correct=False, max_diff=0.0, error="OutOfMemoryError: no memory")
+        return SimpleNamespace(returncode=0, stdout=json.dumps(result), stderr="")
+
+    monkeypatch.setattr(modules.verifier, "_run_verifier_process", run)
+    result = modules.verifier.verify_cuda(*sources)
+    assert result["verification_status"] == "infrastructure_error"
+    assert result["failure_kind"] == "verifier_oom"
+    assert result["correct"] is None
+    assert result["max_diff"] is None
+
+
 def test_runner_assigns_distinct_build_directories_for_same_extension_name(
     modules, monkeypatch, tmp_path
 ):

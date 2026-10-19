@@ -581,6 +581,13 @@ def verify_cuda(
             result["timings"] = {**timings, **(result.get("timings") or {})}
             result["scheduling"] = scheduling
             result["verification_status"] = "completed"
+            if str(result.get("error", "")).startswith("OutOfMemoryError:"):
+                result.update(
+                    verification_status="infrastructure_error",
+                    failure_kind="verifier_oom",
+                    correct=None,
+                    max_diff=None,
+                )
             phase_details = _read_phase(status_path)
             result["verifier_phase"] = phase_details.get("phase")
             result["verifier_phase_elapsed_seconds"] = phase_details.get("elapsed_seconds")

@@ -71,6 +71,23 @@ class InferenceClient:
         return None
 
 
+def inference_admin_app(session, endpoint):
+    async def pause(request):
+        async with session.post(endpoint + "/sleep?level=1") as response:
+            response.raise_for_status()
+        return web.json_response({"sleeping": True})
+
+    async def resume(request):
+        async with session.post(endpoint + "/wake_up") as response:
+            response.raise_for_status()
+        return web.json_response({"sleeping": False})
+
+    admin = web.Application()
+    admin.router.add_post("/pause", pause)
+    admin.router.add_post("/resume", resume)
+    return admin
+
+
 async def collect(arguments):
     generator_class = KernelGenerator
     if generator_class is None:
@@ -113,22 +130,24 @@ async def collect(arguments):
             )
         )
 
-        async def pause(request):
-            async with session.post(arguments.endpoint + "/sleep?level=1") as response:
-                response.raise_for_status()
-            return web.json_response({"sleeping": True})
-
-        async def resume(request):
-            async with session.post(arguments.endpoint + "/wake_up") as response:
-                response.raise_for_status()
-            return web.json_response({"sleeping": False})
-
-        admin = web.Application()
-        admin.router.add_post("/pause", pause)
-        admin.router.add_post("/resume", resume)
+        admin = inference_admin_app(session, arguments.endpoint)
         runner = web.AppRunner(admin, shutdown_timeout=1)
         await runner.setup()
         await web.TCPSite(runner, "127.0.0.1", 8016).start()
+        tracker = None
+        if getattr(arguments, "report_to", "none") == "trackio":
+            import trackio
+
+            tracker = trackio
+            tracker.init(
+                project="laguna-kernel-rlm",
+                name=f"{directory.parents[3].name}-{directory.parents[1].name}-rollouts",
+                space_id=None,
+                auto_log_gpu=False,
+                auto_log_cpu=False,
+                embed=False,
+                config={"policy_version": arguments.policy_version, "rollouts": arguments.rollouts},
+            )
         generator = generator_class(
             client,
             arguments.adapter_name,
@@ -143,18 +162,34 @@ async def collect(arguments):
         )
         tasks = {task["name"]: task for task in load_tasks(arguments.dataset)}
         attempts = []
+        completed_episodes = 0
         try:
             for group_index, task_id in enumerate(arguments.task_ids):
                 task = tasks[task_id]
                 slots = asyncio.Semaphore(4)
 
                 async def run_episode(index, episode_task, group_number, episode_slots):
+                    nonlocal completed_episodes
                     async with episode_slots:
-                        return await generator.run_episode(
+                        episode = await generator.run_episode(
                             episode_task,
                             directory / f"group-{group_number}-trajectory-{index}",
                             arguments.policy_version,
                         )
+                        completed_episodes += 1
+                        if tracker is not None:
+                            tracker.log(
+                                {
+                                    "rollout/completed": completed_episodes,
+                                    "rollout/reward": episode["reward"],
+                                    "rollout/root_turns": len(episode["samples"]),
+                                    "verifier/infrastructure_error": int(
+                                        episode.get("verification", {}).get("verification_status")
+                                        == "infrastructure_error"
+                                    ),
+                                }
+                            )
+                        return episode
 
                 jobs = [
                     asyncio.create_task(run_episode(index, task, group_index, slots))
@@ -168,7 +203,13 @@ async def collect(arguments):
                             job.cancel()
                     await asyncio.gather(*jobs, return_exceptions=True)
                 rewards = [episode["reward"] for episode in episodes]
-                admitted = has_signal(rewards) and max(rewards) > 0.1
+                infrastructure_errors = [
+                    {"trajectory": index, "verification": episode["verification"]}
+                    for index, episode in enumerate(episodes)
+                    if episode.get("verification", {}).get("verification_status")
+                    in {"infrastructure_error", "runner_crash", "invalid_runner_output", "timeout"}
+                ]
+                admitted = not infrastructure_errors and has_signal(rewards) and max(rewards) > 0.1
                 attempts.append(
                     {
                         "task": task_id,
@@ -177,12 +218,19 @@ async def collect(arguments):
                         "policy_version": arguments.policy_version,
                         "reason": "admitted"
                         if admitted
+                        else "infrastructure_error"
+                        if infrastructure_errors
                         else "weak_signal"
                         if max(rewards) <= 0.1
                         else "zero_variance",
+                        "infrastructure_errors": infrastructure_errors,
                     }
                 )
                 (directory / "groups.json").write_text(json.dumps(attempts, indent=2))
+                if infrastructure_errors:
+                    raise RuntimeError(
+                        "Verifier infrastructure failed; preserve the group and repair before retry"
+                    )
                 if max(rewards) <= 0.1:
                     raise RuntimeError(
                         "No reward above 0.1; inspect saved trajectories before continuing"
@@ -207,6 +255,8 @@ async def collect(arguments):
                 "All bounded groups had identical terminal rewards; no update allowed"
             )
         finally:
+            if tracker is not None:
+                tracker.finish()
             await runner.cleanup()
 
 
@@ -223,6 +273,7 @@ def main():
     parser.add_argument("--group-timeout-s", type=float)
     parser.add_argument("--policy-version", type=int, default=0)
     parser.add_argument("--adapter-name", default="kernel-base")
+    parser.add_argument("--report-to", choices=("trackio", "none"), default="trackio")
     parser.add_argument(
         "--task-ids",
         nargs="+",

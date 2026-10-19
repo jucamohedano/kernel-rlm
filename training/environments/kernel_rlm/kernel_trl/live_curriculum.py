@@ -195,9 +195,11 @@ def python_header_environment(python: str, environment: dict[str, str]) -> dict[
 def inference_environment(
     inference_python: str, environment: dict[str, str] | None = None
 ) -> dict[str, str]:
-    return python_header_environment(
+    result = python_header_environment(
         inference_python, runtime_environment(inference_python, environment)
     )
+    result["VLLM_SERVER_DEV_MODE"] = "1"
+    return result
 
 
 def read_json(path: Path) -> dict:
@@ -329,7 +331,7 @@ async def wait_for_server(server, session, deadline: float) -> None:
             async with session.get("http://127.0.0.1:8006/health") as response:
                 if response.status == 200:
                     return
-        except (aiohttp.ClientError, asyncio.TimeoutError):
+        except (TimeoutError, aiohttp.ClientError):
             pass
         await asyncio.sleep(2)
     raise TimeoutError("vLLM readiness exceeded its phase deadline")
@@ -853,6 +855,7 @@ async def train_task(arguments, budget: dict, state: dict, task_id: str) -> bool
 
 async def run(arguments) -> dict:
     arguments.output_dir.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("TRACKIO_DIR", str(arguments.output_dir / "trackio"))
     os.environ.update(
         training_environment(
             arguments.python,

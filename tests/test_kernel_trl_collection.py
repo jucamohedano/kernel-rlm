@@ -66,6 +66,7 @@ def collector(monkeypatch):
             return {
                 "reward": observed["rewards"][index],
                 "samples": [RootSample([2], [index + 3], [-1.0], "stop")],
+                "verification": observed.get("verification", {}).get(index, {}),
             }
 
     def client_session(**kwargs):
@@ -240,3 +241,42 @@ def test_uniform_correct_rewards_are_filtered_without_changing_them(collector, t
     assert recorded[0]["reason"] == "zero_variance"
     assert recorded[0]["rewards"] == [0.8] * 8
     assert not (args.output_dir / "training-group.json").exists()
+
+
+def test_verifier_oom_is_not_treated_as_a_trainable_reward(collector, tmp_path):
+    module, observed = collector
+    observed["rewards"] = [0.1, 0.8] * 4
+    observed["verification"] = {
+        0: {"verification_status": "infrastructure_error", "failure_kind": "verifier_oom"}
+    }
+    args = arguments(tmp_path)
+    with pytest.raises(RuntimeError, match="Verifier infrastructure failed"):
+        asyncio.run(module.collect(args))
+    recorded = json.loads((args.output_dir / "groups.json").read_text())[0]
+    assert recorded["reason"] == "infrastructure_error"
+    assert recorded["rewards"] == observed["rewards"]
+    assert recorded["infrastructure_errors"][0]["trajectory"] == 0
+    assert not (args.output_dir / "training-group.json").exists()
+
+
+def test_trackio_records_real_rollout_rewards_without_hosting(collector, tmp_path, monkeypatch):
+    module, observed = collector
+    observed["rewards"] = [0.1, 0.8] * 4
+    tracker = SimpleNamespace(
+        init=AsyncMock(),
+        log=lambda metrics: records.append(metrics),
+        finish=lambda: finished.append(True),
+    )
+    settings = []
+    records = []
+    finished = []
+    tracker.init = lambda **kwargs: settings.append(kwargs)
+    monkeypatch.setitem(sys.modules, "trackio", tracker)
+    args = arguments(tmp_path)
+    args.output_dir = tmp_path / "run/groups/step-002-task/collection/rollouts"
+    args.report_to = "trackio"
+    asyncio.run(module.collect(args))
+    assert settings[0]["space_id"] is None
+    assert [row["rollout/reward"] for row in records] == observed["rewards"]
+    assert records[-1]["rollout/completed"] == 8
+    assert finished == [True]
