@@ -10,7 +10,17 @@
 <p class="muted">Status snapshot: 19 October 2026. This is not a live job or billing monitor.</p></header>
 <nav aria-label="Guide sections"><a href="#now">Start here</a><a href="#next">Next run</a><a href="#decisions">Decisions</a><a href="#evidence">Results</a><a href="#learn">Learn the loop</a><a href="#project">Project brief</a><a href="#references">References</a><a href="http://127.0.0.1:7790/">Experiment runs</a><button id="collapse" type="button">Close all details</button></nav>
 
-<section id="now" class="latest"><span class="tag">Resource check · 19 October · 17:51 Madrid</span><h2>More context is configured. Training is still paused.</h2><ul>
+<section id="now" class="latest"><span class="tag">Training resumed · 19 October · 18:04 Madrid</span><h2>Resumed from checkpoint 5 with a 14,336-token context.</h2><ul>
+<li><strong>Current attempt:</strong> <a href="/?run=20261019T160431Z-context-resume">Context-safe continuation</a>. Task <code>0010</code>, Linear plus RReLU, starts attempt 2. Inference is serving the policy-5 adapter with up to four concurrent requests. No new optimizer step is confirmed yet.</li>
+<li><strong>Kept:</strong> five trained tasks, checkpoint 5, eight rollouts per task, concurrency four, rank-8 attention LoRA and Muon. Root replies stay at 4,096 tokens. Prompts, rewards and all 50 dataset rows/order are unchanged.</li>
+<li><strong>Fixed:</strong> exact context exhaustion ends only that episode and saves its valid sampled replies. It no longer becomes a server fault that cancels healthy siblings. An absent final submission keeps its existing zero reward; there is no new penalty or fabricated completion.</li>
+<li><strong>Still strict:</strong> real infrastructure failures, missing token evidence and failed probability audits block updates. Independent siblings can finish and save their work; the group deadline still cleans up outstanding jobs. Fully scored weak/equal-reward groups are deferred, not trained.</li>
+<li><strong>History preserved:</strong> failed attempt <code>20261019T140720Z-deferred-curriculum</code> remains unchanged. The new manifest references its state/input hashes and 33 partial-group file hashes. Attempt counts are retained; none of those partial samples is used for training. Task 0047 remains deferred.</li>
+<li><strong>Bound:</strong> at most three successful additional updates, from policy 5 to at most 8. The original $60 total guard remains; launch spend was about $22.00, including diagnostics and idle rental. Estimates are not invoices. Hourly monitoring is active and <a href="http://127.0.0.1:7861/">Trackio</a> remains available.</li>
+<li><strong>Checks:</strong> 110 CPU tests and Ruff passed, including the real REPL capacity-outcome test, sibling preservation, group-deadline cleanup and durable scoring. Source <code>bbdf657</code> was pushed before dispatch. See <code>notes/results/20261019-context-resume.json</code>.</li>
+</ul><p class="muted">This is a launch/status proof, not a quality gain. Live capacity outcomes, real routing VRAM and verifier queues still need observation. The CPU contract preflight and feedback deadline improvements remain open work.</p></section>
+
+<section id="context-memory-history"><details><summary>Resource checks · 14k and 16k native backward memory</summary><h2>The larger context was selected from measured memory.</h2><ul>
 <li><strong>Changed:</strong> new TRL runs use <strong>14,336 total sequence tokens</strong>, up from 12,288 (+16.7%). Root replies stay capped at 4,096, recovery at 1,024, and child input/output at 2,048. Eight rollouts and concurrency four are unchanged.</li>
 <li><strong>Measured:</strong> both GPUs restored the real step-5 adapters, Muon momentum, RNG and scheduler. Two full-length synthetic backward passes per rank completed at both 14,336 and 16,384 tokens. There were <strong>zero optimizer updates</strong> and no checkpoint saves.</li>
 <li><strong>Why not 16k by default:</strong> peak allocated VRAM was about 42.5 GiB at 16k and 41.4 GiB at 14k. The smaller limit leaves about 1.1 GiB more allocation margin. Both tests needed allocator retries; neither proves every real trajectory will fit.</li>
@@ -24,7 +34,7 @@
 <li><strong>R:</strong> the current generated reply, including its thinking tokens. A 14,336-token context can fit a 10,240-token prompt plus a 4,096-token reply.</li>
 <li><strong>C:</strong> total capacity, not a command to generate that many tokens. A longer prompt leaves less room for the reply. Removing thinking from later prompts does not make the current generation free.</li>
 <li><strong>VRAM:</strong> peak allocated memory measures live tensors. Reserved memory also includes allocator cache; low raw device-free memory alone is not proof that all that cache is unavailable. Recoverable allocator warnings still mean we should keep a margin.</li>
-</ul></details></section>
+</ul></details></details></section>
 
 <section id="context-failure-history"><details><summary>Previous stop · task 0010 exhausted context · no step 6</summary><h2>One context-limit error cancelled the group.</h2><ul>
 <li><strong>Status:</strong> <a href="/?run=20261019T140720Z-deferred-curriculum">Deferred-group curriculum</a> failed at <strong>16:22 Madrid</strong> during task <code>0010</code>, Linear plus RReLU. No new optimizer step or final reward was produced. The GPU workers are stopped; no retry was launched during this sync.</li>
