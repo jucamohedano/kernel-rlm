@@ -26,7 +26,7 @@
       "status": "open",
       "intent": "Continue the preserved policy8 through unchanged L1 tasks with searchable archived CUDA guidance and a later submission deadline.",
       "change": "CUDA13.3 reference stored in REPL;8 normal turns plus2 recovery, first deadline warning at8; focused child example; reasoning enabled; inference reuse and CPU precompile.",
-      "conclusion": "Prepared from verified checkpoint8 with8/50 already trained. No new update or quality result is claimed before launch.",
+      "conclusion": "Running from verified checkpoint8;8/50 trained tasks are inherited, not new updates. Task0013 is generating. The first four actual root replies contain reasoning. Searchable docs are available but use is not yet observed. No new update or quality improvement is claimed at startup.",
       "decision": "Continue until20October10:00Europe/Madrid within the ORIGINAL60USD total cap, no arbitrary update/group cap. Preserve weak samples without updates. Diagnose and repair unsafe failures before supported checkpoint-safe resume. Keep all coverage/checkpoints.",
       "evidence_file": "notes/results/20261020-docs-training.json",
       "limitations": [

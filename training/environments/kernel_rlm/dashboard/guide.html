@@ -7,10 +7,20 @@
 </style></head><body><main>
 <header><span class="tag">Learning project · decision guide</span><h1>Train Laguna to write CUDA kernels</h1>
 <p>Use this page to decide what to run next. Open the details when you need the evidence.</p>
-<p class="muted">Status snapshot: 19 October 2026. This is not a live job or billing monitor.</p></header>
+<p class="muted">Status snapshot: 20 October 2026, 00:54 Madrid. This is not a live job or billing monitor.</p></header>
 <nav aria-label="Guide sections"><a href="#now">Start here</a><a href="#next">Next run</a><a href="#decisions">Decisions</a><a href="#evidence">Results</a><a href="#learn">Learn the loop</a><a href="#project">Project brief</a><a href="#references">References</a><a href="http://127.0.0.1:7790/">Experiment runs</a><button id="collapse" type="button">Close all details</button></nav>
 
-<section id="now" class="latest"><span class="tag">GPU scheduling diagnostic · 19 October · policy 8 unchanged</span><h2>Both optimizations work. The measured pipeline took 29.8% less time.</h2><ul>
+<section id="now" class="latest"><span class="tag">Training resumed · 20 October · new protocol</span><h2>Ten-turn training is running from checkpoint 8.</h2><ul>
+<li><strong>Current run:</strong> <a href="/?experiment=trl-l1-docs-ten-turn">Docs-assisted L1 continuation</a>, <code>20261019T225000Z-docs-turn10</code>. Task <code>0013</code> is generating eight trajectories at concurrency four. The <strong>8 / 50 trained tasks are inherited</strong>; no new optimizer update is confirmed yet.</li>
+<li><strong>Turns:</strong> ten total. The first submission deadline reminder arrives at turn eight. Turns nine and ten are recovery-only, with a 1,024-token reply cap. Normal replies remain 4,096 tokens; total context stays 14,336.</li>
+<li><strong>CUDA reference:</strong> 53 archived CUDA 13.3 pages match the VM compiler. The agent can search them with <code>search_cuda_docs</code> and retrieve small cited excerpts with <code>read_cuda_doc</code>. Manuals stay outside the initial prompt. Retrieval use is not yet observed.</li>
+<li><strong>Reasoning and children:</strong> reasoning is enabled and present in the first four live root replies. Previous thoughts are not replayed into later prompts. A focused child example asks for indexing and boundary-case review; optional child use is not yet observed. Child outputs remain excluded from loss.</li>
+<li><strong>Scheduling:</strong> inference reuse and CPU final precompilation are enabled. Inference still closes before the learner. All 151 selected CPU regressions passed; full training throughput and quality gains remain unproven.</li>
+<li><strong>Limits:</strong> continue until <strong>20 October, 10:00 Madrid</strong>, subject to the original <strong>$60 total ceiling</strong>. Full phases and cleanup must fit, so a new phase can stop being admitted earlier. Launch spend was approximately <strong>$30.51</strong>; estimates are not invoices. The VM still bills after workload exit.</li>
+<li><strong>Monitoring:</strong> hourly checks are active. <a href="http://127.0.0.1:7861/">Trackio</a> is online through private forwarding. Blocking faults require diagnosis and a validated, checkpoint-safe repair before continuing. Evidence: <code>notes/results/20261020-docs-training.json</code>.</li>
+</ul><details><summary>What this continuation can establish</summary><p>The prompt, turn protocol, documentation and scheduling changed together. This is not a single-variable ablation. Observe actual document searches, child calls, feedback timing, final correctness, speed rewards and exact-token probability audits before claiming improvement. Original checkpoints, task shapes, rewards and dataset order remain unchanged.</p></details></section>
+
+<section id="scheduling-history"><details><summary>Previous GPU scheduling diagnostic · component timings</summary><h2>Both optimizations work. The measured pipeline took 29.8% less time.</h2><ul>
 <li><strong>Reuse inference:</strong> process startup took <strong>66.1 seconds</strong>; waking the same loaded policy took a median <strong>2.1 seconds</strong>. This saves about 64 seconds per avoided reload on this cached VM. The server PID stayed unchanged through all trials.</li>
 <li><strong>Overlap CPU builds:</strong> the matched pipeline averaged <strong>99.5 seconds serial</strong> versus <strong>69.9 seconds overlapped</strong>: 29.8% less elapsed time, or 1.42× throughput in this diagnostic. Post-inference compilation fell from about 50–53 seconds to 2.3–2.4 seconds because the CPU build was already prepared.</li>
 <li><strong>Checks:</strong> all four independent CUDA verifications passed. The diagnostic made zero optimizer updates, shut down its inference server, and left both GPUs at zero allocated process memory. Original checkpoint 8 passed all four file hashes again.</li>
@@ -21,7 +31,7 @@
 <li><strong>Matched setup:</strong> serial → overlap → overlap → serial. Each trial used the same policy-8 checkpoint, known-correct task 0035 candidate, 256-token request, seed and independent final verification. Each trial had a new empty extension-build cache.</li>
 <li><strong>Small sample:</strong> two trials per variant and one process startup. This does not establish a confidence interval or a speedup across all 50 tasks. Cold startup here excludes fresh VM provisioning and model download.</li>
 <li><strong>Still required:</strong> a bounded full-rollout integration check before extending training. Live child-cancellation latency and repaired intermediate-feedback deadlines were not exercised by this separate component test. Sleeping inference beside the learner remains untested and disabled.</li>
-</ul></details></section>
+</ul></details></details></section>
 
 <section id="feedback-repair-history"><details><summary>Previous CPU repair · cancellation, contracts and feedback deadlines</summary><h2>Feedback repairs implemented. Training stays paused at step 8.</h2><ul>
 <li><strong>Cancellation:</strong> the completion bridge now owns GPU admission and cancels its backend transport when the caller disconnects. The reader lock stays held through cleanup. Cancelled child responses never become root training targets.</li>
