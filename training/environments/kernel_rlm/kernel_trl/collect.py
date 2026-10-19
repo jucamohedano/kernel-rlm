@@ -3,11 +3,13 @@
 import argparse
 import asyncio
 import json
+import os
 import time
 from pathlib import Path
 
 import aiohttp
 from aiohttp import web
+from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_request_slot
 from kernel_skyrl.contract import exact_sample, has_signal
 from kernel_skyrl.preflight import load_tasks
 
@@ -24,6 +26,10 @@ class InferenceClient:
         self.trace = trace
 
     async def chat_completion(self, payload):
+        async with inference_request_slot(INFERENCE_ADMISSION_TIMEOUT_S):
+            return await self.request_completion(payload)
+
+    async def request_completion(self, payload):
         body = dict(payload["json"])
         body.pop("session_id", None)
         token_request = {
@@ -241,6 +247,7 @@ def main():
         arguments.group_timeout_s = 900 * (arguments.rollouts // 4)
     if arguments.group_timeout_s <= 0:
         raise ValueError("Group timeout must be positive")
+    os.environ["KERNEL_INFERENCE_ADMIN_URL"] = "http://127.0.0.1:8016"
     asyncio.run(asyncio.wait_for(collect(arguments), timeout=arguments.group_timeout_s))
 
 

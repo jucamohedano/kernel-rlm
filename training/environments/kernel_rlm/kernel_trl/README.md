@@ -1,5 +1,19 @@
 # TRL compatibility check
 
+## Shared-GPU verifier control
+
+The live `kernel_trl.collect` command exposes the local pause/resume proxy on
+port 8016 and exports `KERNEL_INFERENCE_ADMIN_URL` to its REPL workers and final
+scorer. Model requests hold the shared inference admission lock. Exclusive
+verification waits for active requests, sleeps vLLM, checks the kernel, then
+wakes vLLM even if verification fails. Eligible intermediate checks retain the
+existing guarded-overlap path; final timing remains exclusive.
+
+The sigmoid run on 19 October exposed missing control wiring: five compiled
+submissions exhausted verifier memory while inference stayed resident. CPU
+regressions cover the fix; a live L40S sleep/wake and correctness replay is still
+required before claiming the OOM issue is solved. Historical gates follow.
+
 TRL is a candidate, not yet a Laguna training backend. Keep this separate from
 the Prime and SkyRL environments. Pin v1.9.2 at
 `33f9e462728b98f7f91d38b99328e81adde2faa0`.

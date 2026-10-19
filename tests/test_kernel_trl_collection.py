@@ -1,6 +1,9 @@
 import asyncio
+import fcntl
 import importlib
 import json
+import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -33,6 +36,7 @@ def collector(monkeypatch):
         "adapters": [],
         "generator_kwargs": None,
         "inference_http_timeout": None,
+        "client_class": module.InferenceClient,
     }
 
     class Session:
@@ -116,6 +120,55 @@ def test_eight_rollouts_use_four_slots_and_one_policy(collector, tmp_path):
     assert observed["generator_kwargs"]["limits"]["model_timeout_s"] == 600
     assert observed["generator_kwargs"]["episode_timeout_s"] == 1500
     assert observed["inference_http_timeout"] == 630
+
+
+def test_inference_waits_for_verifier_and_releases_its_slot(collector, tmp_path, monkeypatch):
+    _module, observed = collector
+    from kernel_rlm import verifier_slot
+
+    slot = tmp_path / "gpu-slot"
+    monkeypatch.setattr(verifier_slot, "LOCK_PATH", slot)
+    original_client = observed["client_class"](None, "unused", tmp_path / "trace")
+    request = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(original_client, "request_completion", request)
+
+    async def check():
+        with slot.open("a") as holder:
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            pending = asyncio.create_task(original_client.chat_completion({"json": {}}))
+            await asyncio.sleep(0.02)
+            request.assert_not_called()
+            fcntl.flock(holder, fcntl.LOCK_UN)
+            assert await asyncio.wait_for(pending, 1) == {"ok": True}
+            fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    asyncio.run(check())
+
+
+def test_main_enables_shared_gpu_control_for_workers_and_final_scorer(
+    collector, tmp_path, monkeypatch
+):
+    module, _observed = collector
+    monkeypatch.setenv("KERNEL_INFERENCE_ADMIN_URL", "http://127.0.0.1:9999")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "collect",
+            "--checkpoint",
+            str(tmp_path),
+            "--dataset",
+            str(tmp_path / "dataset"),
+            "--output-dir",
+            str(tmp_path / "output"),
+        ],
+    )
+
+    async def check(arguments):
+        assert os.environ["KERNEL_INFERENCE_ADMIN_URL"] == "http://127.0.0.1:8016"
+
+    monkeypatch.setattr(module, "collect", check)
+    module.main()
 
 
 def test_free_slot_starts_next_rollout_before_slowest_finishes(collector, tmp_path):
