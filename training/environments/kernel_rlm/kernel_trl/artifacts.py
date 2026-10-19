@@ -224,7 +224,12 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
                 "role": "dataset",
             }
         )
-    events = [json.loads(line) for line in (source / "events.jsonl").read_text().splitlines()]
+    events_path = source / "events.jsonl"
+    events = (
+        [json.loads(line) for line in events_path.read_text().splitlines()]
+        if events_path.exists()
+        else []
+    )
     completed = next((row for row in events if row["phase"] == "training_completed"), None)
     if completed is not None:
         report["elapsed_seconds"] = (
@@ -246,7 +251,7 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
         "run_id": run_id,
         "experiment_id": "trl-rlm-l40s",
         "capture_kind": "source hashes captured before rollout; normalized offline after execution",
-        "created_at_utc": events[0]["utc"],
+        "created_at_utc": events[0]["utc"] if events else report.get("started_at_utc"),
         "inputs": inputs,
         "pins": {
             "model_revision": report["model_revision"],
@@ -256,12 +261,14 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
         },
         "datasets": {"sha256": captured.get("dataset_sha256"), "upstream_revision": None},
         "config": {
-            "group_size": 4,
+            "group_size": len(report["groups"][0].get("rewards", []))
+            if report.get("groups")
+            else None,
             "root_tokens": 4096,
             "context": 12288,
             "max_turns": 8,
             "children": 2,
-            "max_optimizer_steps": 1,
+            "max_optimizer_steps": report.get("optimizer_steps", 0),
         },
         "parent": None,
         "artifacts": {"weights": "Remain on CloudRift; not downloaded"},
