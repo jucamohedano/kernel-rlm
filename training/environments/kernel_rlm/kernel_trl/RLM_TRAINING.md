@@ -197,9 +197,11 @@ That baseline used a 4,096-token reply cap and a 12,288-token context cap.
 ## Longer context for new TRL runs
 
 The new-run CLI default is 14,336 total prompt-plus-reply tokens. Use
-`--context-tokens 14336` explicitly in the launch record. A 16,384-token native
-backward check passed but left under 0.5 GiB device-free memory and triggered
-allocator retries, so it is not the safe default. Root replies stay at
+`--context-tokens 14336` explicitly in the launch record. Both 14,336 and 16,384
+passed two native backward passes with real checkpoint-5 Muon state. The smaller
+limit used about 1.1 GiB less peak allocated VRAM. Both triggered allocator
+retries; device-free memory alone excludes reclaimable PyTorch cache. This is a
+conservative measured default, not a guarantee for all routing patterns. Root replies stay at
 4,096; recovery stays at 1,024; children keep their existing 2,048-token caps.
 The same context value reaches vLLM, exact token counting, the RLM generator,
 durable generation manifests, final scoring, training rows and dashboard
@@ -210,7 +212,7 @@ larger-context continuation.
 
 Inference KV-cache headroom is not proof that training fits. Before enabling a
 larger limit on the two L40S GPUs, run a bounded native FSDP2/TRL loss memory
-check with `kernel_trl.rlm_update --memory-probe-tokens 16384 --resume-from
+check with `kernel_trl.rlm_update --memory-probe-tokens 14336 --resume-from
 <checkpoint>`. This mode restores real adapters and Muon state, accumulates two
 synthetic full-length backward passes, performs zero optimizer steps, disables
 training tracking and writes no checkpoint. It reports allocated/reserved VRAM
