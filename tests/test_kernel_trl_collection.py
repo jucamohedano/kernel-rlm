@@ -4,6 +4,7 @@ import importlib
 import json
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -123,6 +124,53 @@ def test_eight_rollouts_use_four_slots_and_one_policy(collector, tmp_path):
     assert observed["inference_http_timeout"] == 630
 
 
+def test_transport_does_not_readmit_a_root_when_verifier_is_waiting(
+    collector, tmp_path, monkeypatch
+):
+    module, observed = collector
+    from kernel_rlm import verifier_slot
+
+    path = tmp_path / "admission"
+    monkeypatch.setattr(verifier_slot, "LOCK_PATH", path)
+    monkeypatch.setattr(module, "INFERENCE_ADMISSION_TIMEOUT_S", 0.1)
+    client = observed["client_class"](None, "http://unused", tmp_path / "requests")
+    client.request_completion = AsyncMock(return_value={"completed": True})
+
+    async def verify():
+        async with verifier_slot.exclusive_inference_slot(1, path=path):
+            return "verified"
+
+    async def check():
+        async with verifier_slot.inference_request_slot(1, path=path):
+            pending_verifier = asyncio.create_task(verify())
+            await asyncio.sleep(0)
+            with path.with_name(path.name + ".writer").open("a") as intent:
+                with pytest.raises(BlockingIOError):
+                    fcntl.flock(intent, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            result = await client.chat_completion({"json": {}})
+            assert result == {"completed": True}
+            assert not pending_verifier.done()
+        assert await pending_verifier == "verified"
+
+    asyncio.run(check())
+    client.request_completion.assert_awaited_once()
+
+
+def test_startup_smoke_owns_its_inference_admission(collector, tmp_path, monkeypatch):
+    module, observed = collector
+    observed["rewards"] = [0.1, 0.8] * 4
+    entries = []
+
+    @asynccontextmanager
+    async def slot(timeout):
+        entries.append(timeout)
+        yield 0.0
+
+    monkeypatch.setattr(module, "inference_request_slot", slot)
+    asyncio.run(module.collect(arguments(tmp_path)))
+    assert entries == [module.INFERENCE_ADMISSION_TIMEOUT_S]
+
+
 def test_deferred_generation_saves_all_trajectories_without_final_scoring(
     collector, tmp_path, monkeypatch
 ):
@@ -149,7 +197,7 @@ def test_deferred_generation_saves_all_trajectories_without_final_scoring(
     assert not (args.output_dir / "training-group.json").exists()
 
 
-def test_inference_waits_for_verifier_and_releases_its_slot(collector, tmp_path, monkeypatch):
+def test_root_admission_waits_for_verifier_and_releases_its_slot(collector, tmp_path, monkeypatch):
     _module, observed = collector
     from kernel_rlm import verifier_slot
 
@@ -159,10 +207,14 @@ def test_inference_waits_for_verifier_and_releases_its_slot(collector, tmp_path,
     request = AsyncMock(return_value={"ok": True})
     monkeypatch.setattr(original_client, "request_completion", request)
 
+    async def root_request():
+        async with verifier_slot.inference_request_slot(1, path=slot):
+            return await original_client.chat_completion({"json": {}})
+
     async def check():
         with slot.open("a") as holder:
             fcntl.flock(holder, fcntl.LOCK_EX)
-            pending = asyncio.create_task(original_client.chat_completion({"json": {}}))
+            pending = asyncio.create_task(root_request())
             await asyncio.sleep(0.02)
             request.assert_not_called()
             fcntl.flock(holder, fcntl.LOCK_UN)

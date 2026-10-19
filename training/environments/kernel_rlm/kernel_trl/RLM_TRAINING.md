@@ -195,6 +195,22 @@ The training Python path includes the environment source, the repository's
 This keeps vLLM's runtime-update API disabled and the local service bound to
 loopback.
 
+## Inference admission ownership
+
+Root requests acquire their reader slot in `kernel_rlm_v1.program`; child
+requests acquire it in `kernel_rlm.subcalls`. The slot remains held across the
+loopback bridge and the inference HTTP response. `InferenceClient` is transport
+only: it must not acquire a second reader slot. The standalone startup smoke
+request acquires its own slot in the collector.
+
+A CPU regression reproduces the previous race: the root holds a reader lock,
+the verifier acquires writer intent, and the collector tries to acquire another
+reader lock. The collector waits for the verifier, while the verifier waits for
+the root's HTTP request to finish. Removing the duplicate acquisition breaks
+this cycle without removing verifier priority or allowing inference during
+exclusive verification. This fix is not a measured GPU-throughput improvement;
+the next bounded live check must still validate scheduling behavior.
+
 For a bounded continuation test, use `--bootstrap-dir` with a successful
 step-1 run and `--max-groups 1`. Remove `--max-groups` for the remaining L1
 curriculum. Run the same command with `--resume` after a clean paused boundary.

@@ -21,14 +21,15 @@ KernelGenerator = None
 
 
 class InferenceClient:
+    """Transport REPL-admitted requests without acquiring a second reader lock."""
+
     def __init__(self, session, endpoint, trace):
         self.session = session
         self.endpoint = endpoint
         self.trace = trace
 
     async def chat_completion(self, payload):
-        async with inference_request_slot(INFERENCE_ADMISSION_TIMEOUT_S):
-            return await self.request_completion(payload)
+        return await self.request_completion(payload)
 
     async def request_completion(self, payload):
         body = dict(payload["json"])
@@ -117,7 +118,8 @@ async def collect(arguments):
             "return_tokens_as_token_ids": True,
             "chat_template_kwargs": {"enable_thinking": True},
         }
-        smoke = await client.chat_completion({"json": smoke_request})
+        async with inference_request_slot(INFERENCE_ADMISSION_TIMEOUT_S):
+            smoke = await client.chat_completion({"json": smoke_request})
         sample = exact_sample(smoke, 12288)
         (directory / "inference-smoke.json").write_text(
             json.dumps(
