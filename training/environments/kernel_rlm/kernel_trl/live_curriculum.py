@@ -636,7 +636,18 @@ async def collect_task(
             "--defer-scoring",
             "--context-tokens",
             str(getattr(arguments, "context_tokens", LEGACY_CONTEXT_TOKENS)),
+            "--max-turns",
+            str(getattr(arguments, "max_turns", 8)),
         ]
+        if getattr(arguments, "cuda_docs", None):
+            command.extend(
+                [
+                    "--cuda-docs",
+                    str(arguments.cuda_docs),
+                    "--cuda-docs-sha256",
+                    arguments.cuda_docs_sha256,
+                ]
+            )
         if getattr(arguments, "precompile_finals", False):
             command.append("--precompile-finals")
         collect_timeout = min(COLLECTION_LIMIT_SECONDS, deadline - time.time())
@@ -808,7 +819,7 @@ def initialize_run(arguments) -> dict:
             defer_uninformative_group(state, result)
     manifest = {
         "run_id": arguments.run_id,
-        "experiment_id": "trl-l1-grpo-baseline",
+        "experiment_id": getattr(arguments, "experiment_id", "trl-l1-grpo-baseline"),
         "provider": "cloudrift",
         "backend": "trl",
         "model_revision": MODEL_REVISION,
@@ -824,7 +835,9 @@ def initialize_run(arguments) -> dict:
         ),
         "normal_reply_tokens": 4096,
         "recovery_reply_tokens": 1024,
-        "max_turns": 8,
+        "max_turns": getattr(arguments, "max_turns", 8),
+        "enable_thinking": True,
+        "cuda_docs": documentation_configuration(arguments),
         "model_request_timeout_seconds": MODEL_TIMEOUT_SECONDS,
         "inference_http_timeout_seconds": INFERENCE_HTTP_TIMEOUT_SECONDS,
         "episode_timeout_seconds": EPISODE_TIMEOUT_SECONDS,
@@ -893,6 +906,10 @@ def load_state(arguments) -> dict:
         raise ValueError("Dataset bytes changed since this run started")
     if manifest.get("source_commit") != arguments.source_commit:
         raise ValueError("Source commit changed since this run started")
+    if manifest.get("experiment_id", "trl-l1-grpo-baseline") != getattr(
+        arguments, "experiment_id", "trl-l1-grpo-baseline"
+    ):
+        raise ValueError("Resume cannot change immutable experiment identity")
     requested_handling = "defer" if getattr(arguments, "continue_weak_groups", False) else "stop"
     if manifest.get("context_tokens", LEGACY_CONTEXT_TOKENS) != getattr(
         arguments, "context_tokens", LEGACY_CONTEXT_TOKENS
@@ -902,6 +919,10 @@ def load_state(arguments) -> dict:
         raise ValueError("Weak-group scheduling changed since this run started")
     if manifest.get("cuda_arch_list") != arguments.cuda_arch_list:
         raise ValueError("CUDA architecture target changed since this run started")
+    if manifest.get("max_turns", 8) != getattr(arguments, "max_turns", 8):
+        raise ValueError("Resume cannot change immutable turn limits")
+    if manifest.get("cuda_docs") != documentation_configuration(arguments):
+        raise ValueError("Resume cannot change immutable documentation")
     for option in ("reuse_inference", "precompile_finals"):
         if manifest.get(option, False) != getattr(arguments, option, False):
             raise ValueError(f"Resume cannot change immutable scheduling option {option}")
@@ -927,7 +948,7 @@ def write_report(arguments, state: dict, budget: dict) -> None:
     ]
     report = {
         "run_id": arguments.run_id,
-        "experiment_id": "trl-l1-grpo-baseline",
+        "experiment_id": getattr(arguments, "experiment_id", "trl-l1-grpo-baseline"),
         "backend": "trl",
         "provider": "cloudrift",
         "status": state["status"],
@@ -940,6 +961,9 @@ def write_report(arguments, state: dict, budget: dict) -> None:
         "optimizer_steps": state["policy_version"],
         "current_policy_version": state["policy_version"],
         "context_tokens": getattr(arguments, "context_tokens", LEGACY_CONTEXT_TOKENS),
+        "max_turns": getattr(arguments, "max_turns", 8),
+        "enable_thinking": True,
+        "cuda_docs": documentation_configuration(arguments),
         "current_checkpoint": state.get("checkpoint"),
         "resumed_from": state.get("continuation_parent", {}).get("run_id"),
         "preserved_incomplete_runs": state.get("preserved_incomplete_runs", []),
@@ -1256,6 +1280,18 @@ async def run(arguments) -> dict:
             await inference.close()
 
 
+def documentation_configuration(arguments) -> dict | None:
+    from kernel_rlm.cuda_docs import docs_manifest
+
+    path = getattr(arguments, "cuda_docs", None)
+    if path is None:
+        return None
+    expected = getattr(arguments, "cuda_docs_sha256", None)
+    if not expected:
+        raise ValueError("A pinned CUDA documentation checksum is required")
+    return {"path": str(path), **docs_manifest(path, expected)}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, required=True)
@@ -1266,7 +1302,11 @@ def main() -> None:
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--cuda-arch-list", default=DEFAULT_CUDA_ARCH_LIST)
     parser.add_argument("--context-tokens", type=int, default=DEFAULT_CONTEXT_TOKENS)
+    parser.add_argument("--max-turns", type=int, choices=(8, 10), default=8)
+    parser.add_argument("--cuda-docs", type=Path)
+    parser.add_argument("--cuda-docs-sha256")
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--experiment-id", default="trl-l1-grpo-baseline")
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--inference-python", required=True)
     parser.add_argument("--bootstrap-dir", type=Path)

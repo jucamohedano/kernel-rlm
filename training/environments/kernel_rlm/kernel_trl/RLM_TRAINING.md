@@ -40,6 +40,25 @@ The existing correctness/speed verifier and its submission guards are unchanged.
 
 ## Feedback repair status
 
+The documentation-assisted continuation uses `--max-turns 10`: eight normal
+turns, with its first deadline reminder at turn 8, then two short recovery turns.
+The reply/context limits remain 4,096/14,336 tokens and recovery stays at 1,024.
+Use `--cuda-docs <corpus.json> --cuda-docs-sha256 <digest>` to pin the offline
+NVIDIA CUDA 13.3 archive collection matching this VM's compiler. The downloader
+is `python -m kernel_rlm.cuda_docs --download <private-cache-directory>`.
+
+Only collection metadata and search instructions enter the initial prompt.
+`search_cuda_docs` and `read_cuda_doc` run inside the existing REPL, return bounded
+cited excerpts, and log retrievals. Raw manuals remain in a private cache, outside
+the Git source archive. The corpus hash/version and turn limit are immutable on
+resume. Delegation instructions and the indexing-review example occur once.
+
+Root and child requests explicitly enable thinking. Full sampled root token IDs,
+including reasoning, receive GRPO credit; child outputs and REPL observations do
+not. Earlier private reasoning is absent from later conversation messages, while
+raw responses remain in traces. `reasoning_characters` helps distinguish real
+reasoning from an API that omits its reasoning-token counter.
+
 The completed baseline through policy 8 remains immutable. New source adds
 CPU/meta contract preflight, bridge-owned cancellable inference admission and
 early feedback draining. See `kernel_rlm/STATEFUL_TASKS.md` for exact budgets

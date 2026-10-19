@@ -14,6 +14,12 @@ BACKEND_TIMEOUT_S = REPL_TIMEOUT_S + 30
 SUBMISSION_TURN = 6
 RECOVERY_MAX_TOKENS = 1024
 RECOVERY_MIN_TOKENS = 128
+
+
+def submission_turn(max_turns: int) -> int:
+    return 8 if max_turns >= 10 else min(SUBMISSION_TURN, max_turns)
+
+
 REPL_TOOL = {
     "type": "function",
     "function": {

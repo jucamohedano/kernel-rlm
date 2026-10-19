@@ -113,7 +113,7 @@ def reject_context_rebinding(code: str) -> None:
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Name)
-            and node.id in {"context", "context_0"}
+            and node.id in {"context", "context_0", "cuda_docs", "search_cuda_docs", "read_cuda_doc"}
             and isinstance(node.ctx, (ast.Store, ast.Del))
         ):
             raise ValueError(

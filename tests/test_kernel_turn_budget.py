@@ -96,13 +96,20 @@ def run_program(monkeypatch, tmp_path, actions):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("KERNEL_INFERENCE_ADMIN_URL", raising=False)
 
-    def run(codes, *, used_tokens=1020):
+    def run(codes, *, used_tokens=1020, max_turns=8):
         monkeypatch.setenv("KERNEL_ENDPOINT", "http://mock/v1")
         monkeypatch.setenv("KERNEL_API_KEY", "mock")
         monkeypatch.setenv("KERNEL_MODEL", "mock-model")
         monkeypatch.setenv(
             "KERNEL_LIMITS",
-            json.dumps({"max_turns": 8, "max_tokens": 4096, "max_context_tokens": 12288}),
+            json.dumps(
+                {
+                    "max_turns": max_turns,
+                    "max_tokens": 4096,
+                    "max_context_tokens": 12288,
+                    "enable_thinking": True,
+                }
+            ),
         )
         requests = []
         remaining_codes = iter(codes)
@@ -188,6 +195,30 @@ def test_recovery_feedback_is_rejected_before_execution(run_program):
     assert record["submission"] == "candidate"
     assert backend.execute.await_count == 7
     assert record["action_rejections"][-1]["turn"] == 7
+
+
+def test_ten_turns_only_warns_at_eight_and_recovers_at_nine(run_program):
+    from kernel_rlm.subcalls import turn_budget
+
+    for turn in range(7):
+        message = turn_budget(turn, 10, 0, 0, True, 2)
+        assert "submission" not in message.casefold()
+        assert "NEXT TURN" not in message
+    assert "SUBMISSION DEADLINE" in turn_budget(7, 10, 0, 0, True, 2)
+    assert "RECOVERY ONLY" in turn_budget(8, 10, 2, 0, True, 2)
+    assert "FINAL TURN" in turn_budget(9, 10, 2, 0, True, 2)
+    record, requests, backend = run_program(
+        ["source = 'candidate'"] * 8 + ["answer = {'content': source, 'ready': True}"],
+        max_turns=10,
+    )
+    assert record["submission"] == "candidate"
+    assert len(requests) == 9
+    assert record["model_calls"][7]["phase"] == "submission"
+    assert record["model_calls"][8]["phase"] == "recovery"
+    assert requests[8]["max_tokens"] == 1024
+    assert all(
+        request["extra_body"]["chat_template_kwargs"]["enable_thinking"] for request in requests
+    )
 
 
 def test_direct_compilation_is_rejected_before_execution(run_program):

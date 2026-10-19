@@ -4,7 +4,7 @@ import asyncio
 import os
 import time
 
-from kernel_rlm.actions import SUBMISSION_TURN
+from kernel_rlm.actions import submission_turn
 from kernel_rlm.thinking import visible_response
 from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_request_slot
 
@@ -37,18 +37,20 @@ SUBCALL_INSTRUCTION = (
     "cuda_feedback(source) for compilation and correctness; final verification measures speed. "
     "Calling a child earns no reward. Batched calls share this {max_calls}-call budget; "
     "rlm_query is only a one-shot alias.\n"
-    "Simple subcall example inside the REPL (illustrative only; adapt the question and "
-    "snippet to your actual task, not the whole reference):\n"
+    "A useful child checks a separable part of your plan while you retain responsibility "
+    "for the complete implementation. Specify inputs, outputs, assumptions, your proposed "
+    "approach, and the exact deliverable. Ask for a derivation, boundary cases, a state "
+    "contract review, or a minimal repair to one issue, not a replacement full kernel. "
+    "When searchable CUDA documentation is available, pass only a short relevant excerpt. "
+    "Example of delegating an indexing review (illustrative, not a task solution):\n"
     "```repl\n"
-    "index_code = (\n"
-    "    'int index = blockIdx.x * blockDim.x + threadIdx.x;\\n'\n"
-    "    'if (index < length) output[index] = left[index] + right[index];'\n"
-    ")\n"
     "child_advice = llm_query(\n"
-    "    'Review bounds and thread-to-element mapping for contiguous 1D vector addition. '\n"
-    "    'length is nonnegative; all buffers have length elements. '\n"
-    "    'Return at most three findings and a minimal fix if needed, not a full kernel.\\n'\n"
-    "    + index_code\n"
+    "    'Review only the indexing for pixel-unshuffle on contiguous NCHW tensors. '\n"
+    "    'Input [1,3,8,8], factor 2, output [1,12,4,4]. '\n"
+    "    'My plan assigns one thread to each output element. '\n"
+    "    'Derive output coordinates to input offset; check channel ordering and bounds. '\n"
+    "    'Return a compact formula and three boundary test cases, not a full kernel. '\n"
+    "    'Do not claim to run code; I will test and integrate your advice.'\n"
     ")\n"
     "print(child_advice[:1200])\n"
     "```\n"
@@ -88,20 +90,22 @@ KERNEL_SYSTEM = (
 def turn_budget(turn, max_turns, feedback_used, child_calls_used, enabled, max_child_calls=1):
     remaining = max(0, 2 - feedback_used)
     child_calls_remaining = max(0, max_child_calls - child_calls_used) if enabled else 0
-    deadline = min(SUBMISSION_TURN, max_turns)
+    deadline = submission_turn(max_turns)
     current = turn + 1
     if current >= deadline:
         remaining = 0
         child_calls_remaining = 0
     message = (
-        f"\nTurn {current}/{max_turns}. Submit by turn {deadline} at the latest. "
+        f"\nTurn {current}/{max_turns}. "
         f"Feedback calls remaining: {remaining}. Child calls remaining: {child_calls_remaining}."
     )
     if remaining == 0:
         message += " Do not call cuda_feedback again."
-    if current == deadline - 2:
+    if max_turns < 10:
+        message += f" Submit by turn {deadline} at the latest."
+    if max_turns < 10 and current == deadline - 2:
         message += " Only two turns remain before submission is due. Store your best source now."
-    if current == deadline - 1:
+    if max_turns < 10 and current == deadline - 1:
         message += (
             " NEXT TURN is the submission deadline. Reuse the stored source; avoid a full rewrite."
         )

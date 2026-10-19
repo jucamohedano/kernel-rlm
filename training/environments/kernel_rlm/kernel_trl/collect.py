@@ -190,6 +190,12 @@ async def collect(arguments):
             episode_timeout_s=getattr(arguments, "episode_timeout_s", 700),
             limits={
                 "max_context_tokens": context_tokens,
+                "max_turns": getattr(arguments, "max_turns", 8),
+                "enable_thinking": True,
+                "cuda_docs": str(arguments.cuda_docs)
+                if getattr(arguments, "cuda_docs", None)
+                else None,
+                "cuda_docs_sha256": getattr(arguments, "cuda_docs_sha256", None),
                 "model_timeout_s": getattr(
                     arguments, "model_timeout_s", DEFAULT_MODEL_TIMEOUT_SECONDS
                 ),
@@ -358,6 +364,9 @@ def main():
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--rollouts", type=int, choices=(4, 8), default=4)
     parser.add_argument("--precompile-finals", action="store_true")
+    parser.add_argument("--max-turns", type=int, choices=(8, 10), default=8)
+    parser.add_argument("--cuda-docs", type=Path)
+    parser.add_argument("--cuda-docs-sha256")
     parser.add_argument("--model-timeout-s", type=float, default=DEFAULT_MODEL_TIMEOUT_SECONDS)
     parser.add_argument("--inference-http-timeout-s", type=float)
     parser.add_argument("--episode-timeout-s", type=float, default=700)

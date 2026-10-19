@@ -14,13 +14,14 @@ from kernel_rlm.actions import (
     FEEDBACK_TIMEOUT_S,
     REPL_TIMEOUT_S,
     REPL_TOOL,
-    SUBMISSION_TURN,
     load_token_counter,
     preparation_error,
     recovery_budget,
     repl_actions,
+    submission_turn,
 )
 from kernel_rlm.capacity import context_exhaustion_details
+from kernel_rlm.cuda_docs import DOCS_INSTRUCTION, docs_manifest
 from kernel_rlm.feedback import build_local_feedback_bootstrap
 from kernel_rlm.subcalls import (
     KERNEL_SYSTEM,
@@ -46,6 +47,7 @@ from rlm_train.repl.subprocess import SubprocessReplBackend
 
 async def run(task: dict) -> None:
     limits = json.loads(os.environ["KERNEL_LIMITS"])
+    deadline_turn = submission_turn(limits["max_turns"])
     client = AsyncOpenAI(
         base_url=os.environ["KERNEL_ENDPOINT"],
         api_key=os.environ.pop("KERNEL_API_KEY"),
@@ -59,7 +61,10 @@ async def run(task: dict) -> None:
     proxy = None
     task_prompt = task["prompt"]
     if limits.get("enable_subcall"):
-        task_prompt = task_prompt.replace("Do not delegate to sub-LLMs.", subcall_instruction)
+        task_prompt = task_prompt.replace(
+            "Do not delegate to sub-LLMs.",
+            "Sub-LLM calls are available in the REPL; follow the system's bounded delegation instructions.",
+        )
         if limits.get("subcall_probe"):
             task_prompt += "\n" + PROBE_INSTRUCTION
     messages = build_rlm_system_prompt(
@@ -85,7 +90,12 @@ async def run(task: dict) -> None:
         "subcalls": [],
         "recovery": [],
         "action_rejections": [],
+        "reasoning_enabled": bool(limits.get("enable_thinking")),
     }
+    docs_path = limits.get("cuda_docs")
+    if docs_path:
+        record["cuda_docs"] = docs_manifest(Path(docs_path), limits["cuda_docs_sha256"])
+        messages[0]["content"] += "\n" + DOCS_INSTRUCTION
     last_usage = {}
     last_usage_message_count = 0
     compiler_names = {"load_inline"}
@@ -127,6 +137,15 @@ async def run(task: dict) -> None:
             )
         await backend.start(proxy_url=proxy_url, rollout_id="bounded-v1")
         await backend.load_context(task["context"])
+        if docs_path:
+            docs_log = (
+                str(Path(feedback_log_dir) / "docs-retrieval.jsonl") if feedback_log_dir else None
+            )
+            await backend.bootstrap(
+                "from kernel_rlm.cuda_docs import load_docs as _kernel_load_docs\n"
+                f"cuda_docs, search_cuda_docs, read_cuda_doc = _kernel_load_docs({docs_path!r}, "
+                f"{limits['cuda_docs_sha256']!r}, {docs_log!r})"
+            )
         await backend.bootstrap(
             build_local_feedback_bootstrap(
                 task["context"],
@@ -155,7 +174,7 @@ async def run(task: dict) -> None:
                 messages[-1]["content"] += "\n\n" + turn_prompt["content"]
             else:
                 messages.append(turn_prompt)
-            recovery = turn >= SUBMISSION_TURN
+            recovery = turn >= deadline_turn
             requested_tokens = limits["max_tokens"]
             if recovery:
                 if count_tokens is None:
@@ -191,7 +210,7 @@ async def run(task: dict) -> None:
                 "recovery"
                 if recovery
                 else "submission"
-                if turn + 1 == min(SUBMISSION_TURN, limits["max_turns"])
+                if turn + 1 == deadline_turn
                 else "iteration"
             )
             request_args = {
@@ -305,6 +324,9 @@ async def run(task: dict) -> None:
                     "finish_reason": choice.finish_reason,
                     "action_errors": action_errors,
                     "reasoning_tokens": completion_details.get("reasoning_tokens", 0),
+                    "reasoning_characters": len(
+                        raw_message.get("reasoning_content") or raw_message.get("reasoning") or ""
+                    ),
                     "usage": usage,
                 }
             )

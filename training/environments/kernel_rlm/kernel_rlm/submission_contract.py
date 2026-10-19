@@ -119,9 +119,10 @@ CUDA_BUILD_GUIDE = textwrap.dedent(
        extension_used, correct, and error; max_diff alone does not prove success.
        Repair the reported error before spending the second call. If correct,
        preserve that exact candidate and submit it immediately.
-    5. Target submission by turn six at the latest, or earlier if the run ends
-       sooner. Warnings start two turns before the deadline. Extra turns, if
-       allowed by the remaining context, are only for a short submission action.
+    5. Submit a complete candidate when it is ready. Follow the current run's
+       turn budget; a submission reminder appears when its deadline is reached.
+       Recovery turns, if allowed by the remaining context, are only for a short
+       submission action using an existing source variable, not a full rewrite.
        After the second feedback call,
        make any necessary final repair and submit your best complete source,
        even if verification failed. Do not ask for exhausted feedback.

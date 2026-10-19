@@ -183,8 +183,10 @@ def test_prompt_example_runs_through_real_worker_and_proxy(subcalls):
     asyncio.run(check())
     client.chat.completions.create.assert_awaited_once()
     assert len(records) == 1
-    assert "thread-to-element mapping" in records[0]["prompt"]
-    assert "if (index < length)" in records[0]["prompt"]
+    assert "pixel-unshuffle" in records[0]["prompt"]
+    assert "[1,3,8,8]" in records[0]["prompt"]
+    assert "three boundary test cases" in records[0]["prompt"]
+    assert "not a full kernel" in records[0]["prompt"]
     assert "make one focused child call before coding" in instruction
     assert "not a kernel" in instruction
     assert "final verification measures speed" in instruction

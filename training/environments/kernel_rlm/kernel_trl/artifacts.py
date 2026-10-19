@@ -318,7 +318,7 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
     )
     manifest = {
         "run_id": run_id,
-        "experiment_id": "trl-rlm-l40s",
+        "experiment_id": captured.get("experiment_id", report.get("experiment_id", "trl-rlm-l40s")),
         "capture_kind": "source hashes captured before rollout; normalized offline after execution",
         "created_at_utc": events[0]["utc"] if events else report.get("started_at_utc"),
         "inputs": inputs,
@@ -335,7 +335,9 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
             else None,
             "root_tokens": 4096,
             "context": captured.get("context_tokens", 12288),
-            "max_turns": 8,
+            "max_turns": captured.get("max_turns", 8),
+            "enable_thinking": captured.get("enable_thinking"),
+            "cuda_docs": captured.get("cuda_docs"),
             "children": 2,
             "max_optimizer_steps": report.get("optimizer_steps", 0),
         },

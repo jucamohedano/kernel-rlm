@@ -251,7 +251,8 @@ def test_feedback_through_real_worker_does_not_submit(modules, monkeypatch, tmp_
     asyncio.run(modules.program.run({"context": "CPU fixture", "prompt": "test"}))
     record = json.loads((tmp_path / "submission.json").read_text())
     assert "reward" not in record
-    assert any(message.get("reasoning_content") == reasoning for message in record["messages"])
+    assert not any(message.get("reasoning_content") for message in record["messages"])
+    assert record["model_calls"][0]["reasoning_characters"] == len(reasoning)
     request = client.chat.completions.create.await_args.kwargs
     assert [tool["function"]["name"] for tool in request["tools"]] == ["repl"]
     assert request["tool_choice"] == "auto"
@@ -264,7 +265,7 @@ def test_feedback_through_real_worker_does_not_submit(modules, monkeypatch, tmp_
         assert record["feedback_calls"] == 1
         assert "CPP_SOURCE" in record["submission"]
         assert record["termination_reason"] == "submitted"
-        assert "'correct': True" in record["messages"][-1]["content"]
+        assert '"correct": true' in record["messages"][-1]["content"]
     else:
         assert record["feedback_calls"] == 0
         assert record["submission"] == ""
@@ -531,8 +532,9 @@ def test_enabled_subcall_through_program_and_worker(modules, monkeypatch, tmp_pa
     assert "use threadIdx.x" in record["messages"][-1]["content"]
     assert "Do not delegate" not in str(record["messages"])
     assert "2,048" in record["messages"][0]["content"]
-    assert "Simple subcall example" in record["messages"][0]["content"]
-    assert "Delegation is optional" in record["messages"][0]["content"]
+    assert "Example of delegating an indexing review" in record["messages"][0]["content"]
+    assert "make one focused child call before coding" in record["messages"][0]["content"]
+    assert str(record["messages"]).count("Example of delegating an indexing review") == 1
     assert "100k" not in str(record["messages"])
     assert "500K" not in str(record["messages"])
     assert "FINAL TURN" in str(record["messages"])
