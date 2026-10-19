@@ -49,9 +49,14 @@ def test_server_serves_the_base_or_exact_saved_lora(curriculum, tmp_path):
 
 
 def test_inference_environment_exposes_venv_binaries(curriculum, tmp_path):
+    system_python = tmp_path / "system/bin/python"
+    system_python.parent.mkdir(parents=True)
+    system_python.touch()
+    system_python.chmod(0o755)
     python = tmp_path / "inference-venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(system_python)
     ninja = python.parent / "ninja"
-    ninja.parent.mkdir(parents=True)
     ninja.touch()
     ninja.chmod(0o755)
     result = curriculum.inference_environment(str(python), {"PATH": "/usr/bin"})

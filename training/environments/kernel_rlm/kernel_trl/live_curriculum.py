@@ -120,7 +120,7 @@ def inference_environment(
     inference_python: str, environment: dict[str, str] | None = None
 ) -> dict[str, str]:
     result = os.environ.copy() if environment is None else environment.copy()
-    executable_directory = str(Path(inference_python).resolve().parent)
+    executable_directory = str(Path(inference_python).absolute().parent)
     result["PATH"] = os.pathsep.join([executable_directory, result.get("PATH", "")]).rstrip(
         os.pathsep
     )
