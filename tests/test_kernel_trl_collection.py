@@ -51,9 +51,14 @@ def collector(monkeypatch):
             observed["active"] += 1
             observed["peak"] = max(observed["active"], observed["peak"])
             observed["versions"].append(version)
-            await asyncio.sleep(0)
-            observed["active"] -= 1
             index = int(directory.name.rsplit("-", 1)[-1])
+            try:
+                if observed.get("episode_hook"):
+                    await observed["episode_hook"](index)
+                else:
+                    await asyncio.sleep(0)
+            finally:
+                observed["active"] -= 1
             return {
                 "reward": observed["rewards"][index],
                 "samples": [RootSample([2], [index + 3], [-1.0], "stop")],
@@ -97,7 +102,7 @@ def arguments(tmp_path):
     )
 
 
-def test_eight_rollouts_use_two_waves_and_one_policy(collector, tmp_path):
+def test_eight_rollouts_use_four_slots_and_one_policy(collector, tmp_path):
     module, observed = collector
     observed["rewards"] = [0.0, 0.3, 0.7, 1.0] * 2
     args = arguments(tmp_path)
@@ -111,6 +116,52 @@ def test_eight_rollouts_use_two_waves_and_one_policy(collector, tmp_path):
     assert observed["generator_kwargs"]["limits"]["model_timeout_s"] == 600
     assert observed["generator_kwargs"]["episode_timeout_s"] == 1500
     assert observed["inference_http_timeout"] == 630
+
+
+def test_free_slot_starts_next_rollout_before_slowest_finishes(collector, tmp_path):
+    module, observed = collector
+    observed["rewards"] = [0.0, 0.3, 0.7, 1.0] * 2
+
+    async def check():
+        fifth_started = asyncio.Event()
+
+        async def episode_hook(index):
+            if index == 0:
+                await fifth_started.wait()
+            elif index == 4:
+                fifth_started.set()
+            await asyncio.sleep(0)
+
+        observed["episode_hook"] = episode_hook
+        await asyncio.wait_for(module.collect(arguments(tmp_path)), 1)
+        assert fifth_started.is_set()
+
+    asyncio.run(check())
+    result = json.loads((tmp_path / "collection/training-group.json").read_text())
+    assert result["rewards"] == observed["rewards"]
+    assert observed["peak"] <= 4
+    assert observed["active"] == 0
+
+
+def test_episode_failure_cancels_active_and_queued_rollouts(collector, tmp_path):
+    module, observed = collector
+    observed["rewards"] = [0.0, 0.3, 0.7, 1.0] * 2
+
+    async def check():
+        never = asyncio.Event()
+
+        async def episode_hook(index):
+            if index == 0:
+                await asyncio.sleep(0)
+                raise RuntimeError("injected episode failure")
+            await never.wait()
+
+        observed["episode_hook"] = episode_hook
+        with pytest.raises(RuntimeError, match="injected episode failure"):
+            await asyncio.wait_for(module.collect(arguments(tmp_path)), 1)
+        assert observed["active"] == 0
+
+    asyncio.run(check())
 
 
 @pytest.mark.parametrize("rewards", [[0.1] * 8, [0.0, 0.1] * 4])

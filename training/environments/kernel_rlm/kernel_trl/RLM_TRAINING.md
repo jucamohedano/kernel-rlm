@@ -89,7 +89,8 @@ One completed optimizer step is not evidence of quality improvement.
 
 ## Preparing the full L1 pass
 
-- Eight-rollout groups now run as two waves of four. Every member uses the same
+- Eight-rollout groups use a rolling queue with at most four active episodes;
+  a finished episode frees its slot immediately for the next one. Every member uses the same
   explicit adapter and policy version. Four-rollout diagnostics remain supported.
 - The native two-rank CPU gradient proof passed with eight trajectories and policy
   version seven: maximum parameter error was about `7.3e-12`. This validates credit
@@ -158,7 +159,7 @@ two phases because vLLM inference and FSDP2 training cannot fit together safely
 on these two L40S GPUs:
 
 1. Start TP2 vLLM and load the current LoRA adapter by its local checkpoint path.
-2. Generate eight trajectories, four at a time, for one dataset task.
+2. Generate eight trajectories for one dataset task through a four-slot rolling queue.
 3. Stop inference. Keep the complete request, REPL, feedback and verifier traces.
 4. Run the no-update, exact-group sampler/learner probability audit.
 5. Run one TRL/Muon update only when the group has valid reward variance and the

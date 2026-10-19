@@ -140,25 +140,27 @@ async def collect(arguments):
         try:
             for group_index, task_id in enumerate(arguments.task_ids):
                 task = tasks[task_id]
-                episodes = []
-                for start in range(0, arguments.rollouts, 4):
-                    jobs = [
-                        asyncio.create_task(
-                            generator.run_episode(
-                                task,
-                                directory / f"group-{group_index}-trajectory-{index}",
-                                arguments.policy_version,
-                            )
+                slots = asyncio.Semaphore(4)
+
+                async def run_episode(index, episode_task, group_number, episode_slots):
+                    async with episode_slots:
+                        return await generator.run_episode(
+                            episode_task,
+                            directory / f"group-{group_number}-trajectory-{index}",
+                            arguments.policy_version,
                         )
-                        for index in range(start, start + 4)
-                    ]
-                    try:
-                        episodes.extend(await asyncio.gather(*jobs))
-                    finally:
-                        for job in jobs:
-                            if not job.done():
-                                job.cancel()
-                        await asyncio.gather(*jobs, return_exceptions=True)
+
+                jobs = [
+                    asyncio.create_task(run_episode(index, task, group_index, slots))
+                    for index in range(arguments.rollouts)
+                ]
+                try:
+                    episodes = await asyncio.gather(*jobs)
+                finally:
+                    for job in jobs:
+                        if not job.done():
+                            job.cancel()
+                    await asyncio.gather(*jobs, return_exceptions=True)
                 rewards = [episode["reward"] for episode in episodes]
                 admitted = has_signal(rewards) and max(rewards) > 0.1
                 attempts.append(
