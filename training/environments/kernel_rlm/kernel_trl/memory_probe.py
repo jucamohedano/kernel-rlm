@@ -33,6 +33,7 @@ def measure_backward(trainer, group: dict) -> dict:
     import torch
 
     trainer.model.train()
+    trainer.current_gradient_accumulation_steps = trainer.args.gradient_accumulation_steps
     row = group["rows"][0]
     for _iteration in range(2):
         loss = trainer.training_step(trainer.model, row)

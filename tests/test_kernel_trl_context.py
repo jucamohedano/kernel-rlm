@@ -86,7 +86,9 @@ def test_memory_probe_has_no_optimizer_step_or_checkpoint_write(modules, monkeyp
     assert len(row["prompt_ids"]) + len(row["completion_ids"]) == 16384
     assert len(row["completion_ids"]) == 4096
     trainer = SimpleNamespace(
-        model=SimpleNamespace(train=Mock()), training_step=Mock(return_value=1.0)
+        model=SimpleNamespace(train=Mock()),
+        args=SimpleNamespace(gradient_accumulation_steps=2),
+        training_step=Mock(return_value=1.0),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -99,6 +101,7 @@ def test_memory_probe_has_no_optimizer_step_or_checkpoint_write(modules, monkeyp
     result = modules.memory.measure_backward(trainer, group)
     assert result["optimizer_steps"] == 0
     assert trainer.training_step.call_count == 2
+    assert trainer.current_gradient_accumulation_steps == 2
     assert result["synthetic_inputs_not_rollouts"] is True
 
 
