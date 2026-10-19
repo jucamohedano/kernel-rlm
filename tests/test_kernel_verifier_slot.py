@@ -3,6 +3,7 @@ import fcntl
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -170,6 +171,66 @@ def test_queue_timeout_never_starts_cuda(slot_module, monkeypatch, tmp_path):
     assert "queue + execution" in result["error"]
     assert result["timeout_phase"] == "verifier_slot_queue"
     assert result["timings"]["verifier_queue_wait_seconds"] > 0
+
+
+@pytest.mark.parametrize("compile_seconds", [0.0, 54.0, 90.0])
+def test_compilation_consumes_the_same_feedback_deadline_as_gpu_admission(
+    slot_module, monkeypatch, compile_seconds
+):
+    from kernel_rlm import verifier
+
+    clock = SimpleNamespace(now=0.0)
+    observed = {"phases": [], "queue_budget": None}
+    monkeypatch.delenv("KERNEL_INFERENCE_ADMIN_URL", raising=False)
+    monkeypatch.setattr(verifier.time, "monotonic", lambda: clock.now)
+
+    @contextmanager
+    def compile_gate(timeout, **kwargs):
+        yield timeout
+
+    @contextmanager
+    def busy_gpu(timeout):
+        observed["queue_budget"] = timeout
+        clock.now += timeout
+        raise TimeoutError("Model readers still active; GPU execution never started")
+        yield timeout
+
+    def compile_only(command, **kwargs):
+        observed["phases"].append(command[-1])
+        assert command[-1] == "compile"
+        assert kwargs["env"]["CUDA_VISIBLE_DEVICES"] == ""
+        clock.now += compile_seconds
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"compiled":true,"verification_status":"compile_completed"}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(verifier, "compile_slot", compile_gate)
+    monkeypatch.setattr(verifier, "verifier_slot", busy_gpu)
+    monkeypatch.setattr(verifier, "_run_verifier_process", compile_only)
+    result = verifier.verify_cuda("", "", timeout_s=120, benchmark=False)
+
+    assert observed["phases"] == ["compile"]
+    assert observed["queue_budget"] == 120 - compile_seconds
+    assert result["timeout_phase"] == "verifier_slot_queue"
+    assert result["verification_status"] == "timeout"
+    assert result["correct"] is None
+    assert clock.now == 120
+
+
+def test_single_inflight_reader_can_outlast_feedback_queue_budget(slot_module, tmp_path):
+    path = tmp_path / "slot"
+
+    async def check():
+        async with slot_module.inference_request_slot(1, path=path):
+            with pytest.raises(TimeoutError, match="verifier GPU slot"):
+                async with slot_module.exclusive_inference_slot(0.03, path=path):
+                    pytest.fail("The active reader has not finished")
+        async with slot_module.exclusive_inference_slot(1, path=path):
+            pass
+
+    asyncio.run(check())
 
 
 def test_runner_timeout_reports_last_verifier_phase(slot_module, monkeypatch, tmp_path):

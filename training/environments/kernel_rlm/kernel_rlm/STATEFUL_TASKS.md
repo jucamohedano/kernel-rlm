@@ -43,3 +43,39 @@ with independently initialized reference weights pass, with maximum error about
 to the result is rejected with an error about one, using the same cached extension.
 This verifies the constructor/structured-output path, not model-generated kernel
 quality. Benchmark calls now disable autograd for both reference and candidate.
+
+## CPU preflight is not integrated yet
+
+The saved-candidate CPU diagnostic caught six of the eight old task-0018
+interfaces without compiling an extension. It extracted candidate definitions,
+used real CPU Torch state copying, and replaced the extension with an
+argument-count stub. This proves that those specific errors can be caught
+cheaply; it is not a general numerical verifier or a safe arbitrary-code loader.
+
+The production verifier still compiles before checking candidate state and
+runtime arguments. A future preflight needs a bounded, GPU-hidden subprocess
+and an explicit unsupported result for constructors or bindings it cannot safely
+analyze. Unsupported code must reach the existing verifier, not be falsely
+rejected. Independent CUDA correctness and speed checks remain mandatory.
+
+## Feedback deadline diagnostic
+
+Compilation, GPU admission and execution currently share a 120-second feedback
+deadline. A 54-second compile leaves 66 seconds for both admission and execution.
+An already-active model request can exceed that remaining allowance even after
+the duplicate-reader lock bug is removed. Writer priority blocks new readers;
+it does not preempt requests that already hold a reader lock.
+
+CPU tests reproduce the remaining-budget calculation and a timeout behind one
+active reader without launching CUDA. Recorded relay times had a median of
+87 seconds and a maximum of 209 seconds, but those aggregates do not establish
+exact overlap for every observed timeout. A queue timeout means unknown
+correctness, not a failed numerical test.
+
+Do not increase only the feedback deadline. The base REPL and backend limits are
+270 and 300 seconds. With two enabled 90-second child calls, this baseline
+reserves another 180 seconds, giving 450 and 480 seconds respectively. Two
+feedback calls, any child calls and cleanup must still fit those limits. Queue,
+compile, execution, wake cleanup and episode deadlines need a coordinated budget
+policy. This is follow-up infrastructure work; it is not deployed into the
+unchanged three-update baseline block.
