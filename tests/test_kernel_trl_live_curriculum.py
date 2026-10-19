@@ -64,6 +64,22 @@ def test_inference_environment_exposes_venv_binaries(curriculum, tmp_path):
     assert shutil.which("ninja", path=result["PATH"]) == str(ninja)
 
 
+def test_python_path_and_source_hashes_include_rlm_core(curriculum, tmp_path):
+    source_root = tmp_path / "repo/training/environments/kernel_rlm"
+    (source_root / "kernel_trl").mkdir(parents=True)
+    (source_root / "kernel_trl/__init__.py").write_text("")
+    core = tmp_path / "repo/rlm"
+    core.mkdir(parents=True)
+    (core / "__init__.py").write_text("core")
+
+    configured = curriculum.python_path(source_root, "/existing/path")
+    hashes = curriculum.source_hashes(source_root)
+
+    assert configured.split(":") == [str(source_root), str(tmp_path / "repo"), "/existing/path"]
+    assert hashes["kernel_trl/__init__.py"]
+    assert hashes["rlm/__init__.py"]
+
+
 def test_collection_record_requires_one_group(curriculum, tmp_path):
     output = tmp_path / "rollouts"
     output.mkdir()
