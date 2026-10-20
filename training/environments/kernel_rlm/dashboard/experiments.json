@@ -22,11 +22,11 @@
         "trl-l1-grpo-baseline"
       ],
       "title": "L1 continuation · searchable CUDA docs · 10 turns",
-      "current_run_id": "20261020T000400Z-scoring-repair",
+      "current_run_id": "20261020T010000Z-release-repair",
       "status": "open",
       "intent": "Continue the preserved policy8 through unchanged L1 tasks with searchable archived CUDA guidance and a later submission deadline.",
       "change": "CUDA13.3 reference stored in REPL;8 normal turns plus2 recovery, first deadline warning at8; focused child example; reasoning enabled; inference reuse and CPU precompile.",
-      "conclusion": "The first docs group submitted8/8 with44 reasoning replies and zero child calls/searches. Final scoring initially stopped because the idle guard rejected sleeping vLLM workers. A166-CPU-test repair fully closes inference and recovers the SAME8policy8 samples without resampling. Final scores:5correct kernels at1.519–1.526xreference speed, rewards0.1–0.853, zero final infrastructure errors, one attempt each. The probability audit is running; no new update or quality improvement is claimed yet. Eight trained tasks are inherited.",
+      "conclusion": "Step9 saved on0013 at00:13UTC;9/50trained, one new docs-continuation update. Five correct kernels at1.519–1.526xreference speed. Audit35593tokens passed; both ranks fully restored8 and changedall320adapters. Compact9 backup passes archive+4filehashes. Task0012 then stopped before scoring because a CUDA worker lingered after server-parent exit. New177-CPU-test source waits for GPU release and recovers the SAME8policy9samples without resampling. Scoring is live. No held-out quality improvement established.",
       "decision": "Continue until20October10:00Europe/Madrid within the ORIGINAL60USD total cap, no arbitrary update/group cap. Preserve weak samples without updates. Diagnose and repair unsafe failures before supported checkpoint-safe resume. Keep all coverage/checkpoints.",
       "evidence_file": "notes/results/20261020-docs-training.json",
       "limitations": [
@@ -37,7 +37,8 @@
       ],
       "runs": [
         "20261019T225000Z-docs-turn10",
-        "20261020T000400Z-scoring-repair"
+        "20261020T000400Z-scoring-repair",
+        "20261020T010000Z-release-repair"
       ],
       "provenance": {
         "dataset_ids": [
@@ -55,7 +56,8 @@
         ],
         "documented_change_commits": [
           "6c245d8241ea436376b20f4688aec0845b788ef2",
-          "eb2908ea427575f5a9b623ad9e78f2a52950dec9"
+          "eb2908ea427575f5a9b623ad9e78f2a52950dec9",
+          "fc728fc1de485adee84c98bc33af24325d627a39"
         ],
         "historical_attestation": "Registered before GPU dispatch. Execution source6c245d8 and pinned corpus hash are separate from UI metadata; old snapshots are unchanged."
       }
