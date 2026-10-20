@@ -4,6 +4,53 @@ import json
 from pathlib import Path
 
 
+def test_split_card_import_keeps_topology_and_exact_native_step(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "training/environments/kernel_rlm"))
+    artifacts = importlib.import_module("kernel_trl.artifacts")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "report.json").write_text(
+        json.dumps(
+            {
+                "run_id": "rtx-baseline",
+                "optimizer_steps": 1,
+                "title": "RTX TP1 baseline",
+                "gpu_topology": "RTX GPU0 learner; GPU1 inference",
+                "results": [
+                    {"task_id": "task", "optimizer_step": 18, "metrics": {"train_loss": 0.1}}
+                ],
+            }
+        )
+    )
+    (source / "inputs.json").write_text(
+        json.dumps(
+            {
+                "context_tokens": 16384,
+                "learner_world_size": 1,
+                "inference_tensor_parallel_size": 1,
+                "child_prompt_tokens": 4096,
+                "child_reply_tokens": 4096,
+                "child_tools": True,
+            }
+        )
+    )
+    (source / "update.log").write_text("{'loss': 0.1, 'entropy': 0.2}\n")
+    destination = tmp_path / "normalized"
+    artifacts.import_run(source, destination)
+    report = json.loads((destination / "report.json").read_text())
+    assert report["title"] == "RTX TP1 baseline"
+    assert report["gpu_topology"] == "RTX GPU0 learner; GPU1 inference"
+    metrics = [
+        json.loads(line) for line in (destination / "metrics.jsonl").read_text().splitlines()
+    ]
+    assert [entry["step"] for entry in metrics] == [18]
+    assert metrics[0]["entropy"] == 0.2
+    config = json.loads((destination / "provenance.json").read_text())["config"]
+    assert config["learner_world_size"] == 1
+    assert config["inference_tensor_parallel_size"] == 1
+    assert config["child_tools"] is True
+
+
 def test_saved_messages_and_reasoning_survive_without_ui_redesign(tmp_path, monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "training/environments/kernel_rlm"))
     artifacts = importlib.import_module("kernel_trl.artifacts")

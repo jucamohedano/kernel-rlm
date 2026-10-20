@@ -117,10 +117,12 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
             for result in report["results"]
         ]
     report.update(
-        title="TRL L1 · exact-turn GRPO · TP2 inference",
+        title=report.get("title", "TRL L1 · exact-turn GRPO · TP2 inference"),
         model_id="poolside/Laguna-XS.2",
         model_revision="a397bde04501591d0ac3d74a5d9d0a4ec298ffb8",
-        gpu_topology="Two shared L40S; vLLM and TRL run in separate phases",
+        gpu_topology=report.get(
+            "gpu_topology", "Two shared L40S; vLLM and TRL run in separate phases"
+        ),
         groups=groups,
     )
     if isinstance(report["groups"], dict):
@@ -174,7 +176,14 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
         if log_path.name != "training.log" and not log_path.name.startswith("update"):
             continue
         match = re.search(r"step-(\d+)", str(log_path.parent))
-        step = int(match.group(1)) if match else 1
+        if match:
+            step = int(match.group(1))
+        elif len(metrics_by_step) == 1:
+            step = next(iter(metrics_by_step))
+        elif not metrics_by_step:
+            step = 1
+        else:
+            continue
         for line in log_path.read_text(errors="replace").splitlines():
             if not line.startswith("{'loss':"):
                 continue
@@ -346,6 +355,11 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
             "enable_thinking": captured.get("enable_thinking"),
             "cuda_docs": captured.get("cuda_docs"),
             "children": 2,
+            "child_prompt_tokens": captured.get("child_prompt_tokens"),
+            "child_reply_tokens": captured.get("child_reply_tokens"),
+            "child_tools": captured.get("child_tools", False),
+            "learner_world_size": captured.get("learner_world_size", 2),
+            "inference_tensor_parallel_size": captured.get("inference_tensor_parallel_size", 2),
             "max_optimizer_steps": report.get("optimizer_steps", 0),
         },
         "parent": None,
