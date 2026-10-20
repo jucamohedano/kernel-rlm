@@ -363,7 +363,7 @@ async def run(arguments):
         auto_log_cpu=False,
         embed=False,
         config={
-            "goal_resume_step": 19,
+            "goal_resume_step": state["continuation_parent"]["policy_version"],
             "source_commit": arguments.source_commit,
             "gpu_roles": "RTX GPU1 inference; GPU0 verifier or learner",
             "historical_metrics_are_inherited": True,
@@ -392,9 +392,10 @@ async def run(arguments):
         write_report(arguments, state, budget)
         report = read_json(arguments.output_dir / "report.json")
         report.update(
-            title="RTX L1 continuation from checkpoint19",
+            title=f"RTX L1 continuation from checkpoint{state['continuation_parent']['policy_version']}",
             gpu_topology="Two RTX PRO6000: GPU1 inference, GPU0 verifier/one-rank learner",
-            new_optimizer_steps=state["policy_version"] - 19,
+            new_optimizer_steps=state["policy_version"]
+            - state["continuation_parent"]["policy_version"],
         )
         write_json(arguments.output_dir / "report.json", report)
 

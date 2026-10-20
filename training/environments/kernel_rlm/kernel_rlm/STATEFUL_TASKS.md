@@ -138,3 +138,18 @@ arbitrary hostile Python or a guarantee of generalization over all module states
 The deterministic challenge seeds are reproducibility metadata, not hidden tests.
 It does not repair the separate task0037 timeout, undo the update at checkpoint28,
 or authorize restarting training from a different checkpoint.
+
+An operator-approved repair branch can be prepared with
+`python -m kernel_trl.reward_repair`. It verifies the unchanged 50-task dataset,
+parent lineage, base checkpoint hashes/native readback, exact saved generation,
+revalidation score hashes/reward formula, and matching verifier runtime source.
+It copies only collection artifacts, never the discarded descendant's update or
+audit outputs. Original scores and ledger are retained alongside versioned scores;
+the new ledger adds the explicit revalidation without resetting old attempts.
+One operator-selected pending infrastructure group may be deferred with a reason
+and original manifest/ledger hashes. This is not automatic weak-group filtering.
+
+The prepared new directory uses the driver's existing `--resume` path. The parent
+directory and all previous checkpoints remain immutable. The new branch inherits
+only updates through its chosen base, and must pass fresh probability audit,
+optimizer restore and native readback before accepting its rebuilt update.
