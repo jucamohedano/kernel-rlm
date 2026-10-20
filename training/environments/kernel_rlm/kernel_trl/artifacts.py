@@ -95,6 +95,7 @@ def episode_trace(directory: Path, run_id: str, trace_id: str | None = None) -> 
 def import_run(source: Path, destination: Path, source_commit: str | None = None):
     destination.mkdir(parents=True, exist_ok=False)
     report = read_json(source / "report.json")
+    captured = read_json(source / "inputs.json")
     run_id = report["run_id"]
     groups_path = source / "rollouts/groups.json"
     if groups_path.exists():
@@ -238,7 +239,11 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
                         {
                             "index": int(row[0]),
                             "memory_used_mib": float(row[2].split()[0]),
-                            "memory_total_mib": 46068,
+                            "memory_total_mib": captured["gpu_memory_total_mib_by_index"][
+                                int(row[0])
+                            ]
+                            if "gpu_memory_total_mib_by_index" in captured
+                            else 46068,
                             "gpu_utilization_percent": float(row[3].split()[0]),
                         }
                     ],
@@ -248,7 +253,6 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
     (destination / "gpu_stats.jsonl").write_text(
         "".join(json.dumps(sample) + "\n" for sample in samples)
     )
-    captured = read_json(source / "inputs.json")
     inputs = []
     repository = source / "repo"
     environment = repository / "training/environments/kernel_rlm"

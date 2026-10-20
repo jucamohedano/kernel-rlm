@@ -31,10 +31,15 @@ def test_split_card_import_keeps_topology_and_exact_native_step(tmp_path, monkey
                 "child_prompt_tokens": 4096,
                 "child_reply_tokens": 4096,
                 "child_tools": True,
+                "gpu_memory_total_mib_by_index": [97887, 97887],
             }
         )
     )
     (source / "update.log").write_text("{'loss': 0.1, 'entropy': 0.2}\n")
+    (source / "gpu-telemetry.csv").write_text(
+        "index,timestamp,memory.used,utilization.gpu,power.draw\n"
+        "0,2026/10/20 10:31:00.000,70000 MiB,50 %,200 W\n"
+    )
     destination = tmp_path / "normalized"
     artifacts.import_run(source, destination)
     report = json.loads((destination / "report.json").read_text())
@@ -49,6 +54,8 @@ def test_split_card_import_keeps_topology_and_exact_native_step(tmp_path, monkey
     assert config["learner_world_size"] == 1
     assert config["inference_tensor_parallel_size"] == 1
     assert config["child_tools"] is True
+    gpu = json.loads((destination / "gpu_stats.jsonl").read_text())["gpus"][0]
+    assert gpu["memory_total_mib"] == 97887
 
 
 def test_saved_messages_and_reasoning_survive_without_ui_redesign(tmp_path, monkeypatch):
