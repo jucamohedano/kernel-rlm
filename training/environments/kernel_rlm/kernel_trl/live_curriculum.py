@@ -393,6 +393,10 @@ def continuation_state(arguments, task_order: list[str]) -> dict:
 
 def preserve_incomplete_run(arguments, state: dict) -> None:
     selected = getattr(arguments, "preserved_incomplete_run", None)
+    recover = getattr(arguments, "recover_generated_run", None)
+    if selected is not None and recover is not None:
+        raise ValueError("Select either incomplete preservation or generated recovery")
+    selected = recover or selected
     if selected is None:
         return
     directory = selected.resolve()
@@ -421,7 +425,76 @@ def preserve_incomplete_run(arguments, state: dict) -> None:
         pending = Path(original["pending_directory"]).resolve()
         if not pending.is_relative_to(directory) or not pending.is_dir():
             raise ValueError("Incomplete samples must remain inside their original run")
-        if (pending / "collection/rollouts/generation-manifest.json").exists():
+        generated = pending / "collection/rollouts/generation-manifest.json"
+        if recover is not None:
+            from kernel_trl.scoring import load_episodes
+
+            for option, expected in (
+                ("context_tokens", getattr(arguments, "context_tokens", LEGACY_CONTEXT_TOKENS)),
+                ("max_turns", getattr(arguments, "max_turns", 8)),
+                ("enable_thinking", True),
+            ):
+                if manifest.get(option) != expected:
+                    raise ValueError("Generated recovery cannot change the sampled protocol")
+            if (manifest.get("cuda_docs") or {}).get("sha256") != (
+                documentation_configuration(arguments) or {}
+            ).get("sha256"):
+                raise ValueError("Generated recovery cannot change sampled documentation")
+            generation = read_json(generated)
+            if (
+                generation.get("task") != task
+                or generation.get("policy_version") != state["policy_version"]
+                or len(generation.get("episodes", [])) != GROUP_SIZE
+                or generation.get("context_tokens", LEGACY_CONTEXT_TOKENS)
+                != manifest["context_tokens"]
+                or task in state.get("deferred_task_ids", [])
+                or task
+                != next(
+                    item
+                    for item in state["task_order"]
+                    if item not in state["completed_task_ids"]
+                    and item not in state.get("deferred_task_ids", [])
+                )
+            ):
+                raise ValueError("Generated recovery differs from the next complete sampled group")
+            episodes = load_episodes(generated.parent, generation)
+            task_reference = next(
+                item for item in load_tasks(arguments.dataset) if item["name"] == task
+            )
+            if any(item["task"] != task_reference for item in episodes):
+                raise ValueError("Recovered tasks differ from the pinned dataset")
+            destination = arguments.output_dir / "groups" / pending.name
+            shutil.copytree(pending, destination)
+            restored = load_episodes(destination / "collection/rollouts", generation)
+            if len(restored) != GROUP_SIZE:
+                raise ValueError("Recovered group is incomplete")
+            state["pending_task_id"] = task
+            state["pending_directory"] = str(destination)
+            state.setdefault("attempts", {})[task] = original["attempts"][task]
+            state.setdefault("recovered_generated_runs", []).append(
+                {
+                    "run_id": original["run_id"],
+                    "directory": str(directory),
+                    "source_commit": manifest["source_commit"],
+                    "state_sha256": hashlib.sha256(
+                        (directory / "state.json").read_bytes()
+                    ).hexdigest(),
+                    "generation_sha256": hashlib.sha256(generated.read_bytes()).hexdigest(),
+                    "input_manifest_sha256": original["manifest_sha256"],
+                    "preserved_files_sha256": {
+                        str(path.relative_to(pending)): hashlib.sha256(
+                            path.read_bytes()
+                        ).hexdigest()
+                        for path in sorted(pending.rglob("*"))
+                        if path.is_file() and not path.is_symlink()
+                    },
+                    "failure": original.get("failure"),
+                    "sampled_policy_version": state["policy_version"],
+                    "regenerated": False,
+                }
+            )
+            return
+        if generated.exists():
             raise ValueError("A complete generated group must be scored, not discarded")
         saved = {
             "run_id": original["run_id"],
@@ -867,10 +940,12 @@ def initialize_run(arguments) -> dict:
         "bootstrap_dir": str(arguments.bootstrap_dir) if arguments.bootstrap_dir else None,
         "continuation_parent": state.get("continuation_parent"),
         "preserved_incomplete_runs": state.get("preserved_incomplete_runs", []),
+        "recovered_generated_runs": state.get("recovered_generated_runs", []),
         "replay_source": str(arguments.replay_source)
         if getattr(arguments, "replay_source", None)
         else None,
-        "final_scoring_after_inference_exit": not getattr(arguments, "reuse_inference", False),
+        "final_scoring_after_inference_exit": True,
+        "inference_retained_during_final_scoring": False,
         "reuse_inference": getattr(arguments, "reuse_inference", False),
         "precompile_finals": getattr(arguments, "precompile_finals", False),
         "weak_group_handling": "defer"
@@ -1057,7 +1132,7 @@ async def train_task(arguments, budget: dict, state: dict, task_id: str, inferen
                 )
             if collection.get("status") == "generated":
                 if inference is not None:
-                    await inference.sleep()
+                    await inference.close()
                 record_event(arguments.output_dir, "final_scoring_started", task_id=task_id)
                 await run_torch_phase(
                     arguments,
@@ -1312,6 +1387,7 @@ def main() -> None:
     parser.add_argument("--bootstrap-dir", type=Path)
     parser.add_argument("--parent-run-dir", type=Path)
     parser.add_argument("--preserved-incomplete-run", type=Path)
+    parser.add_argument("--recover-generated-run", type=Path)
     parser.add_argument("--replay-source", type=Path)
     parser.add_argument("--max-groups", type=int)
     parser.add_argument("--max-updates", type=int)

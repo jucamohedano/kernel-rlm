@@ -123,6 +123,92 @@ def test_explicit_incomplete_run_preservation_does_not_reset_coverage(
     assert (directory / "state.json").read_bytes() == before
 
 
+@pytest.mark.parametrize("fault", [None, "protocol", "docs", "sample", "missing", "task"])
+def test_generated_repair_preserves_exact_group_and_scoring_attempts(
+    curriculum, continuation_parent, tmp_path, monkeypatch, fault
+):
+    import copy
+
+    from kernel_trl.scoring import capture_generation
+
+    arguments, original, order = continuation_parent
+    directory = tmp_path / "failed-generated"
+    pending = directory / "groups/step-005"
+    output = pending / "collection/rollouts"
+    output.mkdir(parents=True)
+    task = {"name": order[4], "context": "unchanged reference"}
+    response = {
+        "prompt_token_ids": [1],
+        "choices": [
+            {
+                "token_ids": [2],
+                "finish_reason": "tool_calls",
+                "logprobs": {"content": [{"token": "token_id:2", "logprob": -1.0}]},
+            }
+        ],
+    }
+    for index in range(8):
+        episode = output / f"group-0-trajectory-{index}"
+        episode.mkdir()
+        curriculum.write_json(episode / "task.json", task)
+        curriculum.write_json(episode / "submission.json", {"submission": "unchanged"})
+        (episode / "calls.jsonl").write_text(
+            json.dumps({"policy_version": 4, "branch": "root", "response": response}) + "\n"
+        )
+    capture_generation(output, task["name"], 4, 8, 14336)
+    scoring_state = {"scores": {"0": {"attempts": 2, "sha256": "preserved"}}}
+    curriculum.write_json(output / "scoring-state.json", scoring_state)
+    manifest = curriculum.read_json(arguments.parent_run_dir / "inputs.json")
+    manifest.update(context_tokens=14336, max_turns=10, enable_thinking=True)
+    stopped = copy.deepcopy(original)
+    stopped.update(
+        run_id="failed-generated",
+        status="failed",
+        pending_task_id=order[4],
+        pending_directory=str(pending),
+        attempts={order[4]: 2},
+        continuation_parent={"run_id": "parent-run"},
+    )
+    if fault == "protocol":
+        manifest["max_turns"] = 8
+    if fault == "docs":
+        manifest["cuda_docs"] = {"sha256": "different"}
+    if fault == "sample":
+        (output / "group-0-trajectory-0/calls.jsonl").write_text("changed")
+    if fault == "missing":
+        (output / "group-0-trajectory-7/submission.json").unlink()
+    stopped["manifest_sha256"] = hashlib.sha256(
+        json.dumps(manifest, sort_keys=True).encode()
+    ).hexdigest()
+    curriculum.write_json(directory / "inputs.json", manifest)
+    curriculum.write_json(directory / "state.json", stopped)
+    state = copy.deepcopy(original)
+    state["continuation_parent"] = {"run_id": "parent-run"}
+    arguments.recover_generated_run = directory
+    arguments.output_dir = tmp_path / "repair"
+    arguments.context_tokens = 14336
+    arguments.max_turns = 10
+    monkeypatch.setattr(
+        curriculum,
+        "load_tasks",
+        lambda _: [task if fault != "task" else {**task, "context": "other"}],
+    )
+    before = (directory / "state.json").read_bytes()
+    if fault:
+        with pytest.raises((ValueError, FileNotFoundError)):
+            curriculum.preserve_incomplete_run(arguments, state)
+        return
+    curriculum.preserve_incomplete_run(arguments, state)
+    restored = Path(state["pending_directory"]) / "collection/rollouts"
+    assert state["policy_version"] == 4
+    assert state["completed_task_ids"] == order[:4]
+    assert state["attempts"][order[4]] == 2
+    assert curriculum.read_json(restored / "scoring-state.json") == scoring_state
+    assert state["recovered_generated_runs"][0]["regenerated"] is False
+    assert len(list(restored.glob("group-*-trajectory-*"))) == 8
+    assert (directory / "state.json").read_bytes() == before
+
+
 def test_new_snapshot_continuation_keeps_all_coverage_and_rejected_history(
     curriculum, continuation_parent, monkeypatch
 ):
@@ -701,5 +787,5 @@ def test_resumed_task_collects_audits_and_advances_one_policy_version(
     assert state["completed_task_ids"] == ["task-first", "task-next"]
     assert Path(state["checkpoint"]).name == "checkpoint-step-2"
     assert phases == (["collect"] if mode != "resume_generated" else []) + (
-        (["sleep"] if reuse else []) + ["score"] if mode != "inline" else []
+        (["close"] if reuse else []) + ["score"] if mode != "inline" else []
     ) + (["close"] if reuse else []) + ["audit", "update"]

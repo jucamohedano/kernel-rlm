@@ -73,10 +73,11 @@ inference; CUDA correctness checks and uncontended timing require GPU access.
 
 The next optimizations to validate, in order, are:
 
-1. `--reuse-inference` retains the loaded engine after a weak group when policy
-   and checkpoint metadata are unchanged. It sleeps for final verification,
-   wakes for the next task, and closes before audit/learner work or driver exit.
-   Control failure closes the engine rather than permitting unsafe GPU overlap.
+1. The warm-engine component can reuse a fixed policy, but production final
+   scoring requires zero resident GPU processes. The driver therefore closes
+   inference before final scoring, even with `--reuse-inference`. Retaining a
+   sleeping engine across groups is disabled until the scorer can independently
+   validate its ownership and memory isolation. Do not weaken the idle guard.
 2. `--precompile-finals` starts bounded CPU-only preparation as each rollout
    submits, while siblings continue. The worker hides CUDA and shares the existing
    source-isolated build cache. Its reports are not grades. Final correctness and
@@ -85,6 +86,12 @@ The next optimizations to validate, in order, are:
    workers across learner phases. Sleep can release weights/KV cache, but CUDA
    contexts and communication buffers may remain. Learner allocation retries
    make simultaneous residency unsafe to assume.
+
+After a scoring-startup failure, a new immutable continuation can use
+`--recover-generated-run FAILED_RUN` with the same validated checkpoint parent.
+It verifies all eight captured episodes, exact token samples, task data,
+documentation hash and turn/context protocol. It copies durable scoring attempts
+without resetting them or regenerating trajectories. Audits still gate updates.
 
 Both flags are opt-in and immutable on resume. Per-episode `precompile.json` and
 `precompile-error.json`, plus `inference-lifecycle.jsonl`, record their actual work.
