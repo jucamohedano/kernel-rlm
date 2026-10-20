@@ -124,6 +124,28 @@ def test_eight_rollouts_use_four_slots_and_one_policy(collector, tmp_path):
     assert observed["inference_http_timeout"] == 630
 
 
+def test_dedicated_inference_does_not_pause_the_other_card(collector):
+    module, _observed = collector
+    environment = {"CUDA_VISIBLE_DEVICES": "0", "KERNEL_INFERENCE_ADMIN_URL": "old"}
+    module.configure_inference_route(True, environment)
+    assert "KERNEL_INFERENCE_ADMIN_URL" not in environment
+    assert environment["CUDA_VISIBLE_DEVICES"] == "0"
+    module.configure_inference_route(False, environment)
+    assert environment["KERNEL_INFERENCE_ADMIN_URL"] == "http://127.0.0.1:8016"
+    for visible in ("", "0,1"):
+        with pytest.raises(ValueError, match="exactly one"):
+            module.configure_inference_route(True, {"CUDA_VISIBLE_DEVICES": visible})
+
+
+def test_larger_child_prompt_reaches_the_generator_only_when_selected(collector, tmp_path):
+    module, observed = collector
+    observed["rewards"] = [0.1, 0.8] * 4
+    args = arguments(tmp_path)
+    args.child_prompt_tokens = 4096
+    asyncio.run(module.collect(args))
+    assert observed["generator_kwargs"]["limits"]["child_prompt_tokens"] == 4096
+
+
 def test_transport_does_not_readmit_a_root_when_verifier_is_waiting(
     collector, tmp_path, monkeypatch
 ):

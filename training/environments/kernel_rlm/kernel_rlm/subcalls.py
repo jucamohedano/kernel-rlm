@@ -138,7 +138,10 @@ class BoundedSubcalls:
         max_calls=SUBCALL_MAX_CALLS,
         enable_thinking=False,
         admission_enabled=True,
+        prompt_tokens=2048,
     ):
+        if prompt_tokens not in {2048, 4096}:
+            raise ValueError("Child prompt allowance must be 2048 or 4096 tokens")
         self.client = client
         self.model = model
         self.count_tokens = count_tokens
@@ -147,6 +150,7 @@ class BoundedSubcalls:
         self.max_calls = max_calls
         self.enable_thinking = enable_thinking
         self.admission_enabled = admission_enabled
+        self.prompt_tokens = prompt_tokens
         self.calls_used = 0
 
     async def query(self, prompt, state=None):
@@ -154,8 +158,13 @@ class BoundedSubcalls:
             raise ValueError("Subcall budget exhausted for this trajectory")
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("Subcall prompt must be a non-empty string")
-        if len(prompt.encode("utf-8")) > 32768 or self.count_tokens(prompt) > 2048:
-            raise ValueError("Subcall prompt exceeds the 2,048-token limit; shorten it")
+        if (
+            len(prompt.encode("utf-8")) > self.prompt_tokens * 16
+            or self.count_tokens(prompt) > self.prompt_tokens
+        ):
+            raise ValueError(
+                f"Subcall prompt exceeds the {self.prompt_tokens:,}-token limit; shorten it"
+            )
         self.calls_used += 1
         entry = {"prompt": prompt, "model": self.model, "status": "running"}
         entry["call_index"] = self.calls_used

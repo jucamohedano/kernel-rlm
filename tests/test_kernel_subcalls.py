@@ -36,6 +36,18 @@ def test_task_prompt_requires_a_contract_checklist(subcalls):
     assert "parameter or buffer names" in KERNEL_TASK_INSTRUCTION
 
 
+def test_larger_child_prompt_is_explicit_and_preserves_reply_cap(subcalls):
+    client = fake_client()
+    child = subcalls(client, "same-model", len, [], prompt_tokens=4096)
+    assert asyncio.run(child.query("a" * 3000)) == "CUDA advice"
+    assert client.chat.completions.create.call_args.kwargs["max_tokens"] == 4096
+    default = subcalls(fake_client(), "same-model", len, [])
+    with pytest.raises(ValueError, match="2,048-token"):
+        asyncio.run(default.query("a" * 3000))
+    with pytest.raises(ValueError, match="allowance"):
+        subcalls(fake_client(), "same-model", len, [], prompt_tokens=8192)
+
+
 def test_budget_and_trace(subcalls):
     client = fake_client()
     records = []

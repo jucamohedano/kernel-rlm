@@ -57,6 +57,11 @@ async def run(task: dict) -> None:
     max_child_calls = int(limits.get("max_subcalls", 1))
     subcall_timeout = SUBCALL_TIMEOUT_S * max_child_calls if limits.get("enable_subcall") else 0
     subcall_instruction = SUBCALL_INSTRUCTION.format(max_calls=max_child_calls)
+    child_prompt_tokens = limits.get("child_prompt_tokens", 2048)
+    if child_prompt_tokens == 4096:
+        subcall_instruction = subcall_instruction.replace(
+            "prompt limit is 2,048", "prompt limit is 4,096"
+        )
     backend = SubprocessReplBackend(request_timeout=BACKEND_TIMEOUT_S + subcall_timeout)
     proxy = None
     task_prompt = task["prompt"]
@@ -119,6 +124,7 @@ async def run(task: dict) -> None:
                 max_calls=max_child_calls,
                 enable_thinking=bool(limits.get("enable_thinking")),
                 admission_enabled=not limits.get("bridge_owns_admission", False),
+                prompt_tokens=child_prompt_tokens,
             )
             proxy = SubLLMProxy()
             proxy.register(

@@ -27,6 +27,16 @@ DEFAULT_MODEL_TIMEOUT_SECONDS = 150
 KernelGenerator = None
 
 
+def configure_inference_route(dedicated: bool, environment) -> None:
+    if dedicated:
+        visible = environment.get("CUDA_VISIBLE_DEVICES", "")
+        if not visible or "," in visible:
+            raise ValueError("Dedicated inference requires exactly one explicit verifier GPU")
+        environment.pop("KERNEL_INFERENCE_ADMIN_URL", None)
+    else:
+        environment["KERNEL_INFERENCE_ADMIN_URL"] = "http://127.0.0.1:8016"
+
+
 class InferenceClient:
     """Transport bridge-admitted requests without acquiring a second reader lock."""
 
@@ -203,6 +213,7 @@ async def collect(arguments):
                 "max_context_tokens": context_tokens,
                 "max_turns": getattr(arguments, "max_turns", 8),
                 "enable_thinking": True,
+                "child_prompt_tokens": getattr(arguments, "child_prompt_tokens", 2048),
                 "cuda_docs": str(arguments.cuda_docs)
                 if getattr(arguments, "cuda_docs", None)
                 else None,
@@ -370,6 +381,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--endpoint", default="http://127.0.0.1:8006")
     parser.add_argument("--context-tokens", type=int, default=DEFAULT_CONTEXT_TOKENS)
+    parser.add_argument("--child-prompt-tokens", type=int, choices=(2048, 4096), default=2048)
+    parser.add_argument("--dedicated-inference", action="store_true")
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -412,7 +425,7 @@ def main():
         arguments.group_timeout_s = 900 * (arguments.rollouts // 4)
     if arguments.group_timeout_s <= 0:
         raise ValueError("Group timeout must be positive")
-    os.environ["KERNEL_INFERENCE_ADMIN_URL"] = "http://127.0.0.1:8016"
+    configure_inference_route(arguments.dedicated_inference, os.environ)
     asyncio.run(asyncio.wait_for(collect(arguments), timeout=arguments.group_timeout_s))
 
 
