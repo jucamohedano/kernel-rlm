@@ -18,7 +18,7 @@ def imports(monkeypatch):
 
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
-    from kernel_trl import live_curriculum, live_driver
+    from kernel_trl import inference_lifecycle, live_curriculum, live_driver
     from kernel_trl.inference_lifecycle import WarmInference
 
     process = SimpleNamespace(pid=12345, returncode=None, wait=AsyncMock())
@@ -26,6 +26,7 @@ def runtime(tmp_path, monkeypatch):
     stopper = AsyncMock()
     monkeypatch.setattr(asyncio, "create_subprocess_exec", launcher)
     monkeypatch.setattr(live_driver, "stop_group", stopper)
+    monkeypatch.setattr(inference_lifecycle, "wait_for_gpu_release", AsyncMock(return_value=0.75))
     monkeypatch.setattr(live_curriculum, "server_command", lambda *args: ["mock-inference"])
     monkeypatch.setattr(live_curriculum, "inference_environment", lambda *args: {})
     monkeypatch.setattr(live_curriculum, "wait_for_server", AsyncMock())
@@ -40,6 +41,45 @@ def runtime(tmp_path, monkeypatch):
     )
     lease.control = AsyncMock()
     return lease, launcher, stopper
+
+
+def test_gpu_release_wait_rechecks_driver_instead_of_ignoring_busy_pids(monkeypatch):
+    from unittest.mock import Mock
+
+    from kernel_trl import live_curriculum
+    from kernel_trl.inference_lifecycle import wait_for_gpu_release
+
+    guard = Mock(side_effect=[RuntimeError("busy"), RuntimeError("busy"), None])
+    monkeypatch.setattr(live_curriculum, "ensure_gpus_idle", guard)
+    elapsed = asyncio.run(wait_for_gpu_release(timeout_seconds=1, poll_seconds=0.001))
+    assert guard.call_count == 3
+    assert elapsed > 0
+
+
+def test_gpu_release_wait_fails_closed_when_compute_pids_remain(monkeypatch):
+    from kernel_trl import live_curriculum
+    from kernel_trl.inference_lifecycle import wait_for_gpu_release
+
+    def busy():
+        raise RuntimeError("GPU compute PIDs remain")
+
+    monkeypatch.setattr(live_curriculum, "ensure_gpus_idle", busy)
+    with pytest.raises(RuntimeError, match="GPU compute PIDs remain"):
+        asyncio.run(wait_for_gpu_release(timeout_seconds=0.003, poll_seconds=0.001))
+
+
+def test_gpu_release_wait_does_not_hide_a_failed_nvidia_query(monkeypatch):
+    import subprocess
+
+    from kernel_trl import live_curriculum
+    from kernel_trl.inference_lifecycle import wait_for_gpu_release
+
+    def failed_query():
+        raise subprocess.CalledProcessError(1, "nvidia-smi")
+
+    monkeypatch.setattr(live_curriculum, "ensure_gpus_idle", failed_query)
+    with pytest.raises(subprocess.CalledProcessError):
+        asyncio.run(wait_for_gpu_release())
 
 
 def test_same_policy_sleep_wake_reuses_one_process(runtime, tmp_path):
@@ -57,6 +97,7 @@ def test_same_policy_sleep_wake_reuses_one_process(runtime, tmp_path):
         await lease.close()
         stopper.assert_awaited_once_with(original.pid)
         assert lease.process is None
+        assert lease.events[-1]["gpu_release_wait_seconds"] == 0.75
 
     asyncio.run(check())
 

@@ -124,8 +124,9 @@ def test_explicit_incomplete_run_preservation_does_not_reset_coverage(
 
 
 @pytest.mark.parametrize("fault", [None, "protocol", "docs", "sample", "missing", "task"])
+@pytest.mark.parametrize("parent_mode", ["shared_parent", "direct_parent"])
 def test_generated_repair_preserves_exact_group_and_scoring_attempts(
-    curriculum, continuation_parent, tmp_path, monkeypatch, fault
+    curriculum, continuation_parent, tmp_path, monkeypatch, fault, parent_mode
 ):
     import copy
 
@@ -184,6 +185,9 @@ def test_generated_repair_preserves_exact_group_and_scoring_attempts(
     curriculum.write_json(directory / "state.json", stopped)
     state = copy.deepcopy(original)
     state["continuation_parent"] = {"run_id": "parent-run"}
+    if parent_mode == "direct_parent":
+        arguments.parent_run_dir = directory
+        state["continuation_parent"] = {"run_id": stopped["run_id"]}
     arguments.recover_generated_run = directory
     arguments.output_dir = tmp_path / "repair"
     arguments.context_tokens = 14336
@@ -207,6 +211,40 @@ def test_generated_repair_preserves_exact_group_and_scoring_attempts(
     assert state["recovered_generated_runs"][0]["regenerated"] is False
     assert len(list(restored.glob("group-*-trajectory-*"))) == 8
     assert (directory / "state.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("recover", [True, False])
+def test_failed_generated_parent_needs_explicit_same_parent_recovery(
+    curriculum, continuation_parent, monkeypatch, recover
+):
+    arguments, original, order = continuation_parent
+    pending = arguments.parent_run_dir / "groups/pending"
+    output = pending / "collection/rollouts"
+    output.mkdir(parents=True)
+    (output / "generation-manifest.json").write_text("{}")
+    original.update(status="failed", pending_directory=str(pending), pending_task_id=order[4])
+    original["recovered_generated_runs"] = [{"run_id": "earlier-recovery"}]
+    curriculum.write_json(arguments.parent_run_dir / "state.json", original)
+    arguments.recover_generated_run = arguments.parent_run_dir if recover else None
+    monkeypatch.setattr(
+        curriculum,
+        "bootstrap_state",
+        lambda *args: {
+            "policy_version": 4,
+            "completed_task_ids": order[3:4],
+            "results": [{"rewards": [0.8, 0.1]}],
+        },
+    )
+    before = (arguments.parent_run_dir / "state.json").read_bytes()
+    if not recover:
+        with pytest.raises(ValueError, match="saved continuation boundary"):
+            curriculum.continuation_state(arguments, order)
+        return
+    result = curriculum.continuation_state(arguments, order)
+    assert result["policy_version"] == 4
+    assert result["completed_task_ids"] == order[:4]
+    assert result["recovered_generated_runs"] == original["recovered_generated_runs"]
+    assert (arguments.parent_run_dir / "state.json").read_bytes() == before
 
 
 def test_new_snapshot_continuation_keeps_all_coverage_and_rejected_history(

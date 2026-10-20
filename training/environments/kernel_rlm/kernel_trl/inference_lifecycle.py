@@ -11,6 +11,21 @@ import aiohttp
 from kernel_trl.spending import phase_deadline
 
 
+async def wait_for_gpu_release(timeout_seconds: float = 30, poll_seconds: float = 0.5):
+    from kernel_trl.live_curriculum import ensure_gpus_idle
+
+    started = time.monotonic()
+    while True:
+        try:
+            ensure_gpus_idle()
+            return time.monotonic() - started
+        except RuntimeError:
+            remaining = timeout_seconds - (time.monotonic() - started)
+            if remaining <= 0:
+                raise
+            await asyncio.sleep(min(poll_seconds, remaining))
+
+
 class WarmInference:
     def __init__(self, arguments, budget: dict):
         self.arguments = arguments
@@ -104,7 +119,8 @@ class WarmInference:
             if self.process is not None:
                 await stop_group(self.process.pid)
                 await self.process.wait()
-                self.record("stop", started)
+                released = await wait_for_gpu_release()
+                self.record("stop", started, gpu_release_wait_seconds=released)
         finally:
             self.process = None
             self.identity = None

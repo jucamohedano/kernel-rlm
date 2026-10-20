@@ -319,9 +319,21 @@ def continuation_state(arguments, task_order: list[str]) -> dict:
         state_path = parent / "state.json"
         state = read_json(state_path)
         manifest = read_json(parent / "inputs.json")
-        if state.get("status") not in {"paused", "needs_diagnosis"}:
+        recover = getattr(arguments, "recover_generated_run", None)
+        recovering_parent = (
+            recover is not None
+            and recover.resolve() == parent
+            and state.get("status") == "failed"
+            and state.get("pending_directory") is not None
+            and Path(state["pending_directory"])
+            .joinpath("collection/rollouts/generation-manifest.json")
+            .exists()
+        )
+        if state.get("status") not in {"paused", "needs_diagnosis"} and not recovering_parent:
             raise ValueError("Parent must have stopped at a saved continuation boundary")
-        if state.get("pending_directory") or state.get("pending_task_id"):
+        if (
+            state.get("pending_directory") or state.get("pending_task_id")
+        ) and not recovering_parent:
             raise ValueError("Preserve and diagnose unfinished parent samples before continuing")
         if (
             manifest.get("model_revision") != MODEL_REVISION
@@ -377,6 +389,7 @@ def continuation_state(arguments, task_order: list[str]) -> dict:
             "deferred_task_ids": copy.deepcopy(state.get("deferred_task_ids", [])),
             "deferred_groups": copy.deepcopy(state.get("deferred_groups", [])),
             "preserved_incomplete_runs": copy.deepcopy(state.get("preserved_incomplete_runs", [])),
+            "recovered_generated_runs": copy.deepcopy(state.get("recovered_generated_runs", [])),
             "continuation_parent": {
                 "run_id": state["run_id"],
                 "directory": str(parent),
@@ -418,8 +431,15 @@ def preserve_incomplete_run(arguments, state: dict) -> None:
             or manifest.get("model_revision") != MODEL_REVISION
             or original.get("manifest_sha256")
             != hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()
-            or original.get("continuation_parent", {}).get("run_id")
-            != state.get("continuation_parent", {}).get("run_id")
+            or (
+                original.get("continuation_parent", {}).get("run_id")
+                != state.get("continuation_parent", {}).get("run_id")
+                and not (
+                    recover is not None
+                    and directory == arguments.parent_run_dir.resolve()
+                    and state.get("continuation_parent", {}).get("run_id") == original["run_id"]
+                )
+            )
         ):
             raise ValueError("Incomplete run differs from the validated checkpoint/coverage parent")
         pending = Path(original["pending_directory"]).resolve()

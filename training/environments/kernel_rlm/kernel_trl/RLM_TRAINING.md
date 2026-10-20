@@ -78,6 +78,9 @@ The next optimizations to validate, in order, are:
    inference before final scoring, even with `--reuse-inference`. Retaining a
    sleeping engine across groups is disabled until the scorer can independently
    validate its ownership and memory isolation. Do not weaken the idle guard.
+   Closing the parent process does not prove that CUDA workers have released
+   their contexts. Cleanup polls the unchanged GPU-idle guard for at most 30
+   seconds after process-group termination; persistent PIDs still fail closed.
 2. `--precompile-finals` starts bounded CPU-only preparation as each rollout
    submits, while siblings continue. The worker hides CUDA and shares the existing
    source-isolated build cache. Its reports are not grades. Final correctness and
