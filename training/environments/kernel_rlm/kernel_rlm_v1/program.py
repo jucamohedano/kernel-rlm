@@ -22,7 +22,7 @@ from kernel_rlm.actions import (
 )
 from kernel_rlm.capacity import context_exhaustion_details
 from kernel_rlm.child_tools import TOOL_CHILD_TIMEOUT_S, IterativeSubcalls, enclosing_timeouts
-from kernel_rlm.cuda_docs import DOCS_INSTRUCTION, docs_manifest
+from kernel_rlm.cuda_docs import DOCS_INSTRUCTION, docs_manifest, hardware_instruction
 from kernel_rlm.feedback import build_local_feedback_bootstrap
 from kernel_rlm.subcalls import (
     KERNEL_SYSTEM,
@@ -123,9 +123,13 @@ async def run(task: dict) -> None:
         "reasoning_enabled": bool(limits.get("enable_thinking")),
     }
     docs_path = limits.get("cuda_docs")
+    hardware_context = ""
     if docs_path:
         record["cuda_docs"] = docs_manifest(Path(docs_path), limits["cuda_docs_sha256"])
-        messages[0]["content"] += "\n" + DOCS_INSTRUCTION
+        hardware_context = hardware_instruction(
+            record["cuda_docs"], os.environ.get("TORCH_CUDA_ARCH_LIST")
+        )
+        messages[0]["content"] += "\n" + DOCS_INSTRUCTION + "\n" + hardware_context
     last_usage = {}
     last_usage_message_count = 0
     compiler_names = {"load_inline"}
@@ -150,6 +154,7 @@ async def run(task: dict) -> None:
                 enable_thinking=bool(limits.get("enable_thinking")),
                 admission_enabled=not limits.get("bridge_owns_admission", False),
                 prompt_tokens=child_prompt_tokens,
+                hardware_context=hardware_context,
             )
             if limits.get("child_tools"):
                 subcalls = IterativeSubcalls(
@@ -160,6 +165,7 @@ async def run(task: dict) -> None:
                     reference=task["context"],
                     directory=Path(feedback_log_dir) / "child-tools",
                     max_calls=max_child_calls,
+                    hardware_context=hardware_context,
                 )
             proxy = SubLLMProxy()
             proxy.register(

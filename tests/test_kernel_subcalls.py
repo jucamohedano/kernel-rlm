@@ -36,6 +36,26 @@ def test_task_prompt_requires_a_contract_checklist(subcalls):
     assert "parameter or buffer names" in KERNEL_TASK_INSTRUCTION
 
 
+def test_hardware_context_reaches_child_without_changing_system_role(subcalls):
+    from kernel_rlm.subcalls import CHILD_SYSTEM
+
+    client = fake_client()
+    child = subcalls(client, "same-model", len, [], hardware_context="Target sm_120 CUDA13.3")
+    asyncio.run(child.query("Review indexing"))
+    messages = client.chat.completions.create.call_args.kwargs["messages"]
+    assert messages[0]["content"] == CHILD_SYSTEM
+    assert messages[1]["content"].startswith("Target sm_120 CUDA13.3")
+
+
+def test_hardware_context_cannot_bypass_child_input_cap(subcalls):
+    client = fake_client()
+    child = subcalls(client, "same-model", len, [], hardware_context="target" * 400)
+    with pytest.raises(ValueError, match="token limit"):
+        asyncio.run(child.query("Review indexing"))
+    client.chat.completions.create.assert_not_called()
+    assert child.calls_used == 0
+
+
 def test_larger_child_prompt_is_explicit_and_preserves_reply_cap(subcalls):
     client = fake_client()
     child = subcalls(client, "same-model", len, [], prompt_tokens=4096)

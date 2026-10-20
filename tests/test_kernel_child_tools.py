@@ -84,6 +84,34 @@ def test_child_checks_repairs_and_returns_only_measured_status(module, tmp_path,
     )
 
 
+def test_child_hardware_context_preserves_bridge_identity_and_reference(module, tmp_path):
+    session, client, _records = child(
+        module,
+        tmp_path,
+        [response({"action": "finish", "source": "", "advice": "review"})],
+        hardware_context="Target RTX PRO 6000 sm_120, CUDA13.3",
+    )
+    asyncio.run(session.query("Review indexing"))
+    messages = client.chat.completions.create.call_args.kwargs["messages"]
+    assert messages[0]["content"] == module.TOOL_CHILD_SYSTEM
+    assert messages[1]["content"].startswith("Target RTX PRO 6000 sm_120")
+    assert "Immutable reference source:\nunchanged reference" in messages[1]["content"]
+    assert session.reference == "unchanged reference"
+
+
+def test_child_hardware_context_counts_toward_existing_input_budget(module, tmp_path):
+    session, client, _records = child(
+        module,
+        tmp_path,
+        [],
+        hardware_context="target " * 5000,
+    )
+    with pytest.raises(ValueError, match="4096 input tokens"):
+        asyncio.run(session.query("Review indexing"))
+    client.chat.completions.create.assert_not_called()
+    assert session.calls_used == 0
+
+
 def test_child_cannot_self_certify_an_untested_source(module, tmp_path):
     session, _client, records = child(
         module,

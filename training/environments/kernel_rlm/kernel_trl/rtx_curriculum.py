@@ -21,6 +21,7 @@ from kernel_trl.checkpoint_state import checkpoint_metadata
 from kernel_trl.inference_lifecycle import wait_for_gpu_release
 from kernel_trl.live_curriculum import (
     MODEL_REVISION,
+    documentation_configuration,
     ensure_gpus_idle,
     inference_environment,
     read_json,
@@ -38,6 +39,13 @@ from kernel_trl.scoring import INFRASTRUCTURE_STATUSES, digest, load_episodes, s
 from kernel_trl.spending import phase_deadline, spending_snapshot
 
 GROUP_SECONDS = 12000
+
+
+def require_rtx_documentation(arguments) -> dict:
+    metadata = documentation_configuration(arguments)
+    if not metadata or metadata.get("target_profile") != "sm120":
+        raise ValueError("RTX continuation requires a pinned SM120 documentation profile")
+    return metadata
 
 
 def migration_state(bundle: Path, dataset: Path, checkpoint: Path) -> dict:
@@ -299,6 +307,7 @@ async def run(arguments):
             inputs["source_commit"] != arguments.source_commit
             or inputs["source_sha256"] != source_hashes(arguments.source_root)
             or inputs["dataset_sha256"] != digest(arguments.dataset)
+            or inputs.get("cuda_docs") != require_rtx_documentation(arguments)
             or state["manifest_sha256"]
             != hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
         ):
@@ -673,6 +682,7 @@ def main():
     arguments.cuda_arch_list = "12.0"
     if digest(arguments.cuda_docs) != arguments.cuda_docs_sha256:
         raise ValueError("Pinned CUDA documentation changed")
+    require_rtx_documentation(arguments)
     signal.signal(
         signal.SIGTERM, lambda signal_number, frame: (_ for _ in ()).throw(KeyboardInterrupt())
     )

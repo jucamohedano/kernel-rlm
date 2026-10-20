@@ -153,3 +153,30 @@ The prepared new directory uses the driver's existing `--resume` path. The paren
 directory and all previous checkpoints remain immutable. The new branch inherits
 only updates through its chosen base, and must pass fresh probability audit,
 optimizer restore and native readback before accepting its rebuilt update.
+
+## Hardware-scoped CUDA documentation
+
+Generate a new collection with `python -m kernel_rlm.cuda_docs --download DIR
+--target-profile sm120`. It retains pinned CUDA13.3 programming, best-practices
+and nvcc references, adds the NVIDIA Blackwell tuning/compatibility guides, and
+does not include Ada as the target tuning guide. Original HTML, URLs, notices
+and SHA256 hashes remain in the private cache. Never overwrite a corpus used by
+an immutable run: a new collection requires a new checksum and source receipt.
+
+The RTX driver requires an SM120-profiled corpus and checks the recorded docs
+metadata on resume. The root prompt verifies this profile against the supplied
+`TORCH_CUDA_ARCH_LIST=12.0` (or12.0+PTX), identifies RTXPRO6000/CC12.0, and warns
+that SM100/B200 features or compiler flags do not automatically apply to SM120.
+Every search/read result carries the target scope. Generic archived examples
+are reference material, not permission to override the job's compiler target.
+
+Both child types receive the same hardware context in their user assignment,
+within their existing input-token cap. Their system identities, bridge routing,
+generated-token budgets and exclusion from root loss are unchanged. This is a
+prompt/retrieval correction, not a security mechanism against a candidate that
+deliberately changes environment variables or compiler flags.
+
+Stage new source and docs while a healthy old driver runs; do not hot-patch it
+or relabel its existing trajectories as using the new prompt. Activate only in
+an explicitly recorded, checkpoint-safe immutable continuation with the original
+spending baseline, source/docs pins and ordinary safety gates preserved.

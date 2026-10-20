@@ -113,6 +113,7 @@ class IterativeSubcalls:
         max_calls=2,
         timeout_s=TOOL_CHILD_TIMEOUT_S,
         checker=check_candidate,
+        hardware_context="",
     ):
         if max_calls not in {1, 2} or not 0 < timeout_s <= TOOL_CHILD_TIMEOUT_S:
             raise ValueError("Use at most two children with a bounded session deadline")
@@ -120,6 +121,7 @@ class IterativeSubcalls:
         self.records, self.reference, self.directory = records, reference, Path(directory)
         self.max_calls, self.timeout_s, self.checker = max_calls, timeout_s, checker
         self.calls_used = 0
+        self.hardware_context = hardware_context
 
     async def query(self, prompt, state=None):
         if self.calls_used >= self.max_calls:
@@ -127,6 +129,8 @@ class IterativeSubcalls:
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("Child assignment must be nonempty text")
         assignment = "Immutable reference source:\n" + self.reference + "\nAssignment:\n" + prompt
+        if self.hardware_context:
+            assignment = self.hardware_context + "\n" + assignment
         if len(assignment.encode()) > 65536 or self.count_tokens(assignment) > 4096:
             raise ValueError("Child reference plus assignment exceeds 4096 input tokens")
         self.calls_used += 1

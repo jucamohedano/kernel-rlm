@@ -139,6 +139,7 @@ class BoundedSubcalls:
         enable_thinking=False,
         admission_enabled=True,
         prompt_tokens=2048,
+        hardware_context="",
     ):
         if prompt_tokens not in {2048, 4096}:
             raise ValueError("Child prompt allowance must be 2048 or 4096 tokens")
@@ -151,6 +152,7 @@ class BoundedSubcalls:
         self.enable_thinking = enable_thinking
         self.admission_enabled = admission_enabled
         self.prompt_tokens = prompt_tokens
+        self.hardware_context = hardware_context
         self.calls_used = 0
 
     async def query(self, prompt, state=None):
@@ -158,6 +160,8 @@ class BoundedSubcalls:
             raise ValueError("Subcall budget exhausted for this trajectory")
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("Subcall prompt must be a non-empty string")
+        if self.hardware_context:
+            prompt = self.hardware_context + "\nAssignment:\n" + prompt
         if (
             len(prompt.encode("utf-8")) > self.prompt_tokens * 16
             or self.count_tokens(prompt) > self.prompt_tokens
