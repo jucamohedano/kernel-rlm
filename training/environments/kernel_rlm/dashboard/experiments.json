@@ -17,6 +17,36 @@
   },
   "experiments": [
     {
+      "id": "trl-rtx-split-baseline",
+      "follows_experiments": ["trl-l1-child-progress"],
+      "title": "RTX split-card · unchanged eight-rollout baseline",
+      "current_run_id": "20261020T103000Z-split-baseline-retry",
+      "status": "open",
+      "intent": "Validate dedicated TP1 inference and one-rank TRL/Muon with unchanged task0026, checkpoint17 and rollout protocol before expanding research tools.",
+      "change": "RTX PRO6000 hardware, explicit two-to-one Muon state conversion, dedicated GPU1 inference and GPU0 verification/learner phases. No root prompt/reward/context/rollout-count change.",
+      "conclusion": "Eight complete rollouts,3correct kernels, no final infrastructure errors. Exact39416root-token audit passed; all320adapters changed in one update17→18. Native readback restored all320momentum tensors plus scheduler/RNG/counter. One new optimizer point, not18new updates. Collection-through-readback1137.97seconds, excluding initial inference startup. Historical L40S task cycle2284.54seconds, but trajectories/token work differ; no repeatable hardware-only speedup or quality claim.",
+      "decision": "Completed control; do not repeat or merge this independent branch over the newer L40S policy19. Expanded child pilot remains separately gated within RTX20USD total.",
+      "evidence_file": "notes/results/20261020-rtx-split-progression.json",
+      "limitations": ["Fresh stochastic trajectories, not bitwise-paired samples.", "Different GPU reference timings affect speed rewards.", "Only one update; no held-out quality evaluation.", "Training and verification alternate on GPU0; not a production async curriculum driver."],
+      "runs": ["20261020T103000Z-split-baseline-retry"],
+      "provenance": {"dataset_ids": ["ops6k-l1-seed42"], "documented_change_commits": ["5c18655", "f7f9e46"], "notes": ["notes/results/20261020-rtx-split-progression.json"]}
+    },
+    {
+      "id": "trl-rtx-child-research",
+      "follows_experiments": ["trl-rtx-split-baseline"],
+      "title": "RTX research pilot · 16K context · compiler children",
+      "current_run_id": "20261020T111000Z-child-research-repair",
+      "status": "open",
+      "intent": "Test a larger bounded research workflow only after resident verification, single-rank resume, full baseline and actual child tool checks pass.",
+      "change": "Root16384context, child4096input/4096aggregate output, up to2children with2compiler/correctness checks each. Reasoning and root-only loss preserved. New fenced-source action protocol avoids JSON-escaping CUDA source; format repair shares the same token budget.",
+      "conclusion": "Four concurrent near16K requests each generated4096exact tokens without failure. Repaired live child completed3560tokens across4requests, including2format repairs and1correct CUDA check; zerochild samples entered root loss. It corrected the fixture before checking, so a failed-compile-to-repair cycle remains unproven. Fresh eight-rollout pilot is starting; no new update confirmed yet.",
+      "decision": "At most one independent17→18update, after complete independent final grades and exact audit, then save/resume. Do not enlarge to4children or migrate the50task goal automatically.",
+      "evidence_file": "notes/results/20261020-rtx-split-progression.json",
+      "limitations": ["Several protocol changes together; not a single-variable ablation.", "Actual tool availability is not proof of useful spontaneous delegation.", "Both pilot branches start from17; their step18checkpoints are different models.", "The earlier JSON-format diagnostic and zero-sample refused waiter remain preserved."],
+      "runs": ["20261020T111000Z-child-research-repair"],
+      "provenance": {"dataset_ids": ["ops6k-l1-seed42"], "documented_change_commits": ["6206d12", "bba9aaa", "420df34", "8c45656"], "notes": ["notes/results/20261020-rtx-split-progression.json"]}
+    },
+    {
       "id": "trl-l1-child-progress",
       "follows_experiments": ["trl-l1-docs-ten-turn"],
       "title": "L1 continuation · child token progress · 4K child replies",
