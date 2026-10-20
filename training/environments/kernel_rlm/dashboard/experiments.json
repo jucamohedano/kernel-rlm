@@ -34,14 +34,14 @@
       },
       "intent": "Continue from checkpoint27 after the operator-approved identity-shortcut reward repair, with0037explicitly deferred and50USDtotal RTX authorization.",
       "change": "Initial25bb15f rebuilt28with BatchNorm state-v2 using all8original0017samples; originalbad28preserved. Newd1767ad descendantinherits29and repairs candidate loading attribution after natural pause, explicitly revalidates onlythe exactfailed0031member, preservesall8samples/7other scores/attempts, and activates approvedSM120docsforfreshgroups. Dataset/order/shapes/rewardformula/root-onlyloss unchanged.",
-      "conclusion": "At21:42UTCnew immutable d1767ad driver57108healthy collecting0032at acceptedP29. Parent completed0025update29:4/8correct,onefaster;51710token audit,full28restore/native29readback passed. Parent later paused on0031candidate NameError wrongly labeledreference_loading afterinlinecompile erasedowner.137localCPU/58remoteCPUtests andone exactcandidate revalidation passed. All8pending samples reused,7successfulscoresunchanged,member3explicitrevalidation recorded as attempt3; fullyscoredweak0031deferredwithoutupdate. Newruninherits29points,zero newupdates;9deferred/12nondeferredremaining. ApprovedSM120docsareLIVEforfresh0032;first4rootrequests omitstaleL40Stextandinclude reasoning. Local29backup+privateHF29commit25d7b0a verified; prior28uploadfinishedindependently,notkilled. No quality gain claimed.",
+      "conclusion": "At22:33UTCsame driver57108healthy collecting0048at acceptedP30:29inherited+1newupdate. Weak0032fullyscored/deferredwithoutupdate;10deferred/10nondeferredremaining. Step30/0022CrossMapLRN2d3of8correct,one4.9667xfaster;fastestperformsrealCUDAneighborhoodnormalization,notidentity.41817root-token audit,full29restore,320changedadapters/native30readbackpassed. Loss.15278974,peak74900527104bytes,noOOM/allocator/Tracebackmatches.115of115newcompletedrootrepliesreasoning+SM120guidance;6docsqueries(5withhits),0children. Local30archive+3hashesverified,privateHFcommita640c00all8addresses/sizesverified. Viewer24scoredtracesbutonly8new-updateadmitted;curve30points. Estimated38.55/50;nextgroupmayhitunchanged12000s+$2guardabove38.73,currentreserved0048notinterrupted. No heldoutqualityclaim.",
       "decision": "Continue unchanged remaining L1 pass within50USDtotal with original full-phase/cleanup guards. Skip only the explicitly deferred0037and prior deferred weak tasks. Audit/readback gates remain. User controls VM termination; hourly monitoring resumes.",
-      "evidence_file": "notes/results/20261020-loading-owner-repair.json",
+      "evidence_file": "notes/results/20261020-hardware-loading-hourly-2233Z.json",
       "limitations": [
         "Old intermediate verifier feedback remains in reused trajectories; this is explicit final-reward revalidation, not fresh protocol rollouts.",
         "No held-out learning improvement established.",
         "Old checkpoint28and its bad reward remain preserved on their original branch.",
-        "Nine tasks are deferred and remain untrained; only0037was an operator infrastructure deferral."
+        "Ten tasks are deferred and remain untrained; only0037was an operator infrastructure deferral."
       ],
       "runs": [
         "20261020T192919Z-verifier-v2-repair",
@@ -60,7 +60,8 @@
         "notes": [
           "notes/results/20261020-verifier-state-hardening.json",
           "notes/results/20261020-verifier-v2-resume.json",
-          "notes/results/20261020-loading-owner-repair.json"
+          "notes/results/20261020-loading-owner-repair.json",
+          "notes/results/20261020-hardware-loading-hourly-2233Z.json"
         ]
       }
     },
