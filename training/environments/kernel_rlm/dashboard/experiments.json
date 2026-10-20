@@ -24,6 +24,14 @@
       "title": "RTX L1 curriculum · verifier v2 · reward-corrected branch",
       "current_run_id": "20261020T192919Z-verifier-v2-repair",
       "status": "open",
+      "hardware_docs_prepared": {
+        "source_commit": "034f1b0b1fb37f828f97df046f5f3c7c9b98ff48",
+        "profile": "sm120",
+        "corpus_sha256": "014eaa965b4c59250ed29f9aa37dfcfd78c4ea7ed0849dc109c1b63a3f7497c7",
+        "status": "staged_not_activated",
+        "evidence_file": "notes/results/20261020-hardware-docs-audit.json",
+        "activation_gate": "Natural checkpoint-safe pause and tested immutable descendant; never hot-patch or silently replace docs in the live run."
+      },
       "intent": "Continue from checkpoint27 after the operator-approved identity-shortcut reward repair, with0037explicitly deferred and50USDtotal RTX authorization.",
       "change": "New immutable25bb15f uses tested BatchNorm state-v2 verification. Same eight original task0017trajectories sampled at27, all terminal scores explicitly revalidated; old28state preserved, not inherited. Dataset order/shapes/reward formula/root-only loss unchanged.",
       "conclusion": "At20:44UTCsame driver45246healthy collecting0025at acceptedP28. Three new groups0028/0029/0024 each completed8finals, all rewards<=.1, no correct finals or finalinfraerrors, one attempt/member; all24samples retained/deferred without updates.28goalupdates=27inherited+1rebuilt. Eight deferred total. Viewer32scoredtraces but only8usedfornewupdate; curve28points remains flat as expected.178/178root replies reasoning,4docssearches,zerochildren; two candidate crashes safely attributed with healthydevicechecks. Stale L40S8.9prompt observed onRTX12; one trajectory forced8.9and hit intermediatearchitectureerrors. No live change. Local backup verified;HFuploader974376stalledalive with no confirmed remote commit, retry approval pending. No quality gain claimed.",
