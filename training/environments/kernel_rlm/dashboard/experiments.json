@@ -17,6 +17,42 @@
   },
   "experiments": [
     {
+      "id": "trl-l1-verifier-v2-repair",
+      "follows_experiments": [
+        "trl-l1-rtx-continuation"
+      ],
+      "title": "RTX L1 curriculum · verifier v2 · reward-corrected branch",
+      "current_run_id": "20261020T192919Z-verifier-v2-repair",
+      "status": "open",
+      "intent": "Continue from checkpoint27 after the operator-approved identity-shortcut reward repair, with0037explicitly deferred and50USDtotal RTX authorization.",
+      "change": "New immutable25bb15f uses tested BatchNorm state-v2 verification. Same eight original task0017trajectories sampled at27, all terminal scores explicitly revalidated; old28state preserved, not inherited. Dataset order/shapes/reward formula/root-only loss unchanged.",
+      "conclusion": "Corrected28accepted on0017:exact45249token audit passed,full27restore,all320adapters changed,native28readback passed. Two correct kernels at.2496x/1.1093x; identity is now.1reward, not1. Loss-.0048509,train240.8103s,noOOM/retry/traceback matches. At19:41UTCdriver45246collecting0028withP28.27inherited plus1rebuilt update,not29sequential. Local corrected28archive+3internalhashes verified,oldbad28preserved. New curve28points,viewer8accepted traces,28nativepoints. User0037deferral and50USDtotalbaseline are explicit. No held-out improvement established.",
+      "decision": "Continue unchanged remaining L1 pass within50USDtotal with original full-phase/cleanup guards. Skip only the explicitly deferred0037and prior deferred weak tasks. Audit/readback gates remain. User controls VM termination; hourly monitoring resumes.",
+      "evidence_file": "notes/results/20261020-verifier-v2-resume.json",
+      "limitations": [
+        "Old intermediate verifier feedback remains in reused trajectories; this is explicit final-reward revalidation, not fresh protocol rollouts.",
+        "No held-out learning improvement established.",
+        "Old checkpoint28and its bad reward remain preserved on their original branch.",
+        "A completed pass can leave five deferred tasks untrained."
+      ],
+      "runs": [
+        "20261020T192919Z-verifier-v2-repair"
+      ],
+      "provenance": {
+        "dataset_ids": [
+          "ops6k-l1-seed42"
+        ],
+        "documented_change_commits": [
+          "0764ac9",
+          "25bb15fb5c17b85716670154d7db5bc223372a05"
+        ],
+        "notes": [
+          "notes/results/20261020-verifier-state-hardening.json",
+          "notes/results/20261020-verifier-v2-resume.json"
+        ]
+      }
+    },
+    {
       "id": "trl-l1-rtx-continuation",
       "follows_experiments": ["trl-l1-child-progress", "trl-rtx-child-research"],
       "title": "RTX L1 curriculum · continuation from goal checkpoint 19",
