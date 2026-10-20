@@ -193,3 +193,18 @@ Stage new source and docs while a healthy old driver runs; do not hot-patch it
 or relabel its existing trajectories as using the new prompt. Activate only in
 an explicitly recorded, checkpoint-safe immutable continuation with the original
 spending baseline, source/docs pins and ordinary safety gates preserved.
+
+## Compiler-child guidance for the next run
+
+`TOOL_SUBCALL_INSTRUCTION` supplies the root's compiler-enabled child guidance.
+It includes runnable, alternative examples for a state/constructor contract review,
+a repair using saved source and exact feedback, and a bounded performance review.
+Replies are JSON strings; retain the full parsed result and print only a short
+advice slice. The immutable reference and hardware context are attached by the
+controller, so assignments should not duplicate them. All examples share the
+configured child-call budget; they are not a three-call sequence. Independently
+check a proposed source only when a root feedback call remains, and keep the old
+source if that check fails or no feedback budget remains. A child check flag is
+not a substitute for final grading. Child tools, deadlines, token budgets and
+root-only loss are unchanged. This prompt correction is prepared for a subsequent
+immutable run; never inject it into a running trainer or restart work to apply it.

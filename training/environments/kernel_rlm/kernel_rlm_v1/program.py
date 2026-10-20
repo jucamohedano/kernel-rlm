@@ -21,7 +21,12 @@ from kernel_rlm.actions import (
     submission_turn,
 )
 from kernel_rlm.capacity import context_exhaustion_details
-from kernel_rlm.child_tools import TOOL_CHILD_TIMEOUT_S, IterativeSubcalls, enclosing_timeouts
+from kernel_rlm.child_tools import (
+    TOOL_CHILD_TIMEOUT_S,
+    TOOL_SUBCALL_INSTRUCTION,
+    IterativeSubcalls,
+    enclosing_timeouts,
+)
 from kernel_rlm.cuda_docs import DOCS_INSTRUCTION, docs_manifest, hardware_instruction
 from kernel_rlm.feedback import build_local_feedback_bootstrap
 from kernel_rlm.subcalls import (
@@ -65,18 +70,7 @@ async def run(task: dict) -> None:
             "prompt limit is 2,048", "prompt limit is 4,096"
         )
     if limits.get("child_tools"):
-        subcall_instruction = (
-            "You may call llm_query with a focused CUDA improvement assignment up to two times. "
-            "Each child has an isolated conversation and may compile/check/repair a complete candidate "
-            "against the unchanged reference, at most two checks. No shell, recursion or reference edits. "
-            "Reference plus assignment must fit 4096 input tokens. The child has 4096 generated tokens "
-            "TOTAL including reasoning, and returns JSON findings, optional source and check status. "
-            "Compiler feedback is real but independent final grading is still required. "
-            "Example: ask a child to reduce memory traffic in your current source, preserve its exact "
-            "interface, test its change, and return the best checked candidate and any remaining issue. "
-            "Store the reply, inspect a short summary and integrate only justified changes. "
-            "Calling children earns no reward. Do not delegate on the submission deadline or recovery."
-        )
+        subcall_instruction = TOOL_SUBCALL_INSTRUCTION.format(max_calls=max_child_calls)
     repl_timeout = REPL_TIMEOUT_S + subcall_timeout
     backend_timeout = BACKEND_TIMEOUT_S + subcall_timeout
     if limits.get("child_tools"):

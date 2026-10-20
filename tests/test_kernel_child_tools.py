@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -97,6 +98,72 @@ def test_child_hardware_context_preserves_bridge_identity_and_reference(module, 
     assert messages[1]["content"].startswith("Target RTX PRO 6000 sm_120")
     assert "Immutable reference source:\nunchanged reference" in messages[1]["content"]
     assert session.reference == "unchanged reference"
+
+
+@pytest.mark.parametrize("max_calls", [1, 2])
+def test_compiler_child_guidance_retains_contract_examples_and_real_budgets(module, max_calls):
+    instruction = module.TOOL_SUBCALL_INSTRUCTION.format(max_calls=max_calls)
+    assert f"up to {max_calls} times per trajectory" in instruction
+    assert f"same {max_calls}-call budget" in instruction
+    assert "state-dict names/shapes" in instruction
+    assert "reference and hardware guidance are attached automatically" in instruction
+    assert "4096 generated tokens TOTAL" in instruction
+    assert "480-second session deadline" in instruction
+    assert "ALTERNATIVE examples" in instruction
+    assert "no reward" in instruction
+    assert "submission deadline or during recovery" in instruction
+
+
+@pytest.mark.parametrize("example", [0, 1, 2])
+@pytest.mark.parametrize("independent_correct", [False, True])
+@pytest.mark.parametrize("feedback_remaining", [0, 1])
+def test_compiler_child_examples_execute_and_preserve_independent_check(
+    module, example, independent_correct, feedback_remaining
+):
+    blocks = re.findall(r"```repl\n(.*?)\n```", module.TOOL_SUBCALL_INSTRUCTION, re.S)
+    assert len(blocks) == 4
+    assignments = []
+    checked = []
+    result = {
+        "advice": "Review only the requested issue",
+        "source": "repaired complete source",
+        "verified_by_child_check": True,
+        "final_grading_required": True,
+    }
+
+    def llm_query(assignment):
+        assignments.append(assignment)
+        return json.dumps(result)
+
+    def cuda_feedback(source):
+        checked.append(source)
+        return {"correct": independent_correct}
+
+    feedback = {"error": "exact compiler error", "feedback_calls_remaining": feedback_remaining}
+    namespace = {
+        "source": "original complete source",
+        "feedback": feedback,
+        "llm_query": llm_query,
+        "cuda_feedback": cuda_feedback,
+    }
+    exec(compile(blocks[example], "compiler-child-example", "exec"), namespace)
+    assert len(assignments) == 1
+    assert (
+        "original complete source" in assignments[0] if example else "state-dict" in assignments[0]
+    )
+    if example == 1:
+        assert str(feedback) in assignments[0]
+    if example:
+        exec(compile(blocks[3], "compiler-child-independent-check", "exec"), namespace)
+        assert checked == ([result["source"]] if feedback_remaining else [])
+        assert namespace["source"] == (
+            result["source"]
+            if feedback_remaining and independent_correct
+            else "original complete source"
+        )
+    else:
+        assert namespace["contract_review"] == result
+        assert checked == []
 
 
 def test_child_hardware_context_counts_toward_existing_input_budget(module, tmp_path):
@@ -402,8 +469,9 @@ def test_tool_children_are_reachable_from_the_real_root_repl(module, tmp_path, m
                 content = texts[self.children]
                 self.children += 1
             else:
+                assert module.TOOL_SUBCALL_INSTRUCTION.format(max_calls=2) in messages[0]["content"]
                 codes = [
-                    "advice = llm_query('Review this candidate')\nprint(advice[:80])",
+                    "import json\nchild_result = json.loads(llm_query('Review this candidate'))\nprint(child_result['advice'][:80])",
                     "answer['content'] = 'fixture candidate'\nanswer['ready'] = True",
                 ]
                 content = "```repl\n" + codes[self.roots] + "\n```"
