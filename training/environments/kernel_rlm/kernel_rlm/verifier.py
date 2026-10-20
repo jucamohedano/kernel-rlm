@@ -42,17 +42,87 @@ def submission_compile_lock(submission_code: str) -> Path:
     return COMPILE_LOCK_PATH.with_name(f"{COMPILE_LOCK_PATH.name}-{digest}")
 
 
+def candidate_fault_boundary(returncode: int, phase: dict[str, Any]) -> bool:
+    return (
+        returncode in {-signal.SIGSEGV, -signal.SIGBUS, -signal.SIGFPE}
+        and phase.get("boundary_version") == 1
+        and phase.get("owner") == "candidate"
+        and phase.get("reference_completed") is True
+        and phase.get("phase")
+        in {
+            "candidate_setup",
+            "candidate_forward",
+            "candidate_extension",
+            "candidate_synchronize",
+            "candidate_benchmark",
+        }
+    )
+
+
+_DEVICE_HEALTH_RUNNER = textwrap.dedent(
+    """
+    import json
+    import resource
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    import torch
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA unavailable during independent device health check")
+    values = torch.arange(64, device="cuda", dtype=torch.float32)
+    result = values.square() + 1
+    torch.cuda.synchronize()
+    expected = torch.arange(64, dtype=torch.float32).square() + 1
+    if not torch.equal(result.cpu(), expected):
+        raise RuntimeError("Independent CUDA arithmetic check failed")
+    print(json.dumps({"status": "healthy", "device": torch.cuda.get_device_name()}))
+    """
+)
+
+
+def check_device_health(
+    python: str, *, timeout_s: float, cwd: str | None, env: dict[str, str]
+) -> dict[str, Any]:
+    if timeout_s <= 0:
+        return {"status": "unknown", "error": "No original verification budget remained"}
+    try:
+        process = _run_verifier_process(
+            [python, "-c", _DEVICE_HEALTH_RUNNER], timeout_s=min(20.0, timeout_s), cwd=cwd, env=env
+        )
+        result = json.loads(process.stdout.strip().splitlines()[-1])
+        if (
+            process.returncode
+            or not isinstance(result, dict)
+            or result.get("status") != "healthy"
+            or not isinstance(result.get("device"), str)
+            or not result["device"]
+        ):
+            raise ValueError(
+                f"Device check failed (rc={process.returncode}): {(process.stderr or '')[-500:]}"
+            )
+        return result
+    except (
+        subprocess.TimeoutExpired,
+        OSError,
+        IndexError,
+        json.JSONDecodeError,
+        ValueError,
+    ) as error:
+        return {"status": "unknown", "error": f"{type(error).__name__}: {error}"}
+
+
 _RUNNER = textwrap.dedent(
     """
     import importlib.util
     import hashlib
     import json
     import os
+    import resource
     import statistics
     import sys
     import time
     from pathlib import Path
 
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     runner_started = time.monotonic()
     import torch
     import torch.utils.cpp_extension
@@ -62,15 +132,22 @@ _RUNNER = textwrap.dedent(
     extension_root = Path(os.environ.get("KERNEL_RLM_EXTENSION_BUILD_ROOT", "/tmp/kernel-rlm-extensions"))
     guard = json.loads(sys.argv[7]) if len(sys.argv) > 9 else {}
     phase_events = []
+    reference_completed = False
+    benchmark_active = False
 
-    def mark_phase(phase):
+    def mark_phase(phase, owner="harness"):
         event = {
             "phase": phase,
+            "owner": owner,
+            "boundary_version": 1,
+            "reference_completed": reference_completed,
             "elapsed_seconds": time.monotonic() - runner_started,
             "monotonic_seconds": time.monotonic(),
         }
         phase_events.append(event)
-        status_path.write_text(json.dumps(event))
+        temporary = status_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(event))
+        temporary.replace(status_path)
 
     mark_phase("torch_imported")
 
@@ -130,6 +207,7 @@ _RUNNER = textwrap.dedent(
 
     if mode == "verify" and not torch.cuda.is_available():
         result["error"] = "CUDA is required for kernel_rlm verification"
+        result.update(correct=None, verification_status="infrastructure_error", failure_kind="cuda_unavailable")
         print(json.dumps(result))
         raise SystemExit(0)
 
@@ -160,6 +238,8 @@ _RUNNER = textwrap.dedent(
 
             def call(*args, **kwargs):
                 extension_calls.append(name)
+                if mode == "verify" and not benchmark_active:
+                    mark_phase("candidate_extension", owner="candidate")
                 return attribute(*args, **kwargs)
 
             return call
@@ -203,16 +283,17 @@ _RUNNER = textwrap.dedent(
             print(json.dumps(result))
             raise SystemExit(0)
 
-        mark_phase("load_reference_and_submission")
+        mark_phase("load_reference", owner="reference")
         reference = load_module(reference_path, "kernel_rlm_reference")
+        model_class = reference.Model
+        get_inputs = reference.get_inputs
+        get_init_inputs = getattr(reference, "get_init_inputs", lambda: [])
+        mark_phase("load_candidate", owner="candidate")
         submission = load_module(submission_path, "kernel_rlm_submission")
         if not isinstance(getattr(submission, "CPP_SOURCE", None), str):
             raise ValueError("submission must define CPP_SOURCE")
         if not isinstance(getattr(submission, "CUDA_SOURCE", None), str):
             raise ValueError("submission must define CUDA_SOURCE")
-        model_class = reference.Model
-        get_inputs = reference.get_inputs
-        get_init_inputs = getattr(reference, "get_init_inputs", lambda: [])
     except Exception as error:
         if guard and isinstance(error, torch.OutOfMemoryError):
             defer_overlap("allocator_limit_or_oom")
@@ -225,7 +306,9 @@ _RUNNER = textwrap.dedent(
                 verification_status="compile_failed",
             )
         else:
-            result["verification_status"] = "runner_error"
+            result["verification_status"] = "candidate_error"
+            if phase_events[-1]["owner"] != "candidate":
+                result.update(correct=None, verification_status="infrastructure_error", failure_kind="reference_loading")
         print(json.dumps(result))
         raise SystemExit(0)
 
@@ -235,6 +318,8 @@ _RUNNER = textwrap.dedent(
     try:
         for trial in range(trials):
             mark_phase(f"correctness_trial_{trial + 1}")
+            reference_completed = False
+            mark_phase("reference_setup", owner="reference")
             init_inputs = get_init_inputs()
             model = model_class(*init_inputs).to(device)
             model.eval()
@@ -242,15 +327,23 @@ _RUNNER = textwrap.dedent(
             candidate_inputs = clone_inputs(inputs)
             calls_before = len(extension_calls)
             with torch.no_grad():
+                mark_phase("reference_forward", owner="reference")
                 reference_output = model(*inputs)
+                torch.cuda.synchronize()
+                reference_completed = True
+                mark_phase("candidate_setup", owner="candidate")
                 run_candidate = candidate_forward(submission, model, init_inputs, device)
+                mark_phase("candidate_forward", owner="candidate")
                 candidate_output = run_candidate(*candidate_inputs)
+                mark_phase("candidate_synchronize", owner="candidate")
+                torch.cuda.synchronize()
             if not extension_builds:
                 raise ValueError(
                     "submission must build a CUDA extension with torch.utils.cpp_extension.load_inline"
                 )
             if len(extension_calls) == calls_before:
                 raise ValueError("candidate forward did not invoke the compiled CUDA extension")
+            mark_phase("output_compare")
             correct, difference, error = compare_outputs(reference_output, candidate_output, atol, rtol)
             if correct:
                 correct, _, error = compare_outputs(inputs, candidate_inputs, atol, rtol)
@@ -268,7 +361,12 @@ _RUNNER = textwrap.dedent(
         if guard and isinstance(error, torch.OutOfMemoryError):
             defer_overlap("allocator_limit_or_oom")
         result["error"] = f"{type(error).__name__}: {error}"
-        correct = False
+        if phase_events[-1]["owner"] == "candidate":
+            correct = False
+            result["verification_status"] = "candidate_error"
+        else:
+            correct = None
+            result.update(verification_status="infrastructure_error", failure_kind="reference_or_comparison")
 
     result["compiled"] = bool(extension_builds)
     result["extension_used"] = bool(correct and extension_calls)
@@ -277,21 +375,35 @@ _RUNNER = textwrap.dedent(
 
     if correct and benchmark_enabled:
         try:
-            mark_phase("benchmark")
+            reference_completed = False
+            mark_phase("benchmark_setup", owner="reference")
             inputs = [move_to_device(value, device) for value in get_inputs()]
             init_inputs = get_init_inputs()
             model = model_class(*init_inputs).to(device).eval()
             with torch.no_grad():
                 model(*inputs)
+                torch.cuda.synchronize()
+                reference_completed = True
+                mark_phase("candidate_setup", owner="candidate")
                 run_candidate = candidate_forward(submission, model, init_inputs, device)
             with torch.no_grad():
+                mark_phase("reference_benchmark", owner="reference")
                 reference_ms = benchmark(lambda: model(*inputs))
-                candidate_ms = benchmark(lambda: run_candidate(*inputs))
+                mark_phase("candidate_benchmark", owner="candidate")
+                benchmark_active = True
+                try:
+                    candidate_ms = benchmark(lambda: run_candidate(*inputs))
+                finally:
+                    benchmark_active = False
             result["ref_ms"] = reference_ms
             result["kernel_ms"] = candidate_ms
             result["speedup"] = reference_ms / max(candidate_ms, 1e-9)
         except Exception as error:
             result["error"] = f"benchmark failed: {type(error).__name__}: {error}"
+            if phase_events[-1]["owner"] == "candidate":
+                result.update(correct=False, verification_status="candidate_error")
+            else:
+                result.update(correct=None, verification_status="infrastructure_error", failure_kind="reference_benchmark")
 
     result["peak_allocated_gib"] = torch.cuda.max_memory_allocated() / (1024 ** 3)
     mark_phase("complete")
@@ -661,17 +773,42 @@ def verify_cuda_execution(
             failure["timings"] = timings
             return failure
         if process.returncode != 0:
+            phase_details = _read_phase(status_path)
+            health = getattr(process, "candidate_device_health", None)
+            attributable = candidate_fault_boundary(process.returncode, phase_details)
+            if attributable and health and health.get("status") == "healthy":
+                signal_name = signal.Signals(-process.returncode).name
+                failure.update(
+                    compiled=True,
+                    extension_used=None,
+                    correct=False,
+                    verification_status="candidate_crash",
+                    failure_kind="candidate_process_signal",
+                    process_returncode=process.returncode,
+                    process_signal=signal_name,
+                    device_health=health,
+                    verifier_phase=phase_details["phase"],
+                    verifier_phase_elapsed_seconds=phase_details.get("elapsed_seconds"),
+                    timings=timings,
+                    error=f"Candidate crashed with {signal_name} during {phase_details['phase']}; "
+                    "reference execution completed and an independent fresh-process CUDA check passed. "
+                    "Check invalid host/device pointer access or out-of-bounds memory use. "
+                    f"{(process.stderr or '')[-1000:]}",
+                )
+                return failure
             failure.update(
                 compiled=True,
                 extension_used=None,
                 correct=None,
                 verification_status="runner_crash",
+                process_returncode=process.returncode,
             )
+            if health is not None:
+                failure["device_health"] = health
             failure["error"] = (
                 f"verifier crashed (rc={process.returncode}): {(process.stderr or '')[-1500:]}"
             )
             failure["timings"] = timings
-            phase_details = _read_phase(status_path)
             failure["verifier_phase"] = phase_details.get("phase")
             failure["verifier_phase_elapsed_seconds"] = phase_details.get("elapsed_seconds")
             return failure
@@ -681,8 +818,8 @@ def verify_cuda_execution(
                 result.pop("phase_events", None)
             result["timings"] = {**timings, **(result.get("timings") or {})}
             result["scheduling"] = scheduling
-            result["verification_status"] = "completed"
-            if str(result.get("error", "")).startswith("OutOfMemoryError:"):
+            result.setdefault("verification_status", "completed")
+            if "OutOfMemoryError:" in str(result.get("error", "")):
                 result.update(
                     verification_status="infrastructure_error",
                     failure_kind="verifier_oom",
@@ -733,16 +870,27 @@ def execute_verification(
                 guard = {"allocator_limit_bytes": memory_limit, "reserve_bytes": RESERVE_BYTES}
                 run_command = [*command[:-2], json.dumps(guard), *command[-2:]]
             try:
-                return _run_verifier_process(
+                environment = {
+                    **os.environ,
+                    **({"CUDA_VISIBLE_DEVICES": "0"} if shared_gpu else {}),
+                    "KERNEL_RLM_EXTENSION_BUILD_ROOT": str(extension_root),
+                }
+                process = _run_verifier_process(
                     run_command,
                     timeout_s=execution_budget,
                     cwd=cwd,
-                    env={
-                        **os.environ,
-                        **({"CUDA_VISIBLE_DEVICES": "0"} if shared_gpu else {}),
-                        "KERNEL_RLM_EXTENSION_BUILD_ROOT": str(extension_root),
-                    },
+                    env=environment,
                 )
+                if candidate_fault_boundary(process.returncode, _read_phase(status_path)):
+                    health_started = time.monotonic()
+                    process.candidate_device_health = check_device_health(
+                        run_command[0],
+                        timeout_s=execution_budget - (health_started - runner_started),
+                        cwd=cwd,
+                        env=environment,
+                    )
+                    timings["post_crash_device_check_seconds"] = time.monotonic() - health_started
+                return process
             finally:
                 timings["runner_elapsed_seconds"] = (
                     timings.get("runner_elapsed_seconds", 0.0) + time.monotonic() - runner_started

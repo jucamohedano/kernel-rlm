@@ -31,6 +31,23 @@ required before claiming the OOM issue is solved. Historical gates follow.
 
 ## Live metrics and infrastructure failures
 
+Candidate crashes are not automatically infrastructure failures. The fresh CUDA
+runner records reference/candidate ownership boundaries and synchronizes the
+reference before entering candidate code. Selected fatal signals are a
+`candidate_crash` only at a new, explicit candidate boundary and after an
+independent fresh-process CUDA health check passes on the same device. The check
+stays inside the existing GPU lease and original timeout. It does not run inside
+benchmark timing loops. This returns the existing failed-submission reward, not
+a new penalty or repaired kernel.
+
+Reference faults, ambiguous/legacy markers, device-health failures, OOMs, killed
+workers and invalid compiler output still block optimization. A complete group
+of failed candidates has no GRPO contrast and is deferred without an update;
+relative penalties arise only when the group has useful reward variance. Old
+scores and exhausted attempts are not silently reclassified or reset. Phase
+files are diagnostic evidence, not an adversarial security boundary; generated
+code still requires a separate isolation/security design.
+
 The curriculum now uses automatic phases: generate the complete group, stop
 vLLM, score final submissions sequentially, audit exact probabilities, update,
 and checkpoint. Intermediate `cuda_feedback` remains available during generation.

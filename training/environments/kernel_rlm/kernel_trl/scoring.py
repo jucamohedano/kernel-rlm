@@ -17,6 +17,9 @@ from kernel_trl.turn_credit import training_rows
 INFRASTRUCTURE_STATUSES = {
     "infrastructure_error",
     "runner_crash",
+    "compile_runner_crash",
+    "invalid_compile_output",
+    "runner_error",
     "invalid_runner_output",
     "timeout",
 }

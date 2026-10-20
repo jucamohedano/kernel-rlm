@@ -135,15 +135,49 @@ def test_wrong_policy_is_not_reused(saved):
         asyncio.run(module.score_generated(directory, 2, "task-a"))
 
 
-def test_persistent_infrastructure_failure_has_bounded_retries(saved):
+@pytest.mark.parametrize(
+    "status",
+    ["infrastructure_error", "runner_crash", "compile_runner_crash", "invalid_compile_output"],
+)
+def test_persistent_infrastructure_failure_has_bounded_retries(saved, status):
     module, directory, _task = saved
-    scorer = AsyncMock(return_value=(0.1, {"verification_status": "infrastructure_error"}))
+    scorer = AsyncMock(return_value=(0.1, {"verification_status": status}))
     result = asyncio.run(module.score_generated(directory, 1, "task-a", scorer))
     assert result["reason"] == "infrastructure_error"
     assert scorer.await_count == 2
     assert not (directory / "training-group.json").exists()
     asyncio.run(module.score_generated(directory, 1, "task-a", scorer))
     assert scorer.await_count == 2
+
+
+def test_attributed_candidate_crash_is_not_retried_as_infrastructure(saved):
+    module, directory, _task = saved
+    scorer = AsyncMock(
+        return_value=(0.1, {"verification_status": "candidate_crash", "correct": False})
+    )
+    result = asyncio.run(module.score_generated(directory, 1, "task-a", scorer))
+    assert result["admitted"]
+    assert result["infrastructure_errors"] == []
+    assert scorer.await_count == 1
+    asyncio.run(module.score_generated(directory, 1, "task-a", scorer))
+    assert scorer.await_count == 1
+
+
+def test_all_failed_candidates_remain_a_weak_complete_group_without_updates(saved):
+    module, directory, _task = saved
+    for index in range(4):
+        path = directory / f"group-0-trajectory-{index}/score.json"
+        saved_score = json.loads(path.read_text())
+        saved_score.update(
+            reward=0.1, verification={"verification_status": "candidate_crash", "correct": False}
+        )
+        path.write_text(json.dumps(saved_score))
+    scorer = AsyncMock()
+    result = asyncio.run(module.score_generated(directory, 1, "task-a", scorer))
+    assert result["reason"] == "weak_signal"
+    assert result["infrastructure_errors"] == []
+    assert not (directory / "training-group.json").exists()
+    scorer.assert_not_called()
 
 
 def test_recovery_preserves_original_run_and_checks_task_context(saved, tmp_path):
