@@ -1,5 +1,20 @@
 # TRL compatibility check
 
+## Optional PRIME-RL component comparison
+
+`python -m kernel_trl.prime_probe --model <cached-model> --budget <rtx-budget.json>
+--output <new-directory>/report.json` checks PRIME-RL in a separate optional
+environment, with exactly one sm120 GPU visible. Run it under a 600-second process
+timeout. It reserves the full phase and $2 cleanup against the original, separate
+RTX $20 authorization; it does not change either VM's lifetime.
+
+The probe compares FlashAttention 2 with SDPA, checks the full Laguna adapter
+identities on meta tensors, and exercises a random two-layer dense/MoE model with
+native Muon and a saved/restored next update. It never loads goal checkpoint 19,
+samples tasks, runs GRPO, or measures full-model speed. Keep setup failures and
+all reports. The measured comparison and remaining end-to-end gates are in the
+canonical KernelRLM guide, not a new experiment or training loss curve.
+
 ## Shared-GPU verifier control
 
 The live `kernel_trl.collect` command exposes the local pause/resume proxy on
