@@ -85,6 +85,41 @@ def test_failed_trace_without_final_transcript():
     assert "partial response" in page
 
 
+def test_structured_repl_code_appears_when_visible_assistant_text_is_empty():
+    source = "answer['content'] = '<cuda source>'\nanswer['ready'] = True"
+    message = {
+        "role": "assistant",
+        "content": None,
+        "reasoning_content": "saved reasoning",
+        "tool_calls": [{"function": {"name": "repl", "arguments": json.dumps({"code": source})}}],
+    }
+    trace = {
+        "info": {"repl_transcript": [{"role": "assistant", "content": ""}]},
+        "nodes": [{"message": message}],
+        "calls": [{"node": 0, "finish_reason": "tool_calls", "usage": {"completion_tokens": 62}}],
+    }
+    page = dashboard.render_timeline(trace)
+    response = page.split("Assistant response · full text and code</summary>", 1)[1].split(
+        "</details>", 1
+    )[0]
+    assert "answer[" in response and "&lt;cuda source&gt;" in response
+    assert "not proof of execution" in response
+    assert "saved reasoning" in page
+    assert "62 output tokens" in page
+    assert "<details open" not in page
+    assert trace["nodes"][0]["message"]["content"] is None
+
+
+def test_empty_and_malformed_assistant_payloads_explain_missing_text():
+    assert "No visible assistant text" in dashboard.assistant_response_text(None, [])
+    assert "broken{" in dashboard.assistant_response_text(
+        "", [{"function": {"name": "repl", "arguments": "broken{"}}]
+    )
+    assert "print(1)" in dashboard.assistant_response_text(
+        "", [{"function": {"name": "repl", "arguments": {"code": "print(1)"}}}]
+    )
+
+
 def test_child_calls_do_not_shift_parent_token_labels():
     page = dashboard.render_timeline(
         {

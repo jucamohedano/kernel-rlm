@@ -912,6 +912,29 @@ def folded(label: str, value: object) -> str:
     return f"<details><summary>{text(label)}</summary><pre>{text(content)}</pre></details>"
 
 
+def assistant_response_text(content, tool_calls: list) -> str:
+    sections = [content] if isinstance(content, str) and content.strip() else []
+    for tool_call in tool_calls:
+        function = tool_call.get("function", {})
+        name = function.get("name", tool_call.get("name", "unknown tool"))
+        arguments = function.get("arguments", tool_call.get("arguments"))
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except json.JSONDecodeError:
+                sections.append(f"{name} · emitted tool call, unparsed arguments:\n{arguments}")
+                continue
+        code = arguments.get("code") if isinstance(arguments, dict) else None
+        payload = (
+            code if isinstance(code, str) and code.strip() else json.dumps(arguments, indent=2)
+        )
+        sections.append(f"{name} · emitted tool call, not proof of execution:\n{payload}")
+    return "\n\n".join(sections) or (
+        "No visible assistant text or tool-call arguments were saved for this message. "
+        "Reasoning, when available, is shown separately."
+    )
+
+
 def render_timeline(trace: dict) -> str:
     info = trace.get("info", {})
     calls = iter(trace.get("calls", []))
@@ -939,14 +962,18 @@ def render_timeline(trace: dict) -> str:
             body = ""
             if original.get("reasoning_content"):
                 body += folded("Reasoning", original["reasoning_content"])
+            tool_calls = original.get("tool_calls") or message.get("tool_calls") or []
             preview = content.split("```")[0].strip()[:240]
             if preview:
                 body += f'<div class="card message">{text(preview)}</div>'
-            body += folded("Assistant response · full text and code", content)
-            if original.get("tool_calls"):
+            body += folded(
+                "Assistant response · full text and code",
+                assistant_response_text(content, tool_calls),
+            )
+            if tool_calls:
                 body += folded(
                     "Structured tool calls · emitted, not proof of execution",
-                    original["tool_calls"],
+                    tool_calls,
                 )
         else:
             label_name = "System instructions" if role == "system" else "Prompt / REPL observation"
