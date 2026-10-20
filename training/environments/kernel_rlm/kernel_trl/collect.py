@@ -14,6 +14,7 @@ from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_re
 from kernel_skyrl.contract import exact_sample, has_signal
 from kernel_skyrl.preflight import load_tasks
 
+from kernel_trl.child_stream import read_child_stream
 from kernel_trl.context import (
     DEFAULT_CONTEXT_TOKENS,
     LEGACY_CONTEXT_TOKENS,
@@ -38,7 +39,10 @@ class InferenceClient:
     async def chat_completion(self, payload):
         return await self.request_completion(payload)
 
-    async def request_completion(self, payload):
+    async def chat_completion_with_progress(self, payload, progress):
+        return await self.request_completion(payload, progress=progress)
+
+    async def request_completion(self, payload, progress=None):
         body = dict(payload["json"])
         body.pop("session_id", None)
         token_request = {
@@ -67,8 +71,15 @@ class InferenceClient:
                     + "\n"
                 )
             raise ContextExhaustedError(tokenized["count"], self.context_tokens, requested)
+        if progress is not None:
+            body.update(stream=True, stream_options={"include_usage": True})
         async with self.session.post(self.endpoint + "/v1/chat/completions", json=body) as response:
-            data = await response.json()
+            if progress is not None and response.status == 200:
+                data = await read_child_stream(
+                    response, tokenized["tokens"], body["max_tokens"], self.context_tokens, progress
+                )
+            else:
+                data = await response.json()
             with self.trace.open("a") as stream:
                 stream.write(
                     json.dumps(

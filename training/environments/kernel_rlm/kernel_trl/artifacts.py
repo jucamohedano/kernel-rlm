@@ -75,6 +75,13 @@ def episode_trace(directory: Path, run_id: str, trace_id: str | None = None) -> 
             "kernel_verify": score.get("verification", {}),
             "kernel_model_calls": calls,
             "kernel_subcalls": children,
+            "kernel_child_progress": [
+                json.loads(line)
+                for line in (directory / "child-progress.jsonl").read_text().splitlines()
+                if line.strip()
+            ]
+            if (directory / "child-progress.jsonl").exists()
+            else [],
             "repl_transcript": messages,
             "feedback_results": feedback,
             "program_log": (directory / "program.log").read_text()

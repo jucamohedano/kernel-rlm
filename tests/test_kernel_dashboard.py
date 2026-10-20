@@ -94,6 +94,7 @@ def test_child_calls_do_not_shift_parent_token_labels():
                     {"finish_reason": "stop", "usage": {"completion_tokens": 15}}
                 ],
                 "kernel_subcalls": [{"prompt": "child prompt", "response": "<child reply>"}],
+                "kernel_child_progress": [{"stage": "generating", "completion_tokens": 257}],
             },
             "calls": [{"finish_reason": "length", "usage": {"completion_tokens": 2048}}],
             "nodes": [
@@ -106,6 +107,8 @@ def test_child_calls_do_not_shift_parent_token_labels():
     assert "2048 output tokens" not in page
     assert "child prompt" in page
     assert "child policy" in page
+    assert "Child progress · stages, runtime and sampled tokens" in page
+    assert "257" in page
     assert "&lt;child reply&gt;" in page
     assert "<details open" not in page
 

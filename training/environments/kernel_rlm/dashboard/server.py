@@ -965,6 +965,12 @@ def render_timeline(trace: dict) -> str:
         events.append(
             folded("Child calls · full prompts, replies, usage and errors", info["kernel_subcalls"])
         )
+    if info.get("kernel_child_progress"):
+        events.append(
+            folded(
+                "Child progress · stages, runtime and sampled tokens", info["kernel_child_progress"]
+            )
+        )
     return '<div class="timeline">' + "".join(events) + "</div>"
 
 

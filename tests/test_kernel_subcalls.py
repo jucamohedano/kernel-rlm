@@ -52,7 +52,7 @@ def test_budget_and_trace(subcalls):
     assert records[0]["status"] == "completed"
     request = client.chat.completions.create.call_args.kwargs
     assert request["model"] == "same-model"
-    assert request["max_tokens"] == 2048
+    assert request["max_tokens"] == 4096
     assert "tools" not in request
     assert "no REPL" in request["messages"][0]["content"]
     client.chat.completions.create.assert_awaited_once()

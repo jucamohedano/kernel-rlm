@@ -59,6 +59,37 @@ not. Earlier private reasoning is absent from later conversation messages, while
 raw responses remain in traces. `reasoning_characters` helps distinguish real
 reasoning from an API that omits its reasoning-token counter.
 
+### Child progress and output allowance
+
+New source snapshots allow 4,096 generated tokens per child, including reasoning;
+the prompt remains capped at 2,048 tokens plus the fixed system message. The bridge
+enforces this independently of the root/recovery reply cap. Two optional calls,
+the 90-second hard deadline, enclosing execution budgets and root-only loss stay
+unchanged. A larger token allowance does not guarantee completion before the deadline.
+
+TRL streams only the child backend request internally. The REPL still receives
+one completed advice response; root sampling remains non-streaming and unchanged.
+Progress events report queued/admitted, first sampled token, every further 256
+sampled tokens, generated, completed or failure/cancellation. Counts include
+reasoning, never decoded estimates. Events contain counters and latency, not
+reasoning or advice. The final response still requires exact prompt IDs, aligned
+sampled token IDs/logprobs, matching usage, a terminal finish reason and `[DONE]`.
+Partial or invalid streams cannot become completed advice or root loss rows.
+
+This borrows nano-rlm's event/threshold subscription pattern without importing its
+agent supervisor. Unlike its post-step notifications, these child-only callbacks
+observe tokens during decoding. There is no asynchronous child-steering API,
+automatic deadline extension or claim that token progress means useful advice.
+
+While a bridge is running, its existing bearer credential also protects
+`GET /v1/child-progress` on private localhost. `child-progress.jsonl` is written
+beside each episode's `calls.jsonl` as events arrive, including cancellation counts.
+The KernelRLM trajectory viewer displays these events after artifact sync in a
+closed Child progress section; that viewer remains a saved-evidence view, not a
+live remote stream. Other inference clients without streaming callbacks explicitly
+report `token_progress_available=false` and expose lifecycle stages only.
+Changed defaults apply only to a new immutable snapshot, not the old live run.
+
 The completed baseline through policy 8 remains immutable. New source adds
 CPU/meta contract preflight, bridge-owned cancellable inference admission and
 early feedback draining. See `kernel_rlm/STATEFUL_TASKS.md` for exact budgets
@@ -315,7 +346,8 @@ passed two native backward passes with real checkpoint-5 Muon state. The smaller
 limit used about 1.1 GiB less peak allocated VRAM. Both triggered allocator
 retries; device-free memory alone excludes reclaimable PyTorch cache. This is a
 conservative measured default, not a guarantee for all routing patterns. Root replies stay at
-4,096; recovery stays at 1,024; children keep their existing 2,048-token caps.
+4,096; recovery stays at 1,024. Current child defaults are documented above;
+historical source snapshots retain their original 2,048-token input/output caps.
 The same context value reaches vLLM, exact token counting, the RLM generator,
 durable generation manifests, final scoring, training rows and dashboard
 provenance. Historical manifests without this field still mean 12,288 tokens.

@@ -47,6 +47,10 @@ def test_disconnect_cancels_backend_and_releases_bridge_owned_admission(
         started, cancelled = asyncio.Event(), asyncio.Event()
 
         class Client:
+            async def chat_completion_with_progress(self, payload, progress):
+                progress({"stage": "generating", "completion_tokens": 257})
+                return await self.chat_completion(payload)
+
             async def chat_completion(self, payload):
                 started.set()
                 with gate.open("a") as lock:
@@ -93,6 +97,15 @@ def test_disconnect_cancels_backend_and_releases_bridge_owned_admission(
             record = json.loads((tmp_path / "calls").read_text())
             assert record["outcome"] == "cancelled"
             assert "response" not in record
+            if child:
+                progress = [
+                    json.loads(line)
+                    for line in (tmp_path / "child-progress.jsonl").read_text().splitlines()
+                ]
+                assert progress[-1]["stage"] == "cancelled"
+                assert progress[-1]["completion_tokens"] == 257
+            else:
+                assert not (tmp_path / "child-progress.jsonl").exists()
         finally:
             await bridge.stop()
 

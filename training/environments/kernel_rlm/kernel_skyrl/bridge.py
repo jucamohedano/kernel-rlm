@@ -11,7 +11,7 @@ from typing import Any
 
 from aiohttp import web
 from kernel_rlm.capacity import ContextExhaustedError
-from kernel_rlm.subcalls import CHILD_SYSTEM
+from kernel_rlm.subcalls import CHILD_SYSTEM, SUBCALL_REPLY_TOKENS
 from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_request_slot
 
 from kernel_skyrl.contract import exact_sample
@@ -42,12 +42,14 @@ class CompletionBridge:
         self.samples = []
         self.failures = []
         self.child_calls = 0
+        self.child_progress = {}
         self.runner = None
         self.endpoint = None
 
     async def start(self) -> None:
         app = web.Application(client_max_size=2_000_000)
         app.router.add_post("/v1/chat/completions", self.complete)
+        app.router.add_get("/v1/child-progress", self.progress_status)
         self.runner = web.AppRunner(app, shutdown_timeout=1, handler_cancellation=True)
         await self.runner.setup()
         await web.TCPSite(self.runner, "127.0.0.1", 0).start()
@@ -60,6 +62,29 @@ class CompletionBridge:
                 await self.runner.cleanup()
         finally:
             await asyncio.wait_for(self.client.finish_session(self.session_id), 5)
+
+    async def progress_status(self, request: web.Request) -> web.Response:
+        if request.headers.get("Authorization") != f"Bearer {self.api_key}":
+            raise web.HTTPUnauthorized()
+        return web.json_response(
+            {
+                "observed_at_unix_seconds": time.time(),
+                "children": list(self.child_progress.values()),
+            }
+        )
+
+    def publish_child_progress(self, call_id, started, **fields):
+        event = {
+            **self.child_progress.get(call_id, {}),
+            "call_id": call_id,
+            "policy_version": self.policy_version,
+            "elapsed_seconds": time.monotonic() - started,
+            "updated_at_unix_seconds": time.time(),
+            **fields,
+        }
+        self.child_progress[call_id] = event
+        with self.trace_path.with_name("child-progress.jsonl").open("a") as stream:
+            stream.write(json.dumps(event) + "\n")
 
     async def complete(self, request: web.Request) -> web.Response:
         if request.headers.get("Authorization") != f"Bearer {self.api_key}":
@@ -74,7 +99,7 @@ class CompletionBridge:
                 and messages[0].get("role") == "system"
                 and messages[0].get("content") == CHILD_SYSTEM
             )
-            limit = min(self.max_reply, 2048) if child else self.max_reply
+            limit = SUBCALL_REPLY_TOKENS if child else self.max_reply
             requested = body.pop("max_completion_tokens", body.pop("max_tokens", limit))
             if type(requested) is not int or requested <= 0 or body.get("stream"):
                 raise ValueError("Expected a bounded non-streaming completion")
@@ -91,20 +116,47 @@ class CompletionBridge:
                 cache_salt=f"kernel-{self.policy_version}",
             )
             record.update(branch="child" if child else "root", request=copy.deepcopy(body))
+            if child:
+                record["call_id"] = uuid.uuid4().hex
+                self.publish_child_progress(
+                    record["call_id"], started, stage="queued", completion_tokens=0
+                )
             async with inference_request_slot(
                 INFERENCE_ADMISSION_TIMEOUT_S,
                 enabled=bool(os.environ.get("KERNEL_INFERENCE_ADMIN_URL")),
             ) as admission_wait:
                 record["admission_wait_seconds"] = admission_wait
-                response = await asyncio.wait_for(
-                    self.client.chat_completion({"json": body}), self.timeout_s
-                )
+                streaming = getattr(self.client, "chat_completion_with_progress", None)
+                if child:
+                    self.publish_child_progress(
+                        record["call_id"],
+                        started,
+                        stage="admitted",
+                        admission_wait_seconds=admission_wait,
+                        token_progress_available=streaming is not None,
+                    )
+                if child and streaming is not None:
+
+                    def progress(event):
+                        self.publish_child_progress(record["call_id"], started, **event)
+
+                    completion = streaming({"json": body}, progress)
+                else:
+                    completion = self.client.chat_completion({"json": body})
+                response = await asyncio.wait_for(completion, self.timeout_s)
             record["response"] = response
             sample = exact_sample(response, self.context_limit)
             if len(sample.response_ids) > body["max_tokens"]:
                 raise ValueError("Inference exceeded this call's output cap")
             if child:
                 self.child_calls += 1
+                self.publish_child_progress(
+                    record["call_id"],
+                    started,
+                    stage="completed",
+                    completion_tokens=len(sample.response_ids),
+                    finish_reason=sample.stop_reason,
+                )
             else:
                 self.samples.append(sample)
             return web.json_response(response)
@@ -136,5 +188,12 @@ class CompletionBridge:
             return web.json_response({"error": {"message": message}}, status=502)
         finally:
             record["elapsed_seconds"] = time.monotonic() - started
+            if "call_id" in record and (record.get("error") or "outcome" in record):
+                self.publish_child_progress(
+                    record["call_id"],
+                    started,
+                    stage=record.get("outcome", "failed"),
+                    error=record.get("error"),
+                )
             with self.trace_path.open("a") as stream:
                 stream.write(json.dumps(record) + "\n")

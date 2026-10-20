@@ -129,7 +129,7 @@ def prepare(source: Path, manifest: Path) -> dict:
             "turns": 8,
             "submit_by_turn": 6,
             "children": 2,
-            "child_reply_tokens": 2048,
+            "child_reply_tokens": 4096,
             "group_size": 4,
             "prompt_batch_size": 1,
             "max_sample_batches": 3,

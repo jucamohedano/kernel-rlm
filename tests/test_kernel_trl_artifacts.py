@@ -42,7 +42,11 @@ def test_saved_messages_and_reasoning_survive_without_ui_redesign(tmp_path, monk
     (directory / "calls.jsonl").write_text(
         json.dumps({"branch": "root", "response": response, "elapsed_seconds": 1.0}) + "\n"
     )
+    (directory / "child-progress.jsonl").write_text(
+        json.dumps({"call_id": "child", "stage": "generating", "completion_tokens": 257}) + "\n"
+    )
     trace = artifacts.episode_trace(directory, "run")
+    assert trace["info"]["kernel_child_progress"][0]["completion_tokens"] == 257
     assert trace["info"]["repl_transcript"][0]["content"] == "all system instructions"
     assert trace["nodes"][1]["message"]["reasoning_content"] == "saved reasoning"
     assert trace["calls"][0]["node"] == 1

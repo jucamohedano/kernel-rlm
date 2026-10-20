@@ -14,10 +14,11 @@ CHILD_SYSTEM = (
 )
 SUBCALL_TIMEOUT_S = 90
 SUBCALL_MAX_CALLS = 2
+SUBCALL_REPLY_TOKENS = 4096
 SUBCALL_INSTRUCTION = (
     "You may call llm_query(prompt) inside the REPL up to {max_calls} times per trajectory. "
     "The child is the same model with a fresh context, no REPL, and no further recursion. "
-    "Its prompt limit is 2,048 tokens; its output limit is 2,048 tokens. "
+    "Its prompt limit is 2,048 tokens; its output limit is 4,096 tokens including reasoning. "
     "Solve simple single-output elementwise tasks directly. If the reference has registered "
     "parameters or buffers, non-tensor constructor arguments, structured outputs, or a "
     "nontrivial reduction or scan, make one focused child call before coding. Ask it to check "
@@ -174,7 +175,7 @@ class BoundedSubcalls:
                             {"role": "system", "content": CHILD_SYSTEM},
                             {"role": "user", "content": prompt},
                         ],
-                        "max_tokens": 2048,
+                        "max_tokens": SUBCALL_REPLY_TOKENS,
                     }
                     if self.enable_thinking:
                         request_args["extra_body"] = {
