@@ -11,6 +11,7 @@ from typing import Any
 
 from aiohttp import web
 from kernel_rlm.capacity import ContextExhaustedError
+from kernel_rlm.child_tools import TOOL_CHILD_SYSTEM
 from kernel_rlm.subcalls import CHILD_SYSTEM, SUBCALL_REPLY_TOKENS
 from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_request_slot
 
@@ -97,7 +98,7 @@ class CompletionBridge:
             child = bool(
                 messages
                 and messages[0].get("role") == "system"
-                and messages[0].get("content") == CHILD_SYSTEM
+                and messages[0].get("content") in (CHILD_SYSTEM, TOOL_CHILD_SYSTEM)
             )
             limit = SUBCALL_REPLY_TOKENS if child else self.max_reply
             requested = body.pop("max_completion_tokens", body.pop("max_tokens", limit))

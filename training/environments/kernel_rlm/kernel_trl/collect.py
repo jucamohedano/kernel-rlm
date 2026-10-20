@@ -214,6 +214,8 @@ async def collect(arguments):
                 "max_turns": getattr(arguments, "max_turns", 8),
                 "enable_thinking": True,
                 "child_prompt_tokens": getattr(arguments, "child_prompt_tokens", 2048),
+                "child_tools": getattr(arguments, "child_tools", False),
+                "dedicated_inference": getattr(arguments, "dedicated_inference", False),
                 "cuda_docs": str(arguments.cuda_docs)
                 if getattr(arguments, "cuda_docs", None)
                 else None,
@@ -383,6 +385,7 @@ def main():
     parser.add_argument("--context-tokens", type=int, default=DEFAULT_CONTEXT_TOKENS)
     parser.add_argument("--child-prompt-tokens", type=int, choices=(2048, 4096), default=2048)
     parser.add_argument("--dedicated-inference", action="store_true")
+    parser.add_argument("--child-tools", action="store_true")
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -425,6 +428,14 @@ def main():
         arguments.group_timeout_s = 900 * (arguments.rollouts // 4)
     if arguments.group_timeout_s <= 0:
         raise ValueError("Group timeout must be positive")
+    if arguments.child_tools and (
+        not arguments.dedicated_inference
+        or arguments.child_prompt_tokens != 4096
+        or arguments.episode_timeout_s < 2400
+    ):
+        raise ValueError(
+            "Child tools require split GPUs, 4096 input tokens and a 2400s episode budget"
+        )
     configure_inference_route(arguments.dedicated_inference, os.environ)
     asyncio.run(asyncio.wait_for(collect(arguments), timeout=arguments.group_timeout_s))
 

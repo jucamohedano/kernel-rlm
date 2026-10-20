@@ -71,6 +71,15 @@ class KernelGenerator:
             raise ValueError("The L40S adapter supports 12288 to 16384 context tokens")
         if not 0 <= self.limits["max_subcalls"] <= 2:
             raise ValueError("At most two child calls are supported")
+        if self.limits.get("child_tools") and (
+            not self.limits.get("dedicated_inference")
+            or not self.limits.get("enable_thinking")
+            or self.limits.get("child_prompt_tokens") != 4096
+            or episode_timeout_s < 2400
+        ):
+            raise ValueError(
+                "Iterative children require dedicated inference, thinking and explicit budgets"
+            )
         self.max_sample_batches = max_sample_batches
         self.episode_timeout_s = episode_timeout_s
         self.scorer = scorer

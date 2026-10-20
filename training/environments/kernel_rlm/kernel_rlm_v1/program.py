@@ -21,6 +21,7 @@ from kernel_rlm.actions import (
     submission_turn,
 )
 from kernel_rlm.capacity import context_exhaustion_details
+from kernel_rlm.child_tools import TOOL_CHILD_TIMEOUT_S, IterativeSubcalls
 from kernel_rlm.cuda_docs import DOCS_INSTRUCTION, docs_manifest
 from kernel_rlm.feedback import build_local_feedback_bootstrap
 from kernel_rlm.subcalls import (
@@ -55,12 +56,26 @@ async def run(task: dict) -> None:
         timeout=limits.get("model_timeout_s", 150),
     )
     max_child_calls = int(limits.get("max_subcalls", 1))
-    subcall_timeout = SUBCALL_TIMEOUT_S * max_child_calls if limits.get("enable_subcall") else 0
+    child_timeout = TOOL_CHILD_TIMEOUT_S if limits.get("child_tools") else SUBCALL_TIMEOUT_S
+    subcall_timeout = child_timeout * max_child_calls if limits.get("enable_subcall") else 0
     subcall_instruction = SUBCALL_INSTRUCTION.format(max_calls=max_child_calls)
     child_prompt_tokens = limits.get("child_prompt_tokens", 2048)
     if child_prompt_tokens == 4096:
         subcall_instruction = subcall_instruction.replace(
             "prompt limit is 2,048", "prompt limit is 4,096"
+        )
+    if limits.get("child_tools"):
+        subcall_instruction = (
+            "You may call llm_query with a focused CUDA improvement assignment up to two times. "
+            "Each child has an isolated conversation and may compile/check/repair a complete candidate "
+            "against the unchanged reference, at most two checks. No shell, recursion or reference edits. "
+            "Reference plus assignment must fit 4096 input tokens. The child has 4096 generated tokens "
+            "TOTAL including reasoning, and returns JSON findings, optional source and check status. "
+            "Compiler feedback is real but independent final grading is still required. "
+            "Example: ask a child to reduce memory traffic in your current source, preserve its exact "
+            "interface, test its change, and return the best checked candidate and any remaining issue. "
+            "Store the reply, inspect a short summary and integrate only justified changes. "
+            "Calling children earns no reward. Do not delegate on the submission deadline or recovery."
         )
     backend = SubprocessReplBackend(request_timeout=BACKEND_TIMEOUT_S + subcall_timeout)
     proxy = None
@@ -126,6 +141,16 @@ async def run(task: dict) -> None:
                 admission_enabled=not limits.get("bridge_owns_admission", False),
                 prompt_tokens=child_prompt_tokens,
             )
+            if limits.get("child_tools"):
+                subcalls = IterativeSubcalls(
+                    client,
+                    os.environ["KERNEL_MODEL"],
+                    count_tokens,
+                    record["subcalls"],
+                    reference=task["context"],
+                    directory=Path(feedback_log_dir) / "child-tools",
+                    max_calls=max_child_calls,
+                )
             proxy = SubLLMProxy()
             proxy.register(
                 "bounded-v1",

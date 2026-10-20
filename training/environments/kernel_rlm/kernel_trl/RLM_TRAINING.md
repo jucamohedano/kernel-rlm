@@ -442,3 +442,27 @@ native readback, the exact sampled-group probability audit, an actual update and
 a saved/resumed checkpoint before production migration. This option alone does
 not configure dedicated inference, verifier memory admission or asynchronous
 policy synchronization.
+
+## Bounded split-card research pilot
+
+`kernel_trl.collect --dedicated-inference` exposes one explicit verifier GPU and
+does not pause a separately routed inference server. The operator must validate
+the server's physical device separately. The existing two-card shared policy
+continues to use its default pause/drain path. Do not run verifier work during
+backpropagation or time competing work on the same GPU.
+
+The default child stays text-only with 2,048 input and 4,096 output tokens.
+`--child-prompt-tokens 4096` explicitly enlarges its input. An opt-in
+`--child-tools` pilot additionally requires dedicated inference and an episode
+budget of at least 2,400 seconds. It permits at most two isolated child sessions,
+each with at most two compiler/correctness checks, no recursion, and 4,096 total
+generated tokens including reasoning across all its replies. Tool sessions have
+a 480-second enclosing deadline, including verification; root REPL/backend
+budgets account for those sessions. A child cannot supply final grades or earn
+delegation reward. Its sampled replies remain excluded from root loss.
+
+The check worker uses the existing candidate verifier, not a new security
+sandbox. Cancellation unwinds the worker's nested compiler/runner groups.
+Keep original sources, check results, sampled-policy identities and independent
+final scores. Increasing child count or output beyond these bounds remains a
+later measured decision, not an automatic consequence of having more VRAM.
