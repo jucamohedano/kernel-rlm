@@ -17,6 +17,19 @@ structured outputs. A runtime input list alone does not contain all of that stat
 
 ## What the verifier does
 
+Extension compilation preserves the caller's phase owner. A candidate module that
+successfully builds an extension and then raises a Python loading error remains a
+candidate failure; it must not become a reference-loading infrastructure fault
+merely because compilation emitted a progress marker. Reference exceptions still
+fail closed. This does not loosen signal, OOM or device-health attribution.
+
+For the diagnosed task0031 loading-owner failure, `kernel_trl.loading_repair`
+prepares a new immutable descendant only after explicit exact-member revalidation.
+It preserves all eight original samples, seven other scores and the two historical
+attempts, recording the additional revalidation rather than resetting the retry
+counter. The parent directory and accepted checkpoint remain intact. This narrow
+helper is not permission to skip arbitrary infrastructure failures or resample.
+
 1. Build the reference from the trusted `get_init_inputs()` result.
 2. Run it in evaluation/no-grad mode. This also materializes lazy parameters.
 3. Build `ModelNew` with an independent copy of those constructor arguments.
