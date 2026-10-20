@@ -75,14 +75,17 @@ def run(arguments) -> dict:
             raise ValueError("No real trainable tokens")
     if version and arguments.resume_from is None:
         raise ValueError("Nonzero policy version requires its checkpoint")
+    world_size = getattr(arguments, "learner_world_size", 2)
+    if world_size not in {1, 2}:
+        raise ValueError("Select one or two learner ranks explicitly")
     if arguments.resume_from:
-        checkpoint_metadata(arguments.resume_from, version)
+        checkpoint_metadata(arguments.resume_from, version, world_size)
     if group and not arguments.audit_only and not memory_tokens and max(group["rewards"]) <= 0.1:
         raise ValueError("No reward above 0.1: inspect trajectories before further updates")
     if group and not arguments.audit_only and not memory_tokens:
         require_probability_agreement(arguments.audit_report, group)
-    if int(os.environ["WORLD_SIZE"]) != 2 or torch.cuda.device_count() != 2:
-        raise ValueError("Exactly two allocated GPUs are required")
+    if int(os.environ["WORLD_SIZE"]) != world_size or torch.cuda.device_count() != world_size:
+        raise ValueError("Visible GPUs and distributed ranks must match the explicit learner size")
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
     dist.init_process_group(
         "nccl",
@@ -94,7 +97,7 @@ def run(arguments) -> dict:
     rank = dist.get_rank()
     started = time.monotonic()
     try:
-        mesh = init_device_mesh("cuda", (2,), mesh_dim_names=("fsdp",))
+        mesh = init_device_mesh("cuda", (world_size,), mesh_dim_names=("fsdp",))
         torch.manual_seed(42)
         event(directory, "load_started")
         if rank == 0:
@@ -117,7 +120,9 @@ def run(arguments) -> dict:
         )
         updates = []
         row_count = len(group["rows"]) if group else 4
-        gas = row_count // 2
+        if row_count % world_size:
+            raise ValueError("Exact replay rows must divide evenly between learner ranks")
+        gas = row_count // world_size
         settings = GRPOConfig(
             output_dir=str(directory / "trainer-output"),
             bf16=True,
@@ -264,6 +269,7 @@ def main():
     parser.add_argument("--resume-from", type=Path)
     parser.add_argument("--audit-report", type=Path)
     parser.add_argument("--report-to", choices=("trackio", "wandb", "none"), default="trackio")
+    parser.add_argument("--learner-world-size", type=int, choices=(1, 2), default=2)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--audit-only", action="store_true")
     mode.add_argument("--readback-only", action="store_true")

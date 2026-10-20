@@ -422,3 +422,23 @@ An authorization record may also set `stop_at_unix_seconds`. A phase starts only
 when its full requested duration plus 30 seconds for cleanup fits before that
 deadline. This preserves the original spending baseline and avoids starting a
 new phase near the user's working-time cutoff.
+
+## Explicit one-rank learner gate
+
+The existing curriculum driver still uses two learner ranks. A separately
+authorized split-device diagnostic can invoke `kernel_trl.rlm_update` with
+`--learner-world-size 1` and expose only its learner GPU. The default remains two;
+visible devices, process count and checkpoint world size must agree exactly.
+
+Use `kernel_trl.reshard_checkpoint --source CHECKPOINT --destination NEW_DIRECTORY`
+on CPU before changing world size. It verifies all source file hashes, reconstructs
+row-sharded adapters bitwise against portable weights, and joins matching Muon
+momentum. Scheduler and optimizer counters are retained. The former rank-zero
+RNG streams are retained explicitly; changed process topology is not promised to
+produce bitwise-identical future updates. Source checkpoints are never modified.
+
+A converted checkpoint is preparation, not proof of a successful resume. Require
+native readback, the exact sampled-group probability audit, an actual update and
+a saved/resumed checkpoint before production migration. This option alone does
+not configure dedicated inference, verifier memory admission or asynchronous
+policy synchronization.

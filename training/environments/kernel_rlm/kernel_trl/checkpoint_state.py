@@ -1,4 +1,4 @@
-"""Compact phase-boundary checkpoint state for two-rank attention LoRA/Muon."""
+"""Compact phase-boundary checkpoint state for attention LoRA/Muon."""
 
 import hashlib
 import json
@@ -10,9 +10,11 @@ def portable_adapter_name(name: str) -> str:
     return name.replace("._checkpoint_wrapped_module.", ".").replace(".default.", ".")
 
 
-def checkpoint_metadata(directory: Path, expected_step: int) -> dict:
+def checkpoint_metadata(directory: Path, expected_step: int, expected_world_size: int = 2) -> dict:
     metadata = json.loads((directory / "metadata.json").read_text())
-    if metadata["step"] != expected_step or metadata["world_size"] != 2:
+    if expected_world_size not in {1, 2}:
+        raise ValueError("Only explicitly selected one- or two-rank checkpoints are supported")
+    if metadata["step"] != expected_step or metadata["world_size"] != expected_world_size:
         raise ValueError("Checkpoint step or world size does not match the sampled policy")
     if metadata.get("frozen_weights_saved") is not False:
         raise ValueError("Expected a compact adapter-only checkpoint")
@@ -55,7 +57,7 @@ def restore_training_state(trainer, directory: Path, step: int) -> dict:
     from kernel_skyrl.framework_probe import local_tensor
     from torch.distributed.tensor import DTensor
 
-    metadata = checkpoint_metadata(directory, step)
+    metadata = checkpoint_metadata(directory, step, dist.get_world_size())
     state = torch.load(
         directory / f"state-rank-{dist.get_rank()}.pt", map_location="cpu", weights_only=True
     )
@@ -159,7 +161,7 @@ def save_training_state(trainer, directory: Path, step: int) -> Path:
     if rank == 0:
         metadata = {
             "step": step,
-            "world_size": 2,
+            "world_size": dist.get_world_size(),
             "adapter_tensors": len(full),
             "frozen_weights_saved": False,
             "muon_groups": [
