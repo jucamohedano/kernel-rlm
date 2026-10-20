@@ -354,3 +354,100 @@ def test_malformed_action_gets_bounded_format_feedback_without_resetting_tokens(
     assert [
         call.kwargs["max_tokens"] for call in client.chat.completions.create.call_args_list
     ] == [4096, 3996, 3896]
+
+
+def test_tool_children_are_reachable_from_the_real_root_repl(module, tmp_path, monkeypatch):
+    from kernel_skyrl.generator import KernelGenerator
+
+    class Client:
+        def __init__(self):
+            self.roots = 0
+            self.children = 0
+
+        async def chat_completion(self, payload):
+            messages = payload["json"]["messages"]
+            if messages[0]["content"] == module.TOOL_CHILD_SYSTEM:
+                texts = [
+                    "CHECK\n```python\nimport torch\n```",
+                    "FINISH\nStatic feedback requires a complete candidate.\n```python\n\n```",
+                ]
+                content = texts[self.children]
+                self.children += 1
+            else:
+                codes = [
+                    "advice = llm_query('Review this candidate')\nprint(advice[:80])",
+                    "answer['content'] = 'fixture candidate'\nanswer['ready'] = True",
+                ]
+                content = "```repl\n" + codes[self.roots] + "\n```"
+                self.roots += 1
+            return {
+                "id": "fixture",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "policy",
+                "prompt_token_ids": [2],
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "token_ids": [3],
+                        "message": {"role": "assistant", "content": content},
+                        "logprobs": {"content": [{"token": "token_id:3", "logprob": -0.5}]},
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+
+        async def finish_session(self, session_id):
+            pass
+
+    repository = ROOT.parents[2]
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        os.pathsep.join([str(repository), str(repository / "training/src"), str(ROOT)]),
+    )
+    command = [
+        sys.executable,
+        "-c",
+        "import sys,asyncio,json; "
+        f"sys.path[:0]={[str(repository), str(repository / 'training/src'), str(ROOT)]!r}; "
+        "from kernel_rlm_v1 import program; program.load_token_counter=lambda path:len; "
+        "asyncio.run(program.run(json.load(open(sys.argv[1]))))",
+        "task.json",
+    ]
+    client = Client()
+    generator = KernelGenerator(
+        client,
+        "policy-17",
+        "fixture-tokenizer",
+        tmp_path,
+        limits={
+            "child_tools": True,
+            "dedicated_inference": True,
+            "child_prompt_tokens": 4096,
+            "enable_thinking": True,
+            "max_context_tokens": 16384,
+            "max_turns": 10,
+        },
+        episode_timeout_s=2400,
+        program_command=command,
+        scorer=AsyncMock(return_value=(0.8, {"correct": True})),
+    )
+
+    async def run():
+        return await asyncio.wait_for(
+            generator.run_episode(
+                {"name": "fixture-task", "context": "class Model: pass", "prompt": "Test wiring"},
+                tmp_path / "episode",
+                17,
+            ),
+            15,
+        )
+
+    result = asyncio.run(run())
+    assert client.children == 2
+    assert len(result["samples"]) == 2
+    child_record = result["record"]["subcalls"][0]
+    assert child_record["mode"] == "compile_repair"
+    assert child_record["status"] == "completed"
+    assert child_record["checks"][0]["result"]["verification_status"] == "static_rejected"
