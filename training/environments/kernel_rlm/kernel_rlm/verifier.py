@@ -251,7 +251,7 @@ _RUNNER = textwrap.dedent(
     original_load_inline = torch.utils.cpp_extension.load_inline
 
     def tracked_load_inline(*args, **kwargs):
-        mark_phase("extension_compile")
+        mark_phase("extension_compile", owner=phase_events[-1]["owner"])
         extension_name = kwargs.get("name", args[0] if args else "anonymous")
         build_options = {
             key: value for key, value in kwargs.items() if key not in {"build_directory", "verbose"}
