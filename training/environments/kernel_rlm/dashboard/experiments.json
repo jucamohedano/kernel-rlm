@@ -32,11 +32,11 @@
         "evidence_file": "notes/results/20261020-hardware-docs-audit.json",
         "activation_gate": "Natural checkpoint-safe pause and tested immutable descendant; never hot-patch or silently replace docs in the live run."
       },
-      "intent": "Continue from checkpoint27 after the operator-approved identity-shortcut reward repair, with0037explicitly deferred and50USDtotal RTX authorization.",
+      "intent": "Finish remaining nondeferred L1 pass within65USDtotal RTX fromoriginalbaseline; preserve all deferred/history data,verify complete backups and retireonlyRTXaftertraining ends under user's explicit authorization.",
       "change": "Initial25bb15f rebuilt28with BatchNorm state-v2 using all8original0017samples; originalbad28preserved. Newd1767ad descendantinherits29and repairs candidate loading attribution after natural pause, explicitly revalidates onlythe exactfailed0031member, preservesall8samples/7other scores/attempts, and activates approvedSM120docsforfreshgroups. Dataset/order/shapes/rewardformula/root-onlyloss unchanged.",
-      "conclusion": "User raised RTX ceiling65TOTAL and authorized retirement after verified final backups. Parent0048was completeweak/noinfra,deferredwithoutupdate;parentstoppedcleanlyatbudgetgateP30. Newea1790e descendantlaunched23:02UTC,driver62507/observer62531healthy collecting0039,inherits30updates/zero newatlaunch. Eleven deferred,nine nondeferredremaining. Approvedchild examples nowACTUALfreshrootprompt;SM120/thinkingretained.129localCPU/72remoteCPUtests passed. Originalbaseline/12000s+$2guards unchanged;estimated39.97/65at23:04UTC. Comprehensiveprivatepreseedrunning,NOTverifiedfinalbackup. Neverterminatebeforequiescentlogs/results/SQLite/checkpoint hashverification. No qualitygainclaim.",
+      "conclusion": "At23:27UTCstep31accepted on0039:3of8correct,allslower~.407x;42011token audit/full30restore/320changedadapters/native31readbackpass. Sameea1790edriver62507continues0043;31total=30inherited+1new,eightnondeferredremaining/11deferred. Twochildsessions/fivemodelrequestsattempted,butbothformatfailed,noadviceorcompilerchecks;rootcontinued,nochangestohealthyjob.54rootrepliesreasoning,1docssearch. Local31backup+3hashesverified,privateHF131cf9dall8addresses/sizesverified. Preseed5.4GiBfinishedNOTretirement-ready. Estimated40.92/65at23:24UTC,reservesunchanged,15minchecks. No heldoutqualitygainclaim.",
       "decision": "Finish remaining nondeferredpass within65USDtotal and unchangedguards/audit/readback. User now authorizes agent toterminate ONLYRTXVM aftertrainingendandallrequireddataisverifiedbackedup. Do not confusepassendwith50trained tasks orstoppedPythonwithbillingrelease.",
-      "evidence_file": "notes/results/20261021-final-l1-pass.json",
+      "evidence_file": "notes/results/20261021-final-pass-monitor-2324Z.json",
       "limitations": [
         "Old intermediate verifier feedback remains in reused trajectories; this is explicit final-reward revalidation, not fresh protocol rollouts.",
         "No held-out learning improvement established.",
@@ -65,7 +65,8 @@
           "notes/results/20261020-verifier-v2-resume.json",
           "notes/results/20261020-loading-owner-repair.json",
           "notes/results/20261020-hardware-loading-hourly-2233Z.json",
-          "notes/results/20261021-final-l1-pass.json"
+          "notes/results/20261021-final-l1-pass.json",
+          "notes/results/20261021-final-pass-monitor-2324Z.json"
         ]
       }
     },
