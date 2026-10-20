@@ -4,6 +4,7 @@ import asyncio
 import ctypes
 import json
 import os
+import re
 import signal
 import sys
 import time
@@ -14,11 +15,12 @@ from kernel_rlm.thinking import visible_response
 
 TOOL_CHILD_SYSTEM = (
     "You are a bounded CUDA research child with compiler/correctness feedback. "
-    "No shell, Python REPL, recursion or reference edits. Return one JSON object only, no Markdown fences. "
-    'To test return {"action":"check","source":"complete candidate Python source"}. '
+    "No shell, Python REPL, recursion or reference edits. Do not JSON-escape source code. "
+    "To test, write CHECK on its own first line, then one fenced python block containing "
+    "the complete candidate Python source, using real newlines and normal triple quotes. "
     "The controller compiles and checks against the immutable reference; inspect feedback and repair. "
-    "At most two checks, then finish with "
-    '{"action":"finish","advice":"concise findings","source":"best candidate or empty string"}. '
+    "At most two checks, then write FINISH on its own first line, concise findings, "
+    "and one fenced python block containing your best complete candidate. "
     "Resource faults/timeouts are infrastructure, not numerical failure. Never invent measurements. "
     "Final grading is independent. You have 4096 generated tokens TOTAL including reasoning "
     "across this entire session, not 4096 per reply."
@@ -36,6 +38,15 @@ def enclosing_timeouts(max_calls, *, repl_base, backend_base, feedback_timeout, 
 
 def parse_action(content):
     text = content.strip()
+    if text.startswith(("CHECK\n", "FINISH\n")):
+        match = re.fullmatch(r"(CHECK|FINISH)\n(.*?)```python\n(.*)\n```", text, re.S)
+        if match is None or text.count("```") != 2:
+            raise ValueError("Expected one complete fenced Python candidate")
+        return {
+            "action": "check" if match[1] == "CHECK" else "finish",
+            "advice": match[2].strip(),
+            "source": match[3],
+        }
     if text.startswith("```json\n") and text.endswith("\n```"):
         text = text[8:-4].strip()
     action = json.loads(text)
@@ -138,7 +149,7 @@ class IterativeSubcalls:
         ]
         try:
             async with asyncio.timeout(self.timeout_s):
-                for step in range(3):
+                for step in range(4):
                     remaining = 4096 - record["completion_tokens"]
                     if remaining < 128 or self.count_tokens(json.dumps(messages)) > 8192:
                         raise ValueError("Child aggregate token or history budget exhausted")
@@ -160,7 +171,22 @@ class IterativeSubcalls:
                         raise ValueError("Child usage must account for every generated token")
                     record["completion_tokens"] += usage
                     content = visible_response(choice.message.content or "")
-                    action = parse_action(content)
+                    try:
+                        action = parse_action(content)
+                    except ValueError as error:
+                        record.setdefault("format_errors", []).append(str(error))
+                        if step == 3:
+                            raise
+                        messages.append({"role": "assistant", "content": content})
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": "Action format error; no check was executed. Return CHECK on its own first "
+                                "line followed by one fenced python block with complete source using real "
+                                "newlines, or FINISH then findings and one python block. Do not JSON-escape code.",
+                            }
+                        )
+                        continue
                     source = action.get("source", "")
                     if not isinstance(source, str) or len(source.encode()) > 65536:
                         raise ValueError("Invalid child candidate source")
@@ -181,11 +207,13 @@ class IterativeSubcalls:
                         }
                         record.update(status="completed", response=json.dumps(result))
                         return record["response"]
-                    if action.get("action") != "check" or step == 2:
+                    if action.get("action") != "check" or len(record["checks"]) >= 2 or step == 3:
                         raise ValueError("Child has at most two checks followed by a final answer")
                     valid, error = validate_submission_source(source)
                     result = (
-                        await self.checker(self.reference, source, directory / f"check-{step}", 90)
+                        await self.checker(
+                            self.reference, source, directory / f"check-{len(record['checks'])}", 90
+                        )
                         if valid
                         else {
                             "compiled": False,
@@ -212,7 +240,7 @@ class IterativeSubcalls:
                             "role": "user",
                             "content": "Actual check feedback: "
                             + json.dumps(feedback)
-                            + f". Checks remaining: {1 - step}. Repair or finish; do not invent timing.",
+                            + f". Checks remaining: {2 - len(record['checks'])}. Repair or finish; do not invent timing.",
                         }
                     )
                     (directory / "session.json").write_text(json.dumps(record, indent=2))

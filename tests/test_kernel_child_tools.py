@@ -319,3 +319,38 @@ def test_enclosing_deadlines_cover_children_feedback_and_cleanup(module):
         module.enclosing_timeouts(
             4, repl_base=270, backend_base=300, feedback_timeout=180, feedback_calls=2
         )
+
+
+def test_fenced_child_source_needs_no_json_escaping(module):
+    source = 'CPP_SOURCE = """void launch();"""\nCUDA_SOURCE = """kernel"""'
+    assert module.parse_action("CHECK\n```python\n" + source + "\n```") == {
+        "action": "check",
+        "advice": "",
+        "source": source,
+    }
+    assert (
+        module.parse_action("FINISH\nCompiler repair passed\n```python\n" + source + "\n```")[
+            "advice"
+        ]
+        == "Compiler repair passed"
+    )
+
+
+def test_malformed_action_gets_bounded_format_feedback_without_resetting_tokens(
+    module, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(module, "validate_submission_source", lambda source: (True, ""))
+    replies = [response({}), response({}), response({})]
+    replies[0].choices[0].message.content = 'I will check now. {"source":"broken'
+    replies[1].choices[0].message.content = "CHECK\n```python\ncandidate\n```"
+    replies[2].choices[0].message.content = "FINISH\nChecked candidate\n```python\ncandidate\n```"
+    checker = AsyncMock(return_value={"compiled": True, "correct": True})
+    session, client, records = child(module, tmp_path, replies, checker)
+    result = json.loads(asyncio.run(session.query("Check the source")))
+    assert result["verified_by_child_check"] is True
+    assert len(records[0]["format_errors"]) == 1
+    assert records[0]["completion_tokens"] == 300
+    assert checker.await_count == 1
+    assert [
+        call.kwargs["max_tokens"] for call in client.chat.completions.create.call_args_list
+    ] == [4096, 3996, 3896]
