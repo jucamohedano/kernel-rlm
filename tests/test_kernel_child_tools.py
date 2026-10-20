@@ -283,3 +283,17 @@ def test_generator_rejects_tool_children_without_dedicated_budget(module, tmp_pa
         },
     )
     assert generator.limits["max_subcalls"] == 2
+
+
+def test_worker_lifetime_follows_its_actual_parent(module, monkeypatch):
+    calls = []
+    monkeypatch.setattr(module.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(
+        module.ctypes,
+        "CDLL",
+        lambda *args, **kwargs: SimpleNamespace(prctl=lambda *args: calls.append(args) or 0),
+    )
+    module.install_worker_cancellation(os.getppid())
+    assert calls == [(1, module.signal.SIGTERM, 0, 0, 0)]
+    with pytest.raises(KeyboardInterrupt, match="parent exited"):
+        module.install_worker_cancellation(-1)

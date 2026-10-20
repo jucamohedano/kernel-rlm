@@ -1,6 +1,7 @@
 """Opt-in child compile/repair sessions with aggregate token and tool budgets."""
 
 import asyncio
+import ctypes
 import json
 import os
 import signal
@@ -59,6 +60,7 @@ async def check_candidate(reference, source, directory, timeout_s):
             stdout=log,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
+            env={**os.environ, "KERNEL_CHILD_PARENT_PID": str(os.getpid())},
         )
     try:
         status = await asyncio.wait_for(process.wait(), timeout_s + 12)
@@ -206,13 +208,22 @@ class IterativeSubcalls:
             (directory / "session.json").write_text(json.dumps(record, indent=2))
 
 
-def verify_worker(request_path, output_path):
-    from kernel_rlm.verifier import verify_cuda
-
+def install_worker_cancellation(expected_parent: int):
     def cancelled(signum, frame):
         raise KeyboardInterrupt("Child verifier cancelled; unwind nested compiler/runner groups")
 
     signal.signal(signal.SIGTERM, cancelled)
+    library = ctypes.CDLL(None, use_errno=True)
+    if library.prctl(1, signal.SIGTERM, 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "Cannot bind child verifier lifetime to its parent")
+    if os.getppid() != expected_parent:
+        raise KeyboardInterrupt("Child verifier parent exited before cancellation was installed")
+
+
+def verify_worker(request_path, output_path):
+    install_worker_cancellation(int(os.environ["KERNEL_CHILD_PARENT_PID"]))
+    from kernel_rlm.verifier import verify_cuda
+
     request = json.loads(Path(request_path).read_text())
     result = verify_cuda(
         request["reference"],
