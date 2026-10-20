@@ -17,6 +17,21 @@
   },
   "experiments": [
     {
+      "id": "trl-l1-rtx-continuation",
+      "follows_experiments": ["trl-l1-child-progress", "trl-rtx-child-research"],
+      "title": "RTX L1 curriculum · continuation from goal checkpoint 19",
+      "current_run_id": "20261020T141800Z-rtx-resume",
+      "status": "open",
+      "intent": "Continue the unchanged 50-task L1 pass from verified goal checkpoint19 on the two RTX PRO6000 cards, within the revised40USD total RTX authorization.",
+      "change": "Role-aware driver:GPU1 TP1 inference,GPU0 verifier or one-rank nativeTRL/Muon. Explicit one-time hardware/repair revalidation preserves the exact old0006group and prior attempts. Fresh groups use measured16K context and bounded compiler-enabled children; no reward/task/order change.",
+      "conclusion": "Driver21140 launched20October14:18:48UTC with immutable pushed sourceaba545a and loaded40USD ceiling from original RTX creation baseline. All8preserved0006members revalidated and complete weak group deferred without update. At14:25UTC collecting fresh0034withpolicy19;19/50trained,zero new optimizer updates. Trackio campaign is live; its19loss points are inherited,not19newupdates.",
+      "decision": "Continue while full phases and cleanup fit the authorization. Preserve/defer complete weak groups without updates. Every accepted update requires exact-root probability audit and native state readback. User controls termination; hourly monitor restored.",
+      "evidence_file": "notes/results/20261020-rtx-training-resume.json",
+      "limitations": ["No new optimizer step or held-out improvement confirmed at launch.", "Context,children,hardware and infrastructure changed together; not a single-variable ablation.", "Inference fully exits before final scoring/audit/learner; not native asynchronousGRPO.", "Conservative phase reservations can stop expansion before40USD literal spend; idle rental still bills."],
+      "runs": ["20261020T141800Z-rtx-resume"],
+      "provenance": {"dataset_ids": ["ops6k-l1-seed42"], "documented_change_commits": ["5675647", "aba545a"], "notes": ["notes/results/20261020-verifier-repair.json", "notes/results/20261020-rtx-training-resume.json"]}
+    },
+    {
       "id": "trl-rtx-split-baseline",
       "follows_experiments": ["trl-l1-child-progress"],
       "title": "RTX split-card · unchanged eight-rollout baseline",
