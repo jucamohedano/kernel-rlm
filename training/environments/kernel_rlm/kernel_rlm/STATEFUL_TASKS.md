@@ -110,3 +110,31 @@ request drains before a feedback deadline. CPU cancellation and lock tests are
 not measurements of live GPU abort latency, throughput or numerical correctness.
 Use a new source snapshot for GPU validation; do not resume the old immutable run
 with edited code.
+
+## BatchNorm verification protocol: batchnorm-state-v2
+
+Standard BatchNorm1d/2d/3d and SyncBatchNorm modules receive reproducible,
+nondefault affine parameters and running statistics before every correctness
+trial. Running variance stays positive; absent parameters/buffers, input shapes,
+evaluation mode, numerical tolerances and reward formulas are unchanged. Other
+module types and state are not changed. A dedicated CPU generator derives its
+seed from the protocol, module path and trial without changing the global RNG.
+
+The reference evaluates this state, and the existing strict state handoff copies
+it to ModelNew. Every numerical trial must pass before benchmarking. Timing uses
+the same BatchNorm state as the last successful trial, not fresh default state.
+Results record the protocol, challenge seeds/state digests and benchmark state.
+This catches the saved identity-return shortcut even for a one-trial feedback
+check; compiling/calling an extension alone is still not proof of a CUDA launch.
+
+The RTX driver requires matching protocol tags on cached submitted candidates.
+Legacy results fail closed with an explicit revalidation requirement; no original
+scores, attempts, trajectories or checkpoint history are rewritten. A new scorer
+returning a wrong protocol is durably recorded as an attempt before failing.
+Revalidation must use a separate evidence directory and immutable source revision.
+
+This is expanded numerical coverage, not a hardened security boundary against
+arbitrary hostile Python or a guarantee of generalization over all module states.
+The deterministic challenge seeds are reproducibility metadata, not hidden tests.
+It does not repair the separate task0037 timeout, undo the update at checkpoint28,
+or authorize restarting training from a different checkpoint.

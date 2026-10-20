@@ -7,6 +7,58 @@ from unittest.mock import AsyncMock
 import pytest
 
 
+def test_changed_protocol_refuses_cached_scores_without_resetting_them(saved):
+    module, directory, _task = saved
+    before = {str(path): path.read_bytes() for path in directory.rglob("*") if path.is_file()}
+    scorer = AsyncMock()
+    with pytest.raises(ValueError, match="explicit revalidation"):
+        asyncio.run(
+            module.score_generated(
+                directory,
+                1,
+                "task-a",
+                scorer=scorer,
+                required_verification_protocol="batchnorm-state-v2",
+            )
+        )
+    scorer.assert_not_called()
+    assert before == {
+        str(path): path.read_bytes() for path in directory.rglob("*") if path.is_file()
+    }
+
+
+@pytest.mark.parametrize("source", ["", "invalid candidate"])
+def test_terminal_static_results_identify_verifier_protocol(source):
+    from kernel_rlm.verification_state import VERIFICATION_PROTOCOL
+    from kernel_skyrl.generator import score_submission
+
+    reward, verification = asyncio.run(score_submission({}, {"submission": source}))
+    assert reward == 0
+    assert verification["verification_protocol"] == VERIFICATION_PROTOCOL
+
+
+def test_wrong_fresh_protocol_preserves_attempt_before_failing_closed(saved):
+    module, directory, _task = saved
+    for path in directory.glob("group-0-trajectory-*/score.json"):
+        path.unlink()
+    scorer = AsyncMock(return_value=(0.1, {"verification_protocol": "wrong-version"}))
+    with pytest.raises(ValueError, match="different verifier protocol"):
+        asyncio.run(
+            module.score_generated(
+                directory,
+                1,
+                "task-a",
+                scorer=scorer,
+                required_verification_protocol="batchnorm-state-v2",
+            )
+        )
+    scorer.assert_awaited_once()
+    ledger = json.loads((directory / "scoring-state.json").read_text())
+    score = json.loads((directory / "group-0-trajectory-0/score.json").read_text())
+    assert ledger["scores"]["0"]["attempts"] == 1
+    assert score["verification"]["verification_protocol"] == "wrong-version"
+
+
 @pytest.fixture
 def saved(monkeypatch, tmp_path):
     monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "training/environments/kernel_rlm"))

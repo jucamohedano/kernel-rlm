@@ -18,6 +18,7 @@ from typing import Any
 
 from kernel_rlm.feedback_overlap import RESERVE_BYTES, overlap_budget
 from kernel_rlm.gpu_sharing import paused_inference
+from kernel_rlm.verification_state import VERIFICATION_PROTOCOL
 from kernel_rlm.verifier_slot import (
     COMPILE_LOCK_PATH,
     compile_slot,
@@ -127,6 +128,7 @@ _RUNNER = textwrap.dedent(
     import torch
     import torch.utils.cpp_extension
     from kernel_rlm.candidate import candidate_forward, clone_inputs, compare_outputs
+    from kernel_rlm.verification_state import VERIFICATION_PROTOCOL, prepare_batchnorm_state
 
     status_path = Path(sys.argv[-2])
     extension_root = Path(os.environ.get("KERNEL_RLM_EXTENSION_BUILD_ROOT", "/tmp/kernel-rlm-extensions"))
@@ -193,6 +195,8 @@ _RUNNER = textwrap.dedent(
         "trials": trials,
         "device": "cuda",
         "phase_events": phase_events,
+        "verification_protocol": VERIFICATION_PROTOCOL,
+        "batchnorm_state_cases": [],
     }
 
     def defer_overlap(reason):
@@ -323,6 +327,9 @@ _RUNNER = textwrap.dedent(
             init_inputs = get_init_inputs()
             model = model_class(*init_inputs).to(device)
             model.eval()
+            result["batchnorm_state_cases"].append(
+                {"trial": trial, "modules": prepare_batchnorm_state(model, trial)}
+            )
             inputs = [move_to_device(value, device) for value in get_inputs()]
             candidate_inputs = clone_inputs(inputs)
             calls_before = len(extension_calls)
@@ -380,6 +387,7 @@ _RUNNER = textwrap.dedent(
             inputs = [move_to_device(value, device) for value in get_inputs()]
             init_inputs = get_init_inputs()
             model = model_class(*init_inputs).to(device).eval()
+            result["benchmark_batchnorm_state"] = prepare_batchnorm_state(model, trials - 1)
             with torch.no_grad():
                 model(*inputs)
                 torch.cuda.synchronize()
@@ -430,6 +438,8 @@ def verify_cuda(
     """Preflight interfaces, drain during CPU compilation, then independently verify."""
     if timeout_s <= 0:
         raise ValueError("Verification timeout must be positive")
+    if type(n_trials) is not int or n_trials < 1:
+        raise ValueError("Verification trials must be a positive integer")
     started = time.monotonic()
     deadline = started + timeout_s
     preflight = run_contract_preflight(
@@ -449,6 +459,7 @@ def verify_cuda(
             "preflight": preflight,
             "trials": n_trials,
             "device": "cpu_meta",
+            "verification_protocol": VERIFICATION_PROTOCOL,
         }
     shared_gpu = bool(os.environ.get("KERNEL_INFERENCE_ADMIN_URL"))
     memory_limit = None
@@ -482,6 +493,7 @@ def verify_cuda(
             "error": str(error),
         }
     result["preflight"] = preflight
+    result["verification_protocol"] = VERIFICATION_PROTOCOL
     result.setdefault("timings", {}).update(
         preflight_elapsed_seconds=preflight["elapsed_seconds"],
         total_elapsed_seconds=time.monotonic() - started,

@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 import aiohttp
+from kernel_rlm.verification_state import VERIFICATION_PROTOCOL
 from kernel_skyrl.generator import score_submission
 from kernel_skyrl.preflight import load_tasks
 
@@ -328,6 +329,7 @@ async def run(arguments):
             "model_revision": MODEL_REVISION,
             "source_commit": arguments.source_commit,
             "source_sha256": source_hashes(arguments.source_root),
+            "verification_protocol": VERIFICATION_PROTOCOL,
             "dataset_sha256": digest(arguments.dataset),
             "context_tokens": 16384,
             "max_turns": 10,
@@ -511,6 +513,7 @@ async def run(arguments):
                     output,
                     version,
                     task,
+                    required_verification_protocol=VERIFICATION_PROTOCOL,
                     on_score=lambda index, score, reused, version=version: trackio.log(
                         {
                             "verification/completed_scores": index + 1,

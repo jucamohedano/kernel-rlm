@@ -116,7 +116,12 @@ def load_episodes(directory: Path, manifest: dict) -> list[dict]:
 
 
 async def score_generated(
-    directory: Path, version: int, task_id: str, scorer=score_submission, on_score=None
+    directory: Path,
+    version: int,
+    task_id: str,
+    scorer=score_submission,
+    on_score=None,
+    required_verification_protocol: str | None = None,
 ) -> dict:
     manifest_path = directory / "generation-manifest.json"
     manifest = read_json(manifest_path)
@@ -140,6 +145,16 @@ async def score_generated(
         score = read_json(score_path) if score_path.exists() else None
         if score and score.get("policy_version") != version:
             raise ValueError("Persisted score belongs to a different policy")
+        if (
+            score
+            and required_verification_protocol is not None
+            and episode["record"].get("submission")
+            and score.get("verification", {}).get("verification_protocol")
+            != required_verification_protocol
+        ):
+            raise ValueError(
+                "Persisted verifier protocol differs; explicit revalidation is required"
+            )
         attempts = cached.get("attempts", 0) if cached else 0
         while (
             score is None
@@ -160,6 +175,12 @@ async def score_generated(
             write_json(score_path, score)
             state["scores"][str(index)] = {"sha256": digest(score_path), "attempts": attempts}
             write_json(state_path, state)
+            if (
+                required_verification_protocol is not None
+                and episode["record"].get("submission")
+                and verification.get("verification_protocol") != required_verification_protocol
+            ):
+                raise ValueError("Scorer returned a different verifier protocol")
             repaired.append(index)
         if score is None:
             raise ValueError("Missing score after bounded verification")
