@@ -951,7 +951,7 @@ def render_timeline(trace: dict) -> str:
         ]
     for index, message in enumerate(transcript, 1):
         role = message.get("role", "unknown")
-        content = message.get("content", "")
+        content = message.get("content") or ""
         label = f"{index:02d} · {role.upper()}"
         if role == "assistant":
             call = next(calls, {})

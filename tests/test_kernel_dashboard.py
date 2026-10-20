@@ -108,6 +108,8 @@ def test_structured_repl_code_appears_when_visible_assistant_text_is_empty():
     assert "62 output tokens" in page
     assert "<details open" not in page
     assert trace["nodes"][0]["message"]["content"] is None
+    trace["info"]["repl_transcript"][0]["content"] = None
+    assert "&lt;cuda source&gt;" in dashboard.render_timeline(trace)
 
 
 def test_empty_and_malformed_assistant_payloads_explain_missing_text():
