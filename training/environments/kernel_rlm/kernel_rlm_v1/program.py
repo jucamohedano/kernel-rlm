@@ -21,7 +21,7 @@ from kernel_rlm.actions import (
     submission_turn,
 )
 from kernel_rlm.capacity import context_exhaustion_details
-from kernel_rlm.child_tools import TOOL_CHILD_TIMEOUT_S, IterativeSubcalls
+from kernel_rlm.child_tools import TOOL_CHILD_TIMEOUT_S, IterativeSubcalls, enclosing_timeouts
 from kernel_rlm.cuda_docs import DOCS_INSTRUCTION, docs_manifest
 from kernel_rlm.feedback import build_local_feedback_bootstrap
 from kernel_rlm.subcalls import (
@@ -77,7 +77,17 @@ async def run(task: dict) -> None:
             "Store the reply, inspect a short summary and integrate only justified changes. "
             "Calling children earns no reward. Do not delegate on the submission deadline or recovery."
         )
-    backend = SubprocessReplBackend(request_timeout=BACKEND_TIMEOUT_S + subcall_timeout)
+    repl_timeout = REPL_TIMEOUT_S + subcall_timeout
+    backend_timeout = BACKEND_TIMEOUT_S + subcall_timeout
+    if limits.get("child_tools"):
+        repl_timeout, backend_timeout = enclosing_timeouts(
+            max_child_calls,
+            repl_base=REPL_TIMEOUT_S,
+            backend_base=BACKEND_TIMEOUT_S,
+            feedback_timeout=FEEDBACK_TIMEOUT_S,
+            feedback_calls=FEEDBACK_MAX_CALLS,
+        )
+    backend = SubprocessReplBackend(request_timeout=backend_timeout)
     proxy = None
     task_prompt = task["prompt"]
     if limits.get("enable_subcall"):
@@ -126,7 +136,7 @@ async def run(task: dict) -> None:
         feedback_log_path = str(Path(feedback_log_dir) / f"feedback-{uuid.uuid4().hex}.jsonl")
         record["feedback_log_path"] = feedback_log_path
     try:
-        os.environ["RLM_TRAIN_EXEC_TIMEOUT_S"] = str(REPL_TIMEOUT_S + subcall_timeout)
+        os.environ["RLM_TRAIN_EXEC_TIMEOUT_S"] = str(repl_timeout)
         os.environ["RLM_TRAIN_READONLY_CONTEXT"] = "1"
         proxy_url = "http://127.0.0.1:1"
         if limits.get("enable_subcall"):

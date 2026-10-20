@@ -306,3 +306,16 @@ def test_child_action_accepts_only_a_complete_json_object(module):
     for invalid in ("[]", 'preface {"action":"check"}', "```python\n{}\n```"):
         with pytest.raises(ValueError):
             module.parse_action(invalid)
+
+
+def test_enclosing_deadlines_cover_children_feedback_and_cleanup(module):
+    repl, backend = module.enclosing_timeouts(
+        2, repl_base=270, backend_base=300, feedback_timeout=180, feedback_calls=2
+    )
+    assert repl == 2 * 480 + 2 * 180 + 30
+    assert backend >= repl + 30
+    assert backend < 2400
+    with pytest.raises(ValueError, match="two bounded"):
+        module.enclosing_timeouts(
+            4, repl_base=270, backend_base=300, feedback_timeout=180, feedback_calls=2
+        )

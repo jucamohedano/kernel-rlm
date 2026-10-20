@@ -26,6 +26,14 @@ TOOL_CHILD_SYSTEM = (
 TOOL_CHILD_TIMEOUT_S = 480
 
 
+def enclosing_timeouts(max_calls, *, repl_base, backend_base, feedback_timeout, feedback_calls):
+    if max_calls not in {1, 2}:
+        raise ValueError("Use at most two bounded child sessions")
+    child_seconds = TOOL_CHILD_TIMEOUT_S * max_calls
+    repl_seconds = max(repl_base, feedback_timeout * feedback_calls + 30) + child_seconds
+    return repl_seconds, max(backend_base + child_seconds, repl_seconds + 30)
+
+
 def parse_action(content):
     text = content.strip()
     if text.startswith("```json\n") and text.endswith("\n```"):
