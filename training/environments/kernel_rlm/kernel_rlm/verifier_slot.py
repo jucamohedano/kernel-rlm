@@ -16,6 +16,47 @@ def _intent_path(path: Path) -> Path:
     return path.with_name(f"{path.name}.writer")
 
 
+def reader_waiting_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.readers")
+
+
+def try_writer_intent(intent, waiting) -> bool:
+    try:
+        fcntl.flock(waiting, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    try:
+        try:
+            fcntl.flock(intent, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            return False
+    finally:
+        fcntl.flock(waiting, fcntl.LOCK_UN)
+
+
+def acquire_writer_sync(intent, path: Path, deadline: float, message: str) -> None:
+    with reader_waiting_path(path).open("a") as waiting:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(message)
+            if try_writer_intent(intent, waiting):
+                return
+            time.sleep(min(0.05, remaining))
+
+
+async def acquire_writer_async(intent, path: Path, deadline: float, message: str) -> None:
+    with reader_waiting_path(path).open("a") as waiting:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(message)
+            if try_writer_intent(intent, waiting):
+                return
+            await asyncio.sleep(min(0.05, remaining))
+
+
 def _acquire_sync(lock, operation: int, deadline: float, message: str) -> None:
     while True:
         remaining = deadline - time.monotonic()
@@ -44,15 +85,18 @@ async def _acquire_async(lock, operation: int, deadline: float, message: str) ->
 async def inference_request_slot(
     timeout_s: float, *, path: Path | None = None, enabled: bool = True
 ) -> AsyncIterator[float]:
-    """Admit concurrent model requests while giving verifier writers priority."""
+    """Admit queued model requests between exclusive verifier phases."""
     if not enabled:
         yield 0.0
         return
     path = path or LOCK_PATH
     deadline = time.monotonic() + timeout_s
     intent_acquired = False
-    with _intent_path(path).open("a") as intent:
+    with reader_waiting_path(path).open("a") as waiting, _intent_path(path).open("a") as intent:
         try:
+            await _acquire_async(
+                waiting, fcntl.LOCK_SH, deadline, "Timed out waiting to enter inference"
+            )
             await _acquire_async(
                 intent,
                 fcntl.LOCK_SH,
@@ -69,6 +113,7 @@ async def inference_request_slot(
                 )
                 fcntl.flock(intent, fcntl.LOCK_UN)
                 intent_acquired = False
+                fcntl.flock(waiting, fcntl.LOCK_UN)
                 try:
                     yield time.monotonic() - (deadline - timeout_s)
                 finally:
@@ -88,9 +133,9 @@ async def exclusive_inference_slot(
     intent_acquired = False
     with _intent_path(path).open("a") as intent:
         try:
-            await _acquire_async(
+            await acquire_writer_async(
                 intent,
-                fcntl.LOCK_EX,
+                path,
                 deadline,
                 "Timed out waiting for the verifier GPU slot",
             )
@@ -115,9 +160,9 @@ async def exclusive_inference_slot(
 def inference_drain(timeout_s: float, *, path: Path = LOCK_PATH) -> Iterator[float]:
     deadline = time.monotonic() + timeout_s
     with _intent_path(path).open("a") as intent:
-        _acquire_sync(
+        acquire_writer_sync(
             intent,
-            fcntl.LOCK_EX,
+            path,
             deadline,
             "Timed out waiting for the verifier GPU slot",
         )

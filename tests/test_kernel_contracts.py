@@ -183,6 +183,8 @@ def test_prompt_scaffold_assembles_source_without_loading_extension(modules, cap
 
     assert "not a module, Model instance, or callable" in KERNEL_SYSTEM
     assert "or execute the reference" in KERNEL_SYSTEM
+    assert "turn six" not in KERNEL_SYSTEM
+    assert "current run's turn budget" in KERNEL_SYSTEM
     assert KERNEL_TASK_INSTRUCTION.endswith(CUDA_ASSEMBLY_TEMPLATE)
 
 

@@ -77,8 +77,9 @@ def continuation_parent(curriculum, tmp_path):
 
 
 @pytest.mark.parametrize("fault", [None, "coverage", "checkpoint", "completed_group"])
+@pytest.mark.parametrize("parent_mode", ["shared_parent", "direct_parent"])
 def test_explicit_incomplete_run_preservation_does_not_reset_coverage(
-    curriculum, continuation_parent, tmp_path, fault
+    curriculum, continuation_parent, tmp_path, fault, parent_mode
 ):
     import copy
 
@@ -110,6 +111,9 @@ def test_explicit_incomplete_run_preservation_does_not_reset_coverage(
     curriculum.write_json(directory / "state.json", stopped)
     before = (directory / "state.json").read_bytes()
     arguments.preserved_incomplete_run = directory
+    if parent_mode == "direct_parent":
+        arguments.parent_run_dir = directory
+        state["continuation_parent"] = {"run_id": stopped["run_id"]}
     if fault:
         with pytest.raises(ValueError):
             curriculum.preserve_incomplete_run(arguments, state)
@@ -245,6 +249,31 @@ def test_failed_generated_parent_needs_explicit_same_parent_recovery(
     assert result["completed_task_ids"] == order[:4]
     assert result["recovered_generated_runs"] == original["recovered_generated_runs"]
     assert (arguments.parent_run_dir / "state.json").read_bytes() == before
+
+
+def test_failed_incomplete_parent_requires_explicit_preservation(
+    curriculum, continuation_parent, monkeypatch
+):
+    arguments, original, order = continuation_parent
+    pending = arguments.parent_run_dir / "groups/incomplete/collection/rollouts"
+    pending.mkdir(parents=True)
+    original.update(
+        status="failed", pending_directory=str(pending.parents[1]), pending_task_id=order[4]
+    )
+    curriculum.write_json(arguments.parent_run_dir / "state.json", original)
+    arguments.preserved_incomplete_run = arguments.parent_run_dir
+    monkeypatch.setattr(
+        curriculum,
+        "bootstrap_state",
+        lambda *args: {
+            "policy_version": 4,
+            "completed_task_ids": order[3:4],
+            "results": [{"rewards": [0.8, 0.1]}],
+        },
+    )
+    result = curriculum.continuation_state(arguments, order)
+    assert result["policy_version"] == 4
+    assert result["completed_task_ids"] == order[:4]
 
 
 def test_new_snapshot_continuation_keeps_all_coverage_and_rejected_history(

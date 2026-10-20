@@ -81,8 +81,8 @@ KERNEL_SYSTEM = (
     "correctness feedback. The REPL disables exec, eval, and compile; use ast.parse "
     "for syntax checks. Submit with answer['content'] = source and answer['ready'] = True "
     "inside the REPL. Do not submit just a variable name or prose. "
-    "Preserve the best source and submit by turn six at the latest, or sooner if the "
-    "run has fewer turns. Keep the submission action short and reuse the stored source. "
+    "Preserve the best source and submit when ready, within the current run's turn budget. "
+    "Keep the submission action short and reuse the stored source. "
     "Any additional turns are for submission recovery, not more kernel development."
 )
 

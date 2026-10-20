@@ -2,6 +2,7 @@ import asyncio
 import fcntl
 import subprocess
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -38,6 +39,69 @@ def test_slot_excludes_other_processes_and_releases(slot_module, tmp_path):
         assert 0 < remaining <= 5
         assert subprocess.run(command, capture_output=True).returncode != 0
     assert subprocess.run(command, capture_output=True).returncode == 0
+
+
+def test_queued_reader_runs_before_another_verifier_phase(slot_module, tmp_path):
+    path = tmp_path / "fair-slot"
+    writer_started = threading.Event()
+    writer_entered = threading.Event()
+
+    def next_writer():
+        writer_started.set()
+        with slot_module.verifier_slot(2, path=path):
+            writer_entered.set()
+
+    async def check():
+        reader_entered = asyncio.Event()
+        release_reader = asyncio.Event()
+
+        async def reader():
+            async with slot_module.inference_request_slot(2, path=path):
+                reader_entered.set()
+                await release_reader.wait()
+
+        with path.with_name(path.name + ".writer").open("a") as current_writer:
+            fcntl.flock(current_writer, fcntl.LOCK_EX)
+            writer = asyncio.create_task(asyncio.to_thread(next_writer))
+            assert await asyncio.to_thread(writer_started.wait, 1)
+            await asyncio.sleep(0.02)
+            queued_reader = asyncio.create_task(reader())
+            await asyncio.sleep(0.02)
+            with slot_module.reader_waiting_path(path).open("a") as waiting:
+                fcntl.flock(waiting, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                with pytest.raises(BlockingIOError):
+                    fcntl.flock(waiting, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(current_writer, fcntl.LOCK_UN)
+            await asyncio.wait_for(reader_entered.wait(), 1)
+            assert not writer_entered.is_set()
+            release_reader.set()
+            await queued_reader
+            await writer
+            assert writer_entered.is_set()
+
+    asyncio.run(check())
+
+
+def test_cancelled_waiting_reader_releases_its_reservation(slot_module, tmp_path):
+    path = tmp_path / "cancelled-reader"
+
+    async def reader():
+        async with slot_module.inference_request_slot(2, path=path):
+            pytest.fail("An active verifier must exclude inference")
+
+    async def check():
+        with slot_module.inference_drain(1, path=path):
+            queued = asyncio.create_task(reader())
+            await asyncio.sleep(0.02)
+            queued.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await queued
+            with slot_module.reader_waiting_path(path).open("a") as waiting:
+                fcntl.flock(waiting, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        async with slot_module.exclusive_inference_slot(1, path=path):
+            pass
+
+    asyncio.run(check())
 
 
 def test_wait_has_bounded_budget(slot_module, tmp_path):

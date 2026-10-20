@@ -320,14 +320,20 @@ def continuation_state(arguments, task_order: list[str]) -> dict:
         state = read_json(state_path)
         manifest = read_json(parent / "inputs.json")
         recover = getattr(arguments, "recover_generated_run", None)
+        preserve = getattr(arguments, "preserved_incomplete_run", None)
+        if recover is not None and preserve is not None:
+            raise ValueError("Select either incomplete preservation or generated recovery")
+        selected = recover or preserve
+        pending = Path(state["pending_directory"]) if state.get("pending_directory") else None
         recovering_parent = (
-            recover is not None
-            and recover.resolve() == parent
+            selected is not None
+            and selected.resolve() == parent
             and state.get("status") == "failed"
-            and state.get("pending_directory") is not None
-            and Path(state["pending_directory"])
-            .joinpath("collection/rollouts/generation-manifest.json")
-            .exists()
+            and pending is not None
+            and pending.is_dir()
+            and pending.resolve().is_relative_to(parent)
+            and pending.joinpath("collection/rollouts/generation-manifest.json").exists()
+            == (recover is not None)
         )
         if state.get("status") not in {"paused", "needs_diagnosis"} and not recovering_parent:
             raise ValueError("Parent must have stopped at a saved continuation boundary")
@@ -435,8 +441,7 @@ def preserve_incomplete_run(arguments, state: dict) -> None:
                 original.get("continuation_parent", {}).get("run_id")
                 != state.get("continuation_parent", {}).get("run_id")
                 and not (
-                    recover is not None
-                    and directory == arguments.parent_run_dir.resolve()
+                    directory == arguments.parent_run_dir.resolve()
                     and state.get("continuation_parent", {}).get("run_id") == original["run_id"]
                 )
             )
@@ -532,7 +537,7 @@ def preserve_incomplete_run(arguments, state: dict) -> None:
                 and not path.is_symlink()
                 and path.suffix in {".json", ".jsonl", ".log", ".csv"}
             },
-            "fresh_generation_reason": "Explicit continuation after capacity/cancellation repair and context-limit change",
+            "fresh_generation_reason": "Explicit continuation after diagnosed infrastructure repair; original incomplete samples are not trained",
             "incomplete_samples_used_for_training": False,
         }
         state.setdefault("preserved_incomplete_runs", []).append(saved)

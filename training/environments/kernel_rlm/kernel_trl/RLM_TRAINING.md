@@ -96,6 +96,21 @@ It verifies all eight captured episodes, exact token samples, task data,
 documentation hash and turn/context protocol. It copies durable scoring attempts
 without resetting them or regenerating trajectories. Audits still gate updates.
 
+Inference admission reserves waiting readers before the next verifier drain.
+A queued writer cannot hold that reservation while another writer is active.
+This lets queued root requests enter between verifier phases without permitting
+inference to overlap exclusive CUDA execution. The existing 300-second admission
+and 180-second feedback limits remain unchanged. Cancellation releases both
+the reader reservation and the execution lock.
+
+An infrastructure-incomplete group is different from a complete generated group.
+Use an explicitly recorded new continuation with `--preserved-incomplete-run`
+only after diagnosing and testing its repair. All failed and successful sibling
+traces remain preserved, with no optimizer credit. The same task gets a new
+complete eight-member attempt at the unchanged checkpoint. Record this as a
+fresh retry, not exact sample reuse or a reward-based task skip. Its cost and
+attempt history still count. Never manufacture the failed episode's reward.
+
 Both flags are opt-in and immutable on resume. Per-episode `precompile.json` and
 `precompile-error.json`, plus `inference-lifecycle.jsonl`, record their actual work.
 Cancelling preparation terminates the worker and its compiler process group;
