@@ -297,3 +297,12 @@ def test_worker_lifetime_follows_its_actual_parent(module, monkeypatch):
     assert calls == [(1, module.signal.SIGTERM, 0, 0, 0)]
     with pytest.raises(KeyboardInterrupt, match="parent exited"):
         module.install_worker_cancellation(-1)
+
+
+def test_child_action_accepts_only_a_complete_json_object(module):
+    action = {"action": "finish", "advice": "done", "source": ""}
+    assert module.parse_action(json.dumps(action)) == action
+    assert module.parse_action("```json\n" + json.dumps(action) + "\n```") == action
+    for invalid in ("[]", 'preface {"action":"check"}', "```python\n{}\n```"):
+        with pytest.raises(ValueError):
+            module.parse_action(invalid)

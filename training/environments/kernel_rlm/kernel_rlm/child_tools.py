@@ -26,6 +26,16 @@ TOOL_CHILD_SYSTEM = (
 TOOL_CHILD_TIMEOUT_S = 480
 
 
+def parse_action(content):
+    text = content.strip()
+    if text.startswith("```json\n") and text.endswith("\n```"):
+        text = text[8:-4].strip()
+    action = json.loads(text)
+    if not isinstance(action, dict):
+        raise ValueError("Child must return one JSON action object")
+    return action
+
+
 async def stop_verifier(process):
     if process.returncode is not None:
         return
@@ -142,9 +152,7 @@ class IterativeSubcalls:
                         raise ValueError("Child usage must account for every generated token")
                     record["completion_tokens"] += usage
                     content = visible_response(choice.message.content or "")
-                    action = json.loads(content)
-                    if not isinstance(action, dict):
-                        raise ValueError("Child must return one JSON action object")
+                    action = parse_action(content)
                     source = action.get("source", "")
                     if not isinstance(source, str) or len(source.encode()) > 65536:
                         raise ValueError("Invalid child candidate source")
