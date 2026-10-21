@@ -8,4 +8,5 @@ def __getattr__(name: str) -> Any:
         return load_environment
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
+
 __all__ = ["load_environment"]

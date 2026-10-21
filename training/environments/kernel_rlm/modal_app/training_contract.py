@@ -211,9 +211,9 @@ async def check(run_id: str) -> dict:
                     indent=2,
                 )
             )
-        assert (
-            template_ids == requests[0]["token_ids"]
-        ), "Renderer differs from checkpoint chat template"
+        assert template_ids == requests[0]["token_ids"], (
+            "Renderer differs from checkpoint chat template"
+        )
         assert trace.info["kernel_submission"] == submission.strip()
         assert trace.agent.trainable
         samples = trace_to_samples(trace, env_name="kernel-contract")

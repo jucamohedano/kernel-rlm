@@ -173,10 +173,16 @@ def verify_triton(
     "error", "trials", "device"}.
     """
     python = python or os.environ.get("RLM_VERIFY_PYTHON") or sys.executable
-    _fail = lambda msg: {   # noqa: E731
-        "compiled": False, "correct": False, "max_diff": None,
-        "speedup": None, "ref_ms": None, "kernel_ms": None,
-        "error": msg, "trials": n_trials, "device": "?",
+    _fail = lambda msg: {  # noqa: E731
+        "compiled": False,
+        "correct": False,
+        "max_diff": None,
+        "speedup": None,
+        "ref_ms": None,
+        "kernel_ms": None,
+        "error": msg,
+        "trials": n_trials,
+        "device": "?",
     }
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
@@ -187,9 +193,13 @@ def verify_triton(
         sub_path.write_text(submission_code, encoding="utf-8")
         runner_path.write_text(_RUNNER, encoding="utf-8")
         cmd = [
-            python, str(runner_path),
-            str(ref_path), str(sub_path),
-            str(int(n_trials)), repr(float(atol)), repr(float(rtol)),
+            python,
+            str(runner_path),
+            str(ref_path),
+            str(sub_path),
+            str(int(n_trials)),
+            repr(float(atol)),
+            repr(float(rtol)),
         ]
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s, cwd=cwd)

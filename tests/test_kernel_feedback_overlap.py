@@ -49,10 +49,11 @@ def test_only_measured_references_and_supported_allocations_overlap(modules, sou
     assert modules.policy.overlap_budget(reference.replace("4096", "8192"), candidate)[0] is None
     assert modules.policy.overlap_budget(reference, "broken(")[0] is None
     assert modules.policy.overlap_budget(reference, candidate + "\n# cudaMalloc\n")[0] is None
-    curriculum = ROOT.parents[3] / "notes/curriculum/lvl1_seed42.jsonl"
-    rows = [json.loads(line) for line in curriculum.read_text().splitlines()]
-    softplus = next(row for row in rows if row["_task_id"] == "lvl1-seed42-0011")
-    assert modules.policy.overlap_budget(softplus["code"], candidate)[0] == 4 * 1024**3
+    reference = (Path(__file__).parent / "fixtures/kernel_softplus_reference.txt").read_text()
+    assert hashlib.sha256(reference.strip().encode()).hexdigest() == (
+        "abd43e11f40258b2113ef8721650dd787a76c8fbf01daded9405f251f5ade358"
+    )
+    assert modules.policy.overlap_budget(reference, candidate)[0] == 4 * 1024**3
 
 
 def test_submission_compilation_caches_are_source_isolated(modules, monkeypatch, tmp_path):

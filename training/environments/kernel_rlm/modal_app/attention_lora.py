@@ -104,9 +104,9 @@ def preflight(run_id: str) -> dict[str, Any]:
     )
     models.commit()
     save_report(run_id, "preflight", result)
-    assert (
-        compatible
-    ), "Checkpoint keys need conversion; refusing weight download and GPU allocation"
+    assert compatible, (
+        "Checkpoint keys need conversion; refusing weight download and GPU allocation"
+    )
     return result
 
 

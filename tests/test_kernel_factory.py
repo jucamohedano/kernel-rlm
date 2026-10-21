@@ -224,10 +224,21 @@ def test_paths_and_duplicate_task_ids_are_rejected(project):
         factory.validate_registry(root, environment)
 
 
-def test_real_registry_and_materialized_dataset_validate():
-    result = factory.validate_registry(ENVIRONMENT.parents[3], ENVIRONMENT)
+def test_checked_in_example_registry_and_dataset_validate():
+    root = Path(__file__).parents[1]
+    result = factory.validate_registry(root, root / "examples/factory_cpu")
     assert result["status"] == "passed"
-    assert result["datasets"]["ops6k-l1-seed42"]["task_count"] == 50
+    assert result["datasets"]["vector-add-cpu-contract"]["task_count"] == 1
+
+
+def test_missing_provenance_still_fails_closed(project):
+    root, environment = project
+    path = environment / "dashboard/experiments.json"
+    registry = json.loads(path.read_text())
+    registry["experiments"][0]["provenance"]["code_paths"] = []
+    path.write_text(json.dumps(registry))
+    with pytest.raises(ValueError, match="Incomplete experiment provenance"):
+        factory.validate_registry(root, environment)
 
 
 def test_remote_snapshot_payload_cannot_bypass_hashes(project, tmp_path, monkeypatch):

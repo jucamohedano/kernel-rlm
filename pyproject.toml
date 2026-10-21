@@ -55,6 +55,8 @@ dev = [
     "ty>=0.0.7",
 ]
 test = [
+    "aiohttp>=3.9",
+    "datasets==4.0.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=6.0.0",
@@ -82,3 +84,4 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = [".", "training/src", "training/environments/kernel_rlm"]
