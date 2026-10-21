@@ -34,9 +34,9 @@
       },
       "intent": "Finish remaining nondeferred L1 pass within65USDtotal RTX fromoriginalbaseline; preserve all deferred/history data,verify complete backups and retireonlyRTXaftertraining ends under user's explicit authorization.",
       "change": "Initial25bb15f rebuilt28with BatchNorm state-v2 using all8original0017samples; originalbad28preserved. Newd1767ad descendantinherits29and repairs candidate loading attribution after natural pause, explicitly revalidates onlythe exactfailed0031member, preservesall8samples/7other scores/attempts, and activates approvedSM120docsforfreshgroups. Dataset/order/shapes/rewardformula/root-onlyloss unchanged.",
-  "conclusion": "At02:09UTCsameea1790edriver62507healthy generating0003atP33;33trained/15deferred/2remaining.0005bilineargridsamplingall8scoredonce,onecorrectcustomCUDAinterpolationat0.860918xreference,NOTfaster;seven sources/onecontextmissingfinal,no finalinfra.55874ROOTtokenaudit/full32optimizerrestore/native33readbackpassed,changed320adapters. Loss0.001455notaccuracy. Threechildsessions/sixrequests/zerodeliveredadvice;twochecksstaticrejectednotCUDAcompiles.51rootrepliesreasoning,fourdocssearches. New33archive/all3internalhashes/samples/scores/SQLiteverifiedlocally;PRIVATEHFffcb22dall8newaddresses/sizeschecked,notfullbinaryreadback. Viewer56scoredtraces=24accepted+32weak,33points=30inherited+3new. Estimate48.56/65,guardsunchanged;preseedNOTretirement-ready,noVMchange. Prior0036ATendelegationcaveatretained,no livepatch.",
+  "conclusion": "At02:39UTCsameea1790edriver62507healthy generating0004atP34;34trained/15deferred/ONEremaining.0003CTCtwoof8correctat0.99796x/0.99763x,NEITHERfaster;bothC++extensionsdelegateATenlogsoftmax/CTCwithinclude-onlyCUDA,notcustomkernels.39571ROOTtokenaudit/full33optimizerrestore/native34readbackpassed,changed320adapters. Loss0.14557notaccuracy. Onechildsession/3requests/completedadvice/oneREALnumericalcheckpassedonATendelegation;returnedverifiedFalse,nocertifiedsource/optimizationbenefitclaim.54rootrepliesreasoning,no lengths/docs/timeouts;onemissingfinalASTrecoveryrejections. New34archive/all3internalhashes/samples/scores/SQLiteverifiedlocally;PRIVATEHFee41f74all8newaddresses/sizeschecked,notfullbinaryreadback. Viewer64scored=32accepted+32weak,34points=30inherited+4new. Estimate49.95/65guardsunchanged;preseedNOTretirement-ready/noVMaction. Finish0004thenverifyALLdatabeforeauthorizedRTXbillingrelease.",
       "decision": "Finish remaining nondeferredpass within65USDtotal and unchangedguards/audit/readback. User now authorizes agent toterminate ONLYRTXVM aftertrainingendandallrequireddataisverifiedbackedup. Do not confusepassendwith50trained tasks orstoppedPythonwithbillingrelease.",
-  "evidence_file": "notes/results/20261021-final-pass-monitor-0209Z.json",
+  "evidence_file": "notes/results/20261021-final-pass-monitor-0239Z.json",
       "limitations": [
         "Old intermediate verifier feedback remains in reused trajectories; this is explicit final-reward revalidation, not fresh protocol rollouts.",
         "No held-out learning improvement established.",
@@ -72,7 +72,8 @@
           "notes/results/20261021-final-pass-monitor-0039Z.json",
       "notes/results/20261021-final-pass-monitor-0109Z.json",
       "notes/results/20261021-final-pass-monitor-0124Z.json",
-      "notes/results/20261021-final-pass-monitor-0209Z.json"
+      "notes/results/20261021-final-pass-monitor-0209Z.json",
+      "notes/results/20261021-final-pass-monitor-0239Z.json"
         ]
       }
     },
