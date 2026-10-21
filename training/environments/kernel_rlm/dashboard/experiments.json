@@ -23,7 +23,7 @@
       ],
       "title": "RTX L1 curriculum · verifier v2 · reward-corrected branch",
       "current_run_id": "20261020T230200Z-final-l1-pass",
-      "status": "open",
+  "status": "closed",
       "hardware_docs_prepared": {
         "source_commit": "034f1b0b1fb37f828f97df046f5f3c7c9b98ff48",
         "profile": "sm120",
@@ -34,9 +34,9 @@
       },
       "intent": "Finish remaining nondeferred L1 pass within65USDtotal RTX fromoriginalbaseline; preserve all deferred/history data,verify complete backups and retireonlyRTXaftertraining ends under user's explicit authorization.",
       "change": "Initial25bb15f rebuilt28with BatchNorm state-v2 using all8original0017samples; originalbad28preserved. Newd1767ad descendantinherits29and repairs candidate loading attribution after natural pause, explicitly revalidates onlythe exactfailed0031member, preservesall8samples/7other scores/attempts, and activates approvedSM120docsforfreshgroups. Dataset/order/shapes/rewardformula/root-onlyloss unchanged.",
-  "conclusion": "At02:39UTCsameea1790edriver62507healthy generating0004atP34;34trained/15deferred/ONEremaining.0003CTCtwoof8correctat0.99796x/0.99763x,NEITHERfaster;bothC++extensionsdelegateATenlogsoftmax/CTCwithinclude-onlyCUDA,notcustomkernels.39571ROOTtokenaudit/full33optimizerrestore/native34readbackpassed,changed320adapters. Loss0.14557notaccuracy. Onechildsession/3requests/completedadvice/oneREALnumericalcheckpassedonATendelegation;returnedverifiedFalse,nocertifiedsource/optimizationbenefitclaim.54rootrepliesreasoning,no lengths/docs/timeouts;onemissingfinalASTrecoveryrejections. New34archive/all3internalhashes/samples/scores/SQLiteverifiedlocally;PRIVATEHFee41f74all8newaddresses/sizeschecked,notfullbinaryreadback. Viewer64scored=32accepted+32weak,34points=30inherited+4new. Estimate49.95/65guardsunchanged;preseedNOTretirement-ready/noVMaction. Finish0004thenverifyALLdatabeforeauthorizedRTXbillingrelease.",
-      "decision": "Finish remaining nondeferredpass within65USDtotal and unchangedguards/audit/readback. User now authorizes agent toterminate ONLYRTXVM aftertrainingendandallrequireddataisverifiedbackedup. Do not confusepassendwith50trained tasks orstoppedPythonwithbillingrelease.",
-  "evidence_file": "notes/results/20261021-final-pass-monitor-0239Z.json",
+  "conclusion": "Nondeferredpassfinishedat35trained/15deferred/0remaining;driver/observerexitednaturally,noGPUjobs. Final0004threeof8correctat0.98719–0.99966x,nonefaster,allATenCTCdelegationnotcustomCUDA.35696ROOTaudit/full34optimizerrestore/native35readbackpassed,changed320. ALLquiescentsnapshot9504files+5symlinks/7456806807bytes/44checkpointmanifests/consistentSQLiteverifiedlocally;pinnedbasepoolside/Laguna-XS.2a397bde+14shardaddressesretained. PRIVATEHFfinal35833f460all8newaddresses/sizeschecked(notfullbinaryreadback),alloldbranchesretained. OfficialAPIterminatedONLYRTX131552eaafterverification;providerlist03:07:25UTCconfirmsrentalABSENT. PrivateLOCALCPUTrackio35points/noVMdependency;monitorandwarningPAUSED. Conservativeestimate51.26/65notinvoice. Viewer72traces=40accepted+32weak;35points=30inherited+5new. No50taskmasteryorheldoutqualityclaim.",
+  "decision": "Pass/backups/authorizedRTXretirementcompleted;monitorandwarningPAUSED. Preservealllocal/privateHFdataanddeferredscope.NoadditionalVMaccess,rentals,training,evaluationorverifierchangeswithoutnewuserrequest.",
+  "evidence_file": "notes/results/20261021-final-pass-completion.json",
       "limitations": [
         "Old intermediate verifier feedback remains in reused trajectories; this is explicit final-reward revalidation, not fresh protocol rollouts.",
         "No held-out learning improvement established.",
@@ -73,7 +73,8 @@
       "notes/results/20261021-final-pass-monitor-0109Z.json",
       "notes/results/20261021-final-pass-monitor-0124Z.json",
       "notes/results/20261021-final-pass-monitor-0209Z.json",
-      "notes/results/20261021-final-pass-monitor-0239Z.json"
+      "notes/results/20261021-final-pass-monitor-0239Z.json",
+      "notes/results/20261021-final-pass-completion.json"
         ]
       }
     },
