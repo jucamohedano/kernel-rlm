@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this research software, please cite this repository and separately acknowledge the original Recursive Language Models framework."
+type: software
+title: "Kernel RLM: Research on Recursive Language Models for CUDA Kernel Generation"
+authors:
+  - family-names: "Camacho Mohedano"
+    given-names: "Juan"
+repository-code: "https://github.com/jucamohedano/kernel-rlm"
+url: "https://github.com/jucamohedano/kernel-rlm"

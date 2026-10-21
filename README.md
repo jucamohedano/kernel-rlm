@@ -1,3 +1,26 @@
+# Kernel RLM
+
+Research on training recursive agents to generate, verify, and improve CUDA kernels. This independent project extends the [Recursive Language Models framework](https://github.com/alexzhang13/rlm), retaining its original authorship, history, documentation, and [MIT license](LICENSE).
+
+The repository root is the RLM project itself:
+
+- `rlm/`: the framework's Python package, not a nested repository.
+- `training/`: upstream training components and our kernel-training implementation.
+- `training/environments/kernel_rlm/`: CUDA tasks, verification, bounded subcalls, rollout collection, and TRL-backed training.
+- `docs/`: the original framework documentation app.
+- `tests/`: framework and kernel-pipeline tests.
+
+Compute was supported by a **CloudRift compute grant**. See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md), [CITATION.cff](CITATION.cff), and [references.bib](references.bib).
+
+## Research status and migration
+
+The completed nondeferred L1 pass had 35 accepted task updates and 15 tasks deferred. This does not establish all-50-task completion, mastery, or held-out learning improvement. Some passing candidates delegated computation to ATen rather than implementing custom CUDA kernels; this verifier limitation must remain explicit when interpreting results.
+
+This repository imports only the implementation fork's history. Parent-workspace development notes, wrapper history, logs, checkpoints, and virtual environments remain separate and untouched. No compute use is authorized by this migration.
+
+The checkout is not yet completely independent of its former parent workspace. The curriculum builder and pinned input manifests need selective migration; some tests, launchers, and provenance tooling retain parent-directory assumptions. These are follow-up portability tasks, not reasons to rewrite historical inputs or copy the entire development journal. Exact source identities are in [provenance/repository-import.json](provenance/repository-import.json).
+
+The original framework README follows below. It documents upstream features and is not a claim that our completed training used every upstream backend.
 
 ---
 
