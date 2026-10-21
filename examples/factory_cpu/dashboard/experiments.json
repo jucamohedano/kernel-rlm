@@ -1,0 +1,22 @@
+{
+  "datasets": {
+    "vector-add-cpu-contract": {
+      "path": "training/environments/kernel_rlm/kernel_rlm/tasks/vector_add.jsonl",
+      "role": "offline-contract-example",
+      "upstream_revision": null
+    }
+  },
+  "experiments": [
+    {
+      "id": "cpu-manifest-validation",
+      "intent": "Validate a complete checked-in provenance example without private artifacts or compute.",
+      "change": "Use the existing vector-add task and public source/documentation paths.",
+      "decision": "Validation only;no rollout,model request,training,benchmark,or remote launch.",
+      "provenance": {
+        "code_paths": ["training/environments/kernel_rlm/kernel_rlm/submission_contract.py"],
+        "notes": ["examples/factory_cpu/README.md"],
+        "dataset_ids": ["vector-add-cpu-contract"]
+      }
+    }
+  ]
+}

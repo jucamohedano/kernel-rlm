@@ -253,9 +253,9 @@ def validate(run_id: str) -> dict[str, Any]:
             if group["params"]
         )
         report["optimizer"] = optimizer_config.model_dump(mode="json")
-        report[
-            "scope"
-        ] = "one Muon update on random-token CE fixture; not GRPO or quality evaluation"
+        report["scope"] = (
+            "one Muon update on random-token CE fixture; not GRPO or quality evaluation"
+        )
         inputs = torch.randint(32, config.vocab_size, (1, TOKENS), device="cuda")
         before = {name: param.detach().clone() for name, param in adapters.items()}
         model.config.use_cache = False

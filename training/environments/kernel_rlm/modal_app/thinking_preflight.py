@@ -39,7 +39,9 @@ def audit(run_id: str):
     tokenizer = AutoTokenizer.from_pretrained(snapshot, local_files_only=True)
     calls = []
     for index, node in enumerate(trace.nodes):
-        tokens = [token for token, sampled in zip(node.token_ids, node.mask, strict=True) if sampled]
+        tokens = [
+            token for token, sampled in zip(node.token_ids, node.mask, strict=True) if sampled
+        ]
         if not tokens:
             continue
         decoded = tokenizer.decode(tokens)

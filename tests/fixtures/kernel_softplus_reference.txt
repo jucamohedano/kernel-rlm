@@ -1,0 +1,25 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return F.softplus(x)
+
+
+batch_size = 4096  # Increased from 64 to 4096 to increase computation
+width = 512
+height = 128
+
+
+def get_inputs():
+    x = torch.randn(batch_size, height, width)
+    return [x]
+
+
+def get_init_inputs():
+    return []

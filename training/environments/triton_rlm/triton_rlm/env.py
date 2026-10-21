@@ -21,13 +21,13 @@ Row contract (what `_build_dataset` must return):
 from __future__ import annotations
 
 import asyncio
-import os
 import json
+import os
 from typing import Any
 
+import rlm_train
 from datasets import Dataset
 
-import rlm_train
 from triton_rlm.verifier import verify_triton
 
 _TASK_INSTRUCTION = (
@@ -70,24 +70,21 @@ def _build_dataset(*, manifest_path: str, max_tasks: int | None = None, **kwargs
     `max_tasks` caps the number of rows (use it while developing; None = all).
     """
     rows = {"example_id": [], "prompt": [], "answer": [], "info": []}
-    with open(manifest_path, "r", encoding="utf-8") as f:
+    with open(manifest_path, encoding="utf-8") as f:
         for i, line in enumerate(f):
             if max_tasks is not None and i >= max_tasks:
                 break
             ex = json.loads(line)
             task_id = ex.get("_task_id", str(i))
-            root_prompt = (
-                f"{_TASK_INSTRUCTION}\n\n"
-                f"Task {task_id}.\nOperators: {ex.get('ops', '')}."
-            )
+            root_prompt = f"{_TASK_INSTRUCTION}\n\nTask {task_id}.\nOperators: {ex.get('ops', '')}."
             rows["example_id"].append(task_id)
             rows["prompt"].append([{"role": "user", "content": "<placeholder>"}])
             rows["answer"].append("")
             rows["info"].append(
                 json.dumps(
                     {
-                        "context": ex["code"],          # reference -> REPL only
-                        "root_prompt": root_prompt,     # instruction -> visible window
+                        "context": ex["code"],  # reference -> REPL only
+                        "root_prompt": root_prompt,  # instruction -> visible window
                         "ops": ex.get("ops", ""),
                     }
                 )
@@ -143,7 +140,9 @@ async def score(info: Any, state: Any, **_kw: Any) -> float:
     trace_dir = os.environ.get("TRITON_TRACE_DIR")
     if trace_dir:
         try:
-            import pathlib, uuid as _uuid
+            import pathlib
+            import uuid as _uuid
+
             out = pathlib.Path(trace_dir)
             out.mkdir(parents=True, exist_ok=True)
             rid = state.get("rlm_rollout_id") or state.get("trajectory_id") or _uuid.uuid4().hex
@@ -155,7 +154,12 @@ async def score(info: Any, state: Any, **_kw: Any) -> float:
                 "submission": submitted[:20000],
                 "metrics": {
                     k: state.get(k)
-                    for k in ("rlm_iterations", "rlm_repl_calls", "rlm_sub_llm_calls", "rlm_has_final_answer")
+                    for k in (
+                        "rlm_iterations",
+                        "rlm_repl_calls",
+                        "rlm_sub_llm_calls",
+                        "rlm_has_final_answer",
+                    )
                 },
                 "completion": state.get("completion"),
             }
@@ -168,12 +172,15 @@ async def score(info: Any, state: Any, **_kw: Any) -> float:
 async def verify_compiled(state: Any) -> int:
     return 1 if (state.get("triton_verify") or {}).get("compiled") else 0
 
+
 async def verify_correct(state: Any) -> int:
     return 1 if (state.get("triton_verify") or {}).get("correct") else 0
+
 
 async def verify_speedup(state: Any) -> float:
     v = (state.get("triton_verify") or {}).get("speedup")
     return round(float(v), 3) if v is not None else 0.0
+
 
 async def verify_max_diff(state: Any) -> float:
     v = (state.get("triton_verify") or {}).get("max_diff")

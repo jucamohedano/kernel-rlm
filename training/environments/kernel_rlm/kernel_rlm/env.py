@@ -9,9 +9,9 @@ import pathlib
 import uuid
 from typing import Any
 
+import rlm_train
 from datasets import Dataset
 
-import rlm_train
 from kernel_rlm.feedback import build_http_feedback_bootstrap
 from kernel_rlm.submission_contract import KERNEL_TASK_INSTRUCTION, validate_submission_source
 from kernel_rlm.verifier import verify_cuda

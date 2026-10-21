@@ -112,16 +112,10 @@ def validate(run_id: str) -> dict[str, Any]:
             apply_lora_to_model(model, lora_config)
 
         wrapped = {
-            name: module
-            for name, module in model.named_modules()
-            if hasattr(module, "lora_A")
+            name: module for name, module in model.named_modules() if hasattr(module, "lora_A")
         }
         assert set(wrapped) == set(before)
-        trainable = {
-            name: param
-            for name, param in model.named_parameters()
-            if param.requires_grad
-        }
+        trainable = {name: param for name, param in model.named_parameters() if param.requires_grad}
         assert trainable and all("lora_A" in name or "lora_B" in name for name in trainable)
         assert all(param.device.type == "meta" for param in trainable.values())
         base_trainable = [
