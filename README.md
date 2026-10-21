@@ -10,7 +10,13 @@ The repository root is the RLM project itself:
 - `docs/`: the original framework documentation app.
 - `tests/`: framework and kernel-pipeline tests.
 
-Compute was supported by a **CloudRift compute grant**. See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md), [CITATION.cff](CITATION.cff), and [references.bib](references.bib).
+Compute was supported by a **[CloudRift](https://www.cloudrift.ai/) compute grant**. See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md), [CITATION.cff](CITATION.cff), and [references.bib](references.bib).
+
+## First L1 training campaign: weights
+
+The completed campaign's final accepted adapter checkpoint is [checkpoint35 in the version-pinned checkpoint archive](https://huggingface.co/jucamohedano/laguna-xs2-kernel-rlm-checkpoints/tree/833f460dfbd71918a0ad7403e1245233113d4b71/checkpoints/20261020T230200Z-final-l1-pass/checkpoint-step-35). **The archive is private; access is required. A separate reviewed public adapter release is planned, not yet published.**
+
+These are LoRA adapter weights, not a standalone full model. They require `poolside/Laguna-XS.2` at revision `a397bde04501591d0ac3d74a5d9d0a4ec298ffb8`. The accepted lineage contains 35 task updates; 15 tasks remained deferred. There is no claim of held-out quality improvement. See the [artifact publication checklist](docs/research/artifact-publication.md) before exposing model or tracking artifacts.
 
 ## Research status and migration
 
@@ -18,7 +24,7 @@ The completed nondeferred L1 pass had 35 accepted task updates and 15 tasks defe
 
 This repository imports only the implementation fork's history. Parent-workspace development notes, wrapper history, logs, checkpoints, and virtual environments remain separate and untouched. No compute use is authorized by this migration.
 
-The checkout is not yet completely independent of its former parent workspace. The curriculum builder and pinned input manifests need selective migration; some tests, launchers, and provenance tooling retain parent-directory assumptions. These are follow-up portability tasks, not reasons to rewrite historical inputs or copy the entire development journal. Exact source identities are in [provenance/repository-import.json](provenance/repository-import.json).
+The checkout is not yet completely independent of its former parent workspace. The curriculum builder and pinned input manifests need selective migration; some tests, launchers, and provenance tooling retain parent-directory assumptions. These are follow-up portability tasks, not reasons to rewrite historical inputs or copy the entire development journal. The repository-migration record is retained separately in private development notes.
 
 The original framework README follows below. It documents upstream features and is not a claim that our completed training used every upstream backend.
 
