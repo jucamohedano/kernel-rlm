@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import aiohttp
+from kernel_rollout.spending import phase_deadline, spending_snapshot
 
 from kernel_trl.checkpoint_state import checkpoint_metadata
 from kernel_trl.inference_lifecycle import WarmInference
@@ -25,7 +26,6 @@ from kernel_trl.live_curriculum import (
 )
 from kernel_trl.live_driver import execute
 from kernel_trl.precompile import FinalPrecompiler, cancelled
-from kernel_trl.spending import phase_deadline, spending_snapshot
 
 ORDER = ("serial", "overlap", "overlap", "serial")
 PROMPT = "Explain bounds checking and thread-to-element indexing for a CUDA vector operation, with concrete examples."

@@ -16,8 +16,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import aiohttp
-from kernel_skyrl.contract import has_signal
-from kernel_skyrl.preflight import load_tasks
+from kernel_rollout.contract import has_signal
+from kernel_rollout.spending import phase_deadline, spending_snapshot
+from kernel_rollout.tasks import load_tasks
 
 from kernel_trl.checkpoint_state import checkpoint_metadata
 from kernel_trl.context import (
@@ -27,7 +28,6 @@ from kernel_trl.context import (
 )
 from kernel_trl.live_driver import execute, stop_group
 from kernel_trl.probability_audit import require_probability_agreement
-from kernel_trl.spending import phase_deadline, spending_snapshot
 
 MODEL_REVISION = "a397bde04501591d0ac3d74a5d9d0a4ec298ffb8"
 DEFAULT_CUDA_ARCH_LIST = "8.9"
@@ -57,7 +57,13 @@ def record_event(directory: Path, phase: str, **details) -> None:
 
 def source_hashes(source_root: Path) -> dict[str, str]:
     hashes = {}
-    for package in ("kernel_trl", "kernel_skyrl", "kernel_rlm", "kernel_rlm_v1"):
+    for package in (
+        "kernel_trl",
+        "kernel_rollout",
+        "kernel_training",
+        "kernel_rlm",
+        "kernel_rlm_v1",
+    ):
         for path in sorted((source_root / package).rglob("*.py")):
             hashes[str(path.relative_to(source_root))] = hashlib.sha256(
                 path.read_bytes()

@@ -3,7 +3,7 @@
 import math
 import statistics
 
-from kernel_skyrl.contract import RootSample, has_signal
+from kernel_rollout.contract import RootSample, has_signal
 
 from kernel_trl.context import LEGACY_CONTEXT_TOKENS, validate_context_tokens
 

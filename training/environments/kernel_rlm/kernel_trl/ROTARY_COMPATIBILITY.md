@@ -18,7 +18,7 @@ New checks preserve the original checkpoint dictionary independently.
 
 ## Loader correction
 
-`kernel_skyrl.laguna_policy.load_config` reads the original per-layer-type settings
+`kernel_training.laguna_policy.load_config` reads the original per-layer-type settings
 after automatic config parsing, restores an independent copy, and removes real
 legacy instance fields. It does not delete read-only compatibility properties.
 Removing the legacy fields matters: restoring the dictionary alone is undone

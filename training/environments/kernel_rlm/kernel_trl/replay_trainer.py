@@ -1,7 +1,6 @@
 """Native TRL PPO loss and trainer loop over a verified group of exact RLM turns."""
 
-from kernel_skyrl.framework_hooks import trl_muon_trainer
-
+from kernel_trl.framework_hooks import trl_muon_trainer
 from kernel_trl.turn_credit import tensors_for_turn
 
 

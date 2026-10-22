@@ -99,7 +99,7 @@ class FakeClient:
 
 @pytest.mark.parametrize("field", ["prompt_token_ids", "token_ids", "logprobs"])
 def test_exact_tokens_fail_closed(field):
-    from kernel_skyrl.contract import exact_sample
+    from kernel_rollout.contract import exact_sample
 
     response = completion()
     if field == "prompt_token_ids":
@@ -112,7 +112,7 @@ def test_exact_tokens_fail_closed(field):
 
 @pytest.mark.parametrize("corruption", ["alignment", "identity", "nan", "positive", "context"])
 def test_exact_tokens_reject_corruption(corruption):
-    from kernel_skyrl.contract import exact_sample
+    from kernel_rollout.contract import exact_sample
 
     response = completion()
     entries = response["choices"][0]["logprobs"]["content"]
@@ -130,7 +130,7 @@ def test_exact_tokens_reject_corruption(corruption):
 
 @pytest.mark.parametrize("speedup, expected", [(-1, 0.7), (0, 0.7), (1, 0.8), (10, 1.0)])
 def test_terminal_speed_reward_matches_v1(speedup, expected):
-    from kernel_skyrl.contract import terminal_reward
+    from kernel_rollout.contract import terminal_reward
 
     source = (ENVIRONMENT / "kernel_rlm_v1/taskset.py").read_text()
     tree = ast.parse(source)
@@ -157,7 +157,7 @@ def test_terminal_speed_reward_matches_v1(speedup, expected):
 
 
 def test_filter_uses_exact_terminal_reward_including_speed():
-    from kernel_skyrl.contract import has_signal
+    from kernel_rollout.contract import has_signal
 
     assert not has_signal([0.1] * 4)
     assert not has_signal([0.8] * 4)
@@ -168,7 +168,7 @@ def test_filter_uses_exact_terminal_reward_including_speed():
 
 @run_async
 async def test_relay_preserves_small_recovery_cap_and_requires_auth(tmp_path):
-    from kernel_skyrl.bridge import CompletionBridge
+    from kernel_rollout.bridge import CompletionBridge
 
     client = FakeClient()
     bridge = CompletionBridge(client, "skyrl-lora", 12288, 4096, 7, tmp_path / "calls.jsonl")
@@ -230,6 +230,9 @@ async def test_real_repl_program_with_child_and_cpu_feedback_fixture(tmp_path, m
         program_command=[sys.executable, "-c", script],
         scorer=score,
         episode_timeout_s=30,
+        execution_run_id="cpu-run",
+        group_id="cpu-group",
+        attempt_id="cpu-attempt",
     )
     episode_dir = tmp_path / "episode"
     try:
@@ -243,6 +246,10 @@ async def test_real_repl_program_with_child_and_cpu_feedback_fixture(tmp_path, m
         if log.exists():
             print(log.read_text())
         raise
+    assert episode["execution_run_id"] == "cpu-run"
+    assert episode["group_id"] == "cpu-group:cpu"
+    assert episode["record"]["attempt_id"] == "cpu-attempt"
+    assert all(sample.provenance["execution_run_id"] == "cpu-run" for sample in episode["samples"])
     assert len(episode["samples"]) == 3
     assert all(sample.response_ids == [101, 102] for sample in episode["samples"])
     assert client.root_calls == 3
@@ -306,7 +313,7 @@ async def test_exact_capacity_exhaustion_ends_episode_without_infrastructure_fai
 
 @run_async
 async def test_stepwise_filter_and_oversampling_never_cut_a_trajectory(tmp_path):
-    from kernel_skyrl.contract import RootSample
+    from kernel_rollout.contract import RootSample
     from kernel_skyrl.generator import KernelGenerator
 
     task = {"name": "first", "context": "reference", "prompt": "solve"}
@@ -350,7 +357,7 @@ async def test_stepwise_filter_and_oversampling_never_cut_a_trajectory(tmp_path)
 
 @run_async
 async def test_zero_signal_is_bounded_and_does_not_return_a_training_batch(tmp_path):
-    from kernel_skyrl.contract import RootSample
+    from kernel_rollout.contract import RootSample
     from kernel_skyrl.generator import KernelGenerator
 
     task = {"name": "zero", "context": "reference", "prompt": "solve"}
@@ -468,7 +475,7 @@ async def test_program_timeout_is_saved_and_session_is_closed(tmp_path):
 
 @run_async
 async def test_bad_token_transport_fails_closed_and_is_traced(tmp_path):
-    from kernel_skyrl.bridge import CompletionBridge
+    from kernel_rollout.bridge import CompletionBridge
 
     class BadClient(FakeClient):
         async def chat_completion(self, payload):
@@ -495,7 +502,8 @@ async def test_bad_token_transport_fails_closed_and_is_traced(tmp_path):
 
 
 def test_variable_turn_output_passes_pinned_skyrl_validator():
-    from kernel_skyrl.contract import RootSample, stepwise_output
+    from kernel_rollout.contract import RootSample
+    from kernel_skyrl.contract import stepwise_output
 
     source = Path("/tmp/kernel-skyrl-v040/skyrl/train/utils/trainer_utils.py")
     if not source.exists():

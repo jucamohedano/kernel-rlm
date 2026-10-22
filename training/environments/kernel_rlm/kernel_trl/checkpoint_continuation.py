@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from kernel_rlm.cuda_docs import docs_manifest
-from kernel_skyrl.preflight import load_tasks
+from kernel_rollout.tasks import load_tasks
 
 from kernel_trl.checkpoint_state import checkpoint_metadata
 from kernel_trl.live_curriculum import MODEL_REVISION, ensure_gpus_idle, source_hashes

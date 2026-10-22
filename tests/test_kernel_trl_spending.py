@@ -8,7 +8,7 @@ import pytest
 @pytest.fixture
 def spending(monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "training/environments/kernel_rlm"))
-    return importlib.import_module("kernel_trl.spending")
+    return importlib.import_module("kernel_rollout.spending")
 
 
 def configuration():

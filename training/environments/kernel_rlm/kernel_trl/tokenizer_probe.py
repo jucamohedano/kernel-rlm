@@ -12,7 +12,7 @@ def check(checkpoint: Path) -> dict:
 
     import torch
     from datasets import Dataset
-    from kernel_skyrl.laguna_probe import tiny_model
+    from kernel_training.diagnostics import tiny_model
     from transformers import AutoModelForCausalLM
     from trl import GRPOConfig, GRPOTrainer
 

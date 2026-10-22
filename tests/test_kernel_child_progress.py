@@ -68,7 +68,7 @@ async def serve(app):
 
 def test_child_progress_reaches_status_before_completion_and_never_enters_loss(tmp_path):
     from kernel_rlm.subcalls import CHILD_SYSTEM
-    from kernel_skyrl.bridge import CompletionBridge
+    from kernel_rollout.bridge import CompletionBridge
     from kernel_trl.collect import InferenceClient
 
     async def check():

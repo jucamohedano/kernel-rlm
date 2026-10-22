@@ -9,7 +9,7 @@ import traceback
 from datetime import timedelta
 from pathlib import Path
 
-from kernel_trl.spending import phase_deadline, spending_snapshot
+from kernel_rollout.spending import phase_deadline, spending_snapshot
 
 
 def authorize_probe(configuration: dict, now: float) -> float:

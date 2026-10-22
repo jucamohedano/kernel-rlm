@@ -26,14 +26,8 @@ def run(arguments) -> dict:
     import torch
     import torch.distributed as dist
     from datasets import Dataset
-    from kernel_skyrl.framework_hooks import (
-        materialize_meta_adapters,
-        materialize_nonpersistent_buffers,
-        trl_muon_trainer,
-    )
-    from kernel_skyrl.framework_probe import observe_updates
-    from kernel_skyrl.laguna_policy import attach_adapters, audit_storage, load_base, load_config
-    from kernel_skyrl.laguna_probe import event
+    from kernel_training.diagnostics import event, observe_updates
+    from kernel_training.laguna_policy import attach_adapters, audit_storage, load_base, load_config
     from torch.distributed.device_mesh import init_device_mesh
     from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
     from trl import GRPOConfig
@@ -43,6 +37,11 @@ def run(arguments) -> dict:
         load_adapters,
         restore_training_state,
         save_training_state,
+    )
+    from kernel_trl.framework_hooks import (
+        materialize_meta_adapters,
+        materialize_nonpersistent_buffers,
+        trl_muon_trainer,
     )
     from kernel_trl.probability_audit import (
         AuditComplete,

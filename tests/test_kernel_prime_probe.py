@@ -1,7 +1,7 @@
 """CPU-only authorization checks for the optional PRIME-RL component probe."""
 
 import pytest
-from kernel_trl.prime_probe import authorize_probe
+from kernel_prime.probe import authorize_probe
 
 
 def configuration() -> dict:

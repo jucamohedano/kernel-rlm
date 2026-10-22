@@ -18,7 +18,7 @@ ROOT = Path(__file__).parents[1] / "training/environments/kernel_rlm"
 def collector(monkeypatch):
     monkeypatch.syspath_prepend(str(ROOT))
     module = importlib.import_module("kernel_trl.collect")
-    from kernel_skyrl.contract import RootSample
+    from kernel_rollout.contract import RootSample
 
     smoke = {
         "prompt_token_ids": [2],
@@ -86,7 +86,7 @@ def collector(monkeypatch):
         lambda *args, **kwargs: SimpleNamespace(setup=AsyncMock(), cleanup=AsyncMock()),
     )
     monkeypatch.setattr(module.web, "TCPSite", lambda *args: SimpleNamespace(start=AsyncMock()))
-    monkeypatch.setattr(module, "KernelGenerator", Generator)
+    monkeypatch.setattr(module, "RolloutCollector", Generator)
     monkeypatch.setattr(module, "load_tasks", lambda path: [{"name": "task-a"}])
     return module, observed
 
@@ -246,7 +246,7 @@ def test_deferred_generation_saves_all_trajectories_without_final_scoring(
             (directory / "calls.jsonl").write_text("saved exact calls")
             return {"reward": None, "samples": [object()]}
 
-    monkeypatch.setattr(module, "KernelGenerator", Generator)
+    monkeypatch.setattr(module, "RolloutCollector", Generator)
     args = arguments(tmp_path)
     args.defer_scoring = True
     asyncio.run(module.collect(args))

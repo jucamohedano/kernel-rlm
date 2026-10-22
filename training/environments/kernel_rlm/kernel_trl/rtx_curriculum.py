@@ -14,8 +14,9 @@ from pathlib import Path
 
 import aiohttp
 from kernel_rlm.verification_state import VERIFICATION_PROTOCOL
-from kernel_skyrl.generator import score_submission
-from kernel_skyrl.preflight import load_tasks
+from kernel_rollout.scoring import score_submission
+from kernel_rollout.spending import phase_deadline, spending_snapshot
+from kernel_rollout.tasks import load_tasks
 
 from kernel_trl.checkpoint_state import checkpoint_metadata
 from kernel_trl.inference_lifecycle import wait_for_gpu_release
@@ -36,7 +37,6 @@ from kernel_trl.live_curriculum import (
 from kernel_trl.live_driver import stop_group
 from kernel_trl.probability_audit import require_probability_agreement
 from kernel_trl.scoring import INFRASTRUCTURE_STATUSES, digest, load_episodes, score_generated
-from kernel_trl.spending import phase_deadline, spending_snapshot
 
 GROUP_SECONDS = 12000
 

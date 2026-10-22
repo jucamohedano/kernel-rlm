@@ -19,6 +19,44 @@ in examples/vector_add_submission.py.
 The package is intentionally compatible with the existing rlm_train.RLMTrainEnv. The generic
 RLM loop and the historical triton_rlm environment remain separate.
 
+## Training backends
+
+TRL is the active trainer. SkyRL and Prime-RL are preserved but inactive.
+The integrations do not import each other.
+
+- `kernel_rollout/` owns the episode runner, inference bridge, exact-token samples,
+  task loading, terminal reward, and submission scoring.
+- `kernel_training/` owns shared Laguna model helpers, Muon construction, and
+  framework-independent diagnostic helpers.
+- `kernel_trl/` owns collection policy, training rows, and TRL updates.
+- `kernel_skyrl/` owns SkyRL batches, trajectory IDs, and stepwise output conversion.
+- `kernel_prime/` owns the optional native Prime-RL component probe.
+
+`EpisodeRunner` receives an inference client and a scoring function. Its
+`EpisodeRequest` supplies the task, output directory, and policy version. Its
+result keeps exact samples, provenance, reward, submission record, and optional
+verification. Both TRL and SkyRL call this runner by composition. The runner does
+not load a trainer. Limits, rewards, masks, and artifact formats are unchanged.
+
+The native framework probes now use separate entry points:
+
+```bash
+python -m kernel_skyrl.framework_probe skyrl --help
+python -m kernel_trl.framework_probe trl --help
+python -m kernel_prime.probe --help
+```
+
+Use `kernel_trl.framework_probe trl` instead of
+`kernel_skyrl.framework_probe trl`. Use `kernel_prime.probe` instead of
+`kernel_trl.prime_probe`. There are no forwarding modules at the old paths.
+
+Prime-RL still enters through `kernel_rlm.env`, `kernel_rlm_v1.taskset`, and
+`rlm_train`. Its preserved Modal launch and contract modules remain in
+`modal_app/`. They do not use the SkyRL or TRL adapters. Historical evidence is
+unchanged. CPU tests check import boundaries, runner cleanup and cancellation,
+exact tokens, provenance, and backend conversions. They do not validate live
+SkyRL workers, Prime-RL training, distributed GPU updates, or cloud launch.
+
 ## Muon verification
 
 From this directory, run `modal run -m modal_app.muon_wiring` for a bounded CPU-only

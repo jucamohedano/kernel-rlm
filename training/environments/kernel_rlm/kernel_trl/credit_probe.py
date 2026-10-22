@@ -11,9 +11,9 @@ def check(directory: Path, rollouts: int = 4, policy_version: int = 0) -> dict:
         raise ValueError("Use CUDA_VISIBLE_DEVICES='' for the CPU gradient proof")
     import torch
     from datasets import Dataset
-    from kernel_skyrl.contract import RootSample
-    from kernel_skyrl.laguna_policy import attach_adapters
-    from kernel_skyrl.laguna_probe import tiny_model
+    from kernel_rollout.contract import RootSample
+    from kernel_training.diagnostics import tiny_model
+    from kernel_training.laguna_policy import attach_adapters
     from trl import GRPOConfig
 
     from kernel_trl.phase_probe import tokenizer_and_prompt

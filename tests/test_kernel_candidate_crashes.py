@@ -72,7 +72,7 @@ def test_unknown_signals_and_resource_kills_stay_infrastructure(returncode):
 @pytest.mark.parametrize("shared", [False, True])
 def test_crash_health_probe_stays_inside_the_gpu_lease(monkeypatch, health, shared, tmp_path):
     from kernel_rlm import verifier
-    from kernel_skyrl.contract import terminal_reward
+    from kernel_rollout.contract import terminal_reward
 
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "1")
     if shared:

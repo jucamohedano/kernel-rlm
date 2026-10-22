@@ -11,8 +11,8 @@ from pathlib import Path
 
 from kernel_rlm.submission_contract import validate_submission_source
 from kernel_rlm.verification_state import VERIFICATION_PROTOCOL
-from kernel_skyrl.contract import terminal_reward
-from kernel_skyrl.preflight import load_tasks
+from kernel_rollout.contract import terminal_reward
+from kernel_rollout.tasks import load_tasks
 
 from kernel_trl.checkpoint_state import checkpoint_metadata
 from kernel_trl.live_curriculum import MODEL_REVISION, ensure_gpus_idle, source_hashes
@@ -96,8 +96,8 @@ def prepare_branch(arguments) -> dict:
         raise ValueError("Revalidation does not match the original sampled group")
     runtime_hashes = {}
     paths = list((arguments.source_root / "kernel_rlm").rglob("*.py")) + [
-        arguments.source_root / "kernel_skyrl/generator.py",
-        arguments.source_root / "kernel_skyrl/contract.py",
+        arguments.source_root / "kernel_rollout/scoring.py",
+        arguments.source_root / "kernel_rollout/contract.py",
     ]
     for path in paths:
         relative = path.relative_to(arguments.source_root)

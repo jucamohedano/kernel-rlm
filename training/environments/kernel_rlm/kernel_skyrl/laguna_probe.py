@@ -6,12 +6,12 @@ import importlib.metadata
 import json
 import os
 import shutil
-import time
 from datetime import timedelta
 from pathlib import Path
 
-from kernel_skyrl import laguna_policy
-from kernel_skyrl.laguna_policy import (
+from kernel_training import diagnostics, laguna_policy
+from kernel_training.diagnostics import event, tiny_model
+from kernel_training.laguna_policy import (
     MODEL_REVISION,
     attach_adapters,
     audit_storage,
@@ -19,42 +19,6 @@ from kernel_skyrl.laguna_policy import (
     load_base,
     load_config,
 )
-
-
-def event(directory: Path, phase: str, **fields) -> None:
-    with (directory / f"events-rank-{os.environ.get('RANK', 'cpu')}.jsonl").open("a") as stream:
-        stream.write(json.dumps({"phase": phase, "monotonic": time.monotonic(), **fields}) + "\n")
-
-
-def tiny_model(num_experts: int = 4):
-    from transformers import AutoModelForCausalLM, LagunaConfig
-
-    config = LagunaConfig(
-        vocab_size=128,
-        hidden_size=32,
-        intermediate_size=64,
-        num_hidden_layers=2,
-        num_attention_heads=4,
-        num_key_value_heads=2,
-        head_dim=8,
-        num_experts=num_experts,
-        num_experts_per_tok=2,
-        moe_intermediate_size=16,
-        shared_expert_intermediate_size=16,
-        num_attention_heads_per_layer=[4, 4],
-        mlp_layer_types=["dense", "sparse"],
-        layer_types=["full_attention", "sliding_attention"],
-        sliding_window=16,
-        max_position_embeddings=128,
-        rope_parameters={
-            "full_attention": {"rope_type": "default", "rope_theta": 10000.0},
-            "sliding_attention": {"rope_type": "default", "rope_theta": 10000.0},
-        },
-        bos_token_id=2,
-        eos_token_id=2,
-        pad_token_id=9,
-    )
-    return AutoModelForCausalLM.from_config(config, attn_implementation="sdpa")
 
 
 def legacy_state(state: dict) -> dict:
@@ -315,7 +279,7 @@ def main() -> None:
     rank = os.environ.get("RANK", "cpu")
     snapshots = arguments.output_dir / "source" / f"rank-{rank}"
     snapshots.mkdir(parents=True, exist_ok=False)
-    for source in (Path(__file__), Path(laguna_policy.__file__)):
+    for source in (Path(__file__), Path(laguna_policy.__file__), Path(diagnostics.__file__)):
         shutil.copy2(source, snapshots / source.name)
     try:
         report = (
