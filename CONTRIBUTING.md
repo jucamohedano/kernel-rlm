@@ -24,3 +24,13 @@ Low-hanging fruit of the urgent TODOs:
 - [ ] **Pipelining / asynchrony of LM calls**. This could be a paper of its own IMO, but how we deal with LM calls and how we actually implement these recursive calls can have big implications. I suspect this might happen when the repo has a massive overhaul, but something to think about.
 - [ ] **Efficient prefix caching**. Another "would be nice" thing, but requires restructuring a lot of the core logic. Could also be a paper / entire research project of its own.
 - [ ] **Training models to work as RLMs**. See the `verifiers` [rlm_env](https://github.com/PrimeIntellect-ai/verifiers/blob/main/verifiers/envs/experimental/rlm_env.py) as a starting point.
+
+## Before you submit a change
+
+Install the development and test tools with `uv sync --group dev --group test`. Install the repository hooks with `uv run pre-commit install`.
+
+Run `make check` before you submit a change. It checks Ruff lint, formatting, Python tests, and dashboard JavaScript. It does not change files or install dependencies. Use `make format` separately to apply formatting.
+
+Repository-wide Ruff commands use the root `pyproject.toml` (`--config=pyproject.toml`). `ty` currently reports findings for review but does not fail checks. Do not add ignores to hide findings. Fix relevant findings when you change the affected code.
+
+Keep changes focused. Preserve license text and archived evidence. Do not reformat unrelated files. Prefer small functions, explicit names, and direct error handling. Use existing patterns before adding a dependency or abstraction. Add or update tests for behavior changes. Do not claim ASD-STE100 compliance without a vocabulary review.

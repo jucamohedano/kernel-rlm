@@ -26,8 +26,8 @@ uv pip install -e ".[prime]"
 ## General Guidelines
 
 ### Code Style & Typing
-- **Formatting**: Strict `ruff` enforcement. All PRs must pass `ruff check --fix .`
-- **Typing**: Explicit types preferred
+- **Formatting and linting**: Repository-wide Ruff commands use the root `pyproject.toml` (`--config=pyproject.toml`). Run `make check` before a PR. It checks Ruff rules, formatting, tests, and dashboard JavaScript without changing files. Use `make format` only when you want to change formatting.
+- **Typing**: `ty` runs in advisory mode and does not block checks. Do not treat its current findings as errors required for every PR; fix focused findings when you change the affected code. Explicit types are preferred.
   - **OK**: `cast(...)`, `assert ...` for type narrowing
   - **SOMETIMES OK**: Untyped args for simple cases (e.g., prompt handlers)
   - **NOT OK**: `# type: ignore` without strong justification
@@ -89,13 +89,14 @@ uv run pre-commit install
 Before a PR:
 
 ```bash
-# Run style + lint checks:
-uv run ruff check --fix .
-uv run ruff format .
-uv run pre-commit run --all-files
+# Run read-only checks (root Ruff configuration):
+make check
 
-# Run tests:
-uv run pytest
+# Run formatting separately when needed:
+make format
+
+# Run all pre-commit hooks:
+uv run pre-commit run --all-files
 ```
 
 Ensure docs and tests are updated if necessary, and dead code is deleted. Strive for minimal, surgical diffs.
