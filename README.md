@@ -20,6 +20,8 @@ These are LoRA adapter weights, not a standalone full model. They require `pools
 
 ## Research status and migration
 
+The [local research dashboard](dashboard/README.md) is a private evidence viewer with local research Markdown editing; it does not launch training or publish artifacts. Start with the [research guide](docs/research/README.md), [first-campaign account](docs/research/first-campaign.md), and [evidence-reading guidance](docs/research/protocol.md). The dated legacy guide remains available as an [archive](training/environments/kernel_rlm/dashboard/guide.html); distinguish its historical recommendations from current guidance.
+
 The completed nondeferred L1 pass had 35 accepted task updates and 15 tasks deferred. This does not establish all-50-task completion, mastery, or held-out learning improvement. Some passing candidates delegated computation to ATen rather than implementing custom CUDA kernels; this verifier limitation must remain explicit when interpreting results.
 
 This repository imports only the implementation fork's history. Parent-workspace development notes, wrapper history, logs, checkpoints, and virtual environments remain separate and untouched. No compute use is authorized by this migration.
