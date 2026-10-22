@@ -127,7 +127,7 @@ function rows(parent, records, target) {
     parent.append(row);
   }
 }
-function experimentNav(experiments, selected) {
+function experimentNav(experiments, selected, {view = "experiments", onSelect} = {}) {
   document.body.classList.add("has-collection");
   collection.hidden = false;
   collection.replaceChildren(el("div", "collection-heading", "L1 post-training"));
@@ -146,8 +146,13 @@ function experimentNav(experiments, selected) {
     const matches = experiments.filter(ex => (!filter.value || ex.category === filter.value) &&
       [ex.title, ex.id, ex.category, ex.campaign, ex.scope_note, ex.intent, ex.conclusion].filter(Boolean).join(" ").toLowerCase().includes(search.value.toLowerCase()));
     for (const ex of matches) {
-      const a = link("", "#experiments/" + encodeURIComponent(ex.id), "experiment-row" + (selected === ex.id ? " selected" : ""));
+      const a = link("", "#" + view + "/" + encodeURIComponent(ex.id), "experiment-row" + (selected === ex.id ? " selected" : ""));
+      a.dataset.experimentId = ex.id;
       if (selected === ex.id) a.setAttribute("aria-current", "page");
+      if (onSelect) a.addEventListener("click", event => {
+        if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();onSelect(ex.id);
+      });
       a.append(categoryTag(ex.category), el("strong", "", ex.title), el("small", "", `${ex.runs.length} workloads`));
       list.append(a);
     }
@@ -155,6 +160,20 @@ function experimentNav(experiments, selected) {
   };
   search.addEventListener("input", update); filter.addEventListener("change", update);
   collection.append(search, filter, list); update();
+  return id => {
+    selected = id;
+    const selectedRecord = experiments.find(ex => ex.id === id);
+    if (selectedRecord && ((filter.value && selectedRecord.category !== filter.value) ||
+        ![selectedRecord.title, selectedRecord.id, selectedRecord.category, selectedRecord.campaign, selectedRecord.scope_note, selectedRecord.intent, selectedRecord.conclusion].filter(Boolean).join(" ").toLowerCase().includes(search.value.toLowerCase()))) {
+      search.value = "";filter.value = "";
+    }
+    update();
+    const row = [...list.children].find(node => node.dataset.experimentId === id);
+    if (row) {
+      const bounds = row.getBoundingClientRect(), pane = collection.getBoundingClientRect();
+      if (bounds.top < pane.top || bounds.bottom > pane.bottom) collection.scrollTop += bounds.top - pane.top - pane.height / 2 + bounds.height / 2;
+    }
+  };
 }
 async function experimentsPage(id, signal, ticket) {
   const data = await api("experiments", signal);
@@ -236,6 +255,8 @@ async function lineagePage(focus,signal,ticket) {
   heading.textContent="L1 campaign lineage";
   content.append(el("p","scope-note","Recorded research follow-ups—not checkpoint inheritance. The Modal and native TRL trainer lineages are separate; pilot branches are not cumulative training progress."));
   const byId=new Map(data.experiments.map(ex=>[ex.id,ex]));
+  if (!byId.has(focus)) focus = data.experiments[0]?.id;
+  const syncList = experimentNav(data.experiments, focus, {view:"lineage", onSelect: id => selectExperiment(id)});
   const levels=new Map();
   function level(id,visited=new Set()) {
     if(levels.has(id))return levels.get(id);
@@ -259,10 +280,15 @@ async function lineagePage(focus,signal,ticket) {
     const path=document.createElementNS(svg.namespaceURI,"path");path.setAttribute("d",`M${a.x+280},${a.y+75} C${a.x+310},${a.y+75} ${b.x-30},${b.y+75} ${b.x},${b.y+75}`);svg.append(path);
   }
   graph.append(svg);
+  const cards = new Map();
   for(const ex of data.experiments) {
     const pos=positions.get(ex.id),card=el("article","lineage-node"+(focus===ex.id?" selected":""));card.style.left=pos.x+"px";card.style.top=pos.y+"px";
-    card.append(categoryTag(ex.category),link(ex.title,"#experiments/"+encodeURIComponent(ex.id),"writing-link"),el("small","muted",`${ex.runs.length} workloads · saved: ${statusLabel(ex.status)}`));
-    card.title=ex.scope_note||ex.title;graph.append(card);
+    const select = el("button", "lineage-select", ex.title);
+    select.setAttribute("aria-pressed", String(focus === ex.id));
+    select.addEventListener("click", () => selectExperiment(ex.id));
+    card.append(categoryTag(ex.category),select,el("small","muted",`${ex.runs.length} workloads · saved: ${statusLabel(ex.status)}`),link("Open experiment →","#experiments/"+encodeURIComponent(ex.id),"lineage-open"));
+    card.addEventListener("click", event => {if (!event.target.closest("a,button")) selectExperiment(ex.id);});
+    card.dataset.experimentId=ex.id;card.title=ex.scope_note||ex.title;cards.set(ex.id,card);graph.append(card);
   }
   let zoom=1;
   const scale=()=>{graph.style.transform=`scale(${zoom})`;extent.style.width=width*zoom+"px";extent.style.height=height*zoom+"px";reset.textContent=Math.round(zoom*100)+"%";};
@@ -273,7 +299,20 @@ async function lineagePage(focus,signal,ticket) {
   viewport.addEventListener("pointerup",()=>{drag=null;});viewport.addEventListener("pointercancel",()=>{drag=null;});
   extent.append(graph);viewport.append(extent);content.append(toolbar,viewport);
   content.append(el("p","muted","Lines mean “follow-up”; read each record for exact checkpoint and replay provenance. Categories describe purpose, not success."));scale();
-  if(focus&&positions.has(focus)){viewport.scrollLeft=Math.max(0,positions.get(focus).x-100);viewport.scrollTop=positions.get(focus).y;}
+  function selectExperiment(id) {
+    if (!positions.has(id)) return;
+    focus=id;
+    for (const [key,card] of cards) {
+      card.classList.toggle("selected",key===id);
+      card.querySelector(".lineage-select").setAttribute("aria-pressed",String(key===id));
+    }
+    syncList(id);
+    const position=positions.get(id);
+    viewport.scrollLeft=Math.max(0,(position.x+140)*zoom-viewport.clientWidth/2);
+    viewport.scrollTop=Math.max(0,(position.y+75)*zoom-viewport.clientHeight/2);
+    history.replaceState(null,"","#lineage/"+encodeURIComponent(id));
+  }
+  if(focus)selectExperiment(focus);
 }
 function eventTitle(event,index) {
   if(event.source==="kernel_subcalls")return "Child assignments and responses";

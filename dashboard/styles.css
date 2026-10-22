@@ -301,3 +301,7 @@ body { background: #fff; }
 .verifier-summary { max-width: 700px; margin: 16px 0; }
 .event-content > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .reasoning { background: transparent; }
+
+.lineage-select { display: block; width: 100%; padding: 0; margin: 8px 0; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 13px; font-weight: 650; text-align: left; cursor: pointer; }
+.lineage-open { display: block; margin-top: 9px; color: var(--green); font-size: 11px; text-decoration: none; }
+.lineage-node { cursor: pointer; }
