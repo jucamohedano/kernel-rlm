@@ -61,7 +61,7 @@ def test_static_assets_have_content_type(tmp_path):
             "/styles.css": "text/css; charset=utf-8",
             "/fonts/InterVariable.woff2": "font/woff2",
         }.items():
-            conn = HTTPConnection(*server.server_address)
+            conn = HTTPConnection("127.0.0.1", server.server_port)
             conn.request("GET", path)
             response = conn.getresponse()
             assert response.status == 200
