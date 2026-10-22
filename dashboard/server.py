@@ -23,6 +23,7 @@ def make_handler(root: Path, receipt_path: Path | None = None, task_catalog: Pat
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
 
