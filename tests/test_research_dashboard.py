@@ -34,6 +34,69 @@ def test_invalid_receipt_does_not_fallback(tmp_path):
     assert warnings
 
 
+def test_final_run_base_model_has_evidence_and_does_not_imply_checkpoint():
+    run = {"id": "20261020T230200Z-final-l1-pass"}
+    trace = {"info": {"kernel_subcalls": [{"model": "kernel-policy-30"}]}}
+    detail = data.trajectory_detail(run, trace, 0)
+    assert detail["model"] == "poolside/Laguna-XS.2"
+    assert detail["model_scope"] == "base"
+    assert detail["model_revision"] == "a397bde04501591d0ac3d74a5d9d0a4ec298ffb8"
+    assert detail["model_source"].endswith("/trl-l1-final-pass/provenance/base_model")
+    assert detail["model_evidence"]["path"] == "notes/results/20261021-final-pass-completion.json"
+    assert detail["model_evidence"]["model_field"] == "retirement.pinned_base_repo"
+    assert detail["raw"]["info"]["kernel_subcalls"][0]["model"] == "kernel-policy-30"
+    assert "checkpoint" not in detail
+
+
+def test_recorded_models_take_precedence_over_curated_base():
+    run = {"id": "20261020T230200Z-final-l1-pass", "report": {"model_id": "reported-model"}}
+    detail = data.trajectory_metadata(run, {"info": {"model": "trace-model"}}, 0)
+    assert detail["model"] == "trace-model"
+    assert detail["model_source"] == "trace.info.model"
+    assert detail["model_scope"] == "recorded"
+    report_detail = data.trajectory_metadata(run, {}, 0)
+    assert report_detail["model"] == "reported-model"
+    assert report_detail["model_source"] == "report.model_id"
+    assert report_detail["model_scope"] == "recorded"
+
+
+def test_missing_and_ambiguous_model_declarations_remain_unknown(monkeypatch):
+    assert data.trajectory_metadata({"id": "unrelated-run"}, {}, 0)["model"] is None
+    declaration = {
+        "id": "a",
+        "runs": ["ambiguous"],
+        "provenance": {"base_model": {"id": "model-a"}},
+        "conclusion": "Uses model-a, not a structured source of identity.",
+    }
+    monkeypatch.setattr(data, "experiments", lambda: [declaration, {**declaration, "id": "b"}])
+    result = data.trajectory_metadata({"id": "ambiguous"}, {}, 0)
+    assert result["model"] is None
+    assert result["model_source"] is None
+    monkeypatch.setattr(data, "experiments", lambda: [{**declaration, "provenance": {}}])
+    assert data.trajectory_metadata({"id": "ambiguous"}, {}, 0)["model"] is None
+
+
+def test_run_api_and_trajectory_use_the_same_base_model(tmp_path):
+    run = tmp_path / "20261020T230200Z-final-l1-pass"
+    run.mkdir()
+    (run / "report.json").write_text(json.dumps({"run_id": run.name}))
+    (run / "traces.jsonl").write_text(json.dumps({"traces": [{"id": "sample"}]}))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(tmp_path))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, _, body = request(server, f"/api/runs/{run.name}")
+        assert status == 200
+        payload = json.loads(body)
+        for key in ("model", "model_scope", "model_source", "model_revision", "model_evidence"):
+            assert payload["run"][key] == payload["trajectories"][0][key]
+        assert payload["run"]["model"] == "poolside/Laguna-XS.2"
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
 def test_real_trace_normalization():
     trace = {
         "id": "t1",

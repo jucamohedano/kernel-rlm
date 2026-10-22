@@ -118,7 +118,7 @@ def make_handler(root: Path, receipt_path: Path | None = None, task_catalog: Pat
                     "id": run_id,
                     "title": reader.run_title(run),
                     "status": report.get("status"),
-                    "model": report.get("model_id") or report.get("model"),
+                    **data.trajectory_model(run, {}),
                     "hardware": report.get("gpu_topology") or report.get("hardware"),
                     "elapsed_seconds": report.get("elapsed_seconds"),
                     "elapsed_scope": report.get("elapsed_scope"),
