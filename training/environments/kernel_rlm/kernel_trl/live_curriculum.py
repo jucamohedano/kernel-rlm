@@ -19,6 +19,7 @@ import aiohttp
 from kernel_rollout.contract import has_signal
 from kernel_rollout.spending import phase_deadline, spending_snapshot
 from kernel_rollout.tasks import load_tasks
+from kernel_training.source import source_hashes
 
 from kernel_trl.checkpoint_state import checkpoint_metadata
 from kernel_trl.context import (
@@ -53,35 +54,6 @@ def record_event(directory: Path, phase: str, **details) -> None:
         stream.write(
             json.dumps({"phase": phase, "utc": datetime.now(UTC).isoformat(), **details}) + "\n"
         )
-
-
-def source_hashes(source_root: Path) -> dict[str, str]:
-    hashes = {}
-    for package in (
-        "kernel_trl",
-        "kernel_rollout",
-        "kernel_training",
-        "kernel_rlm",
-        "kernel_rlm_v1",
-    ):
-        for path in sorted((source_root / package).rglob("*.py")):
-            hashes[str(path.relative_to(source_root))] = hashlib.sha256(
-                path.read_bytes()
-            ).hexdigest()
-    repository_root = source_root.parents[2]
-    core_root = repository_root / "rlm"
-    if not core_root.is_dir():
-        raise ValueError("The source snapshot must include the RLM core package")
-    for path in sorted(core_root.rglob("*.py")):
-        relative = Path("rlm") / path.relative_to(core_root)
-        hashes[str(relative)] = hashlib.sha256(path.read_bytes()).hexdigest()
-    training_package = repository_root / "training/src/rlm_train"
-    if not training_package.is_dir():
-        raise ValueError("The source snapshot must include training/src/rlm_train")
-    for path in sorted(training_package.rglob("*.py")):
-        relative = Path("training/src/rlm_train") / path.relative_to(training_package)
-        hashes[str(relative)] = hashlib.sha256(path.read_bytes()).hexdigest()
-    return hashes
 
 
 def python_path(source_root: Path, existing: str | None = None) -> str:
