@@ -37,6 +37,12 @@ Open <http://127.0.0.1:7861/?project=laguna-kernel-rlm>. This command can downlo
 
 Use separate terminals for the two dashboards. Press **Ctrl+C** in each terminal to stop its server. Use a different port if one is already in use.
 
+### Review RL training metrics
+
+Open the [accepted-history RL view](http://127.0.0.1:7861/?project=laguna-kernel-rlm&runs=laguna-l1-verifier-v2-learning-curves&metrics=outcomes%2Fmean_reward%2Coutcomes%2Freward_std%2Coutcomes%2Fcorrect_fraction%2Coutcomes%2Ffaster_correct_fraction%2Coutcomes%2Fsubmitted_fraction%2Ctrain%2Fentropy%2Ctrain%2Fclip_ratio%2Fregion_mean%2Ctrain%2Fgrad_norm%2Ctrain%2Floss&x_axis=curves%2Foptimizer_step&smoothing=0&plots_per_row=3). It selects only `laguna-l1-verifier-v2-learning-curves`, uses optimizer step on the x-axis, and shows reward, reward spread, correctness, faster-correct fraction, submission rate, entropy, clipping, gradient norm, and loss.
+
+Do not select all records for this review. Older probes use different metric names and can appear as unrelated summary bars. These curves cover accepted groups on changing tasks, not held-out improvement. Steps 1–19 used L40S; later steps used RTX. The history includes inherited updates and verifier changes.
+
 ## Read the results
 
 - A completed trajectory has a submitted candidate. It has not necessarily passed verification.
