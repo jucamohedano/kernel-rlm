@@ -58,6 +58,15 @@ def experiments() -> list[dict[str, Any]]:
     ]
 
 
+def missing_export_reason(run: dict[str, Any]) -> str:
+    report = run.get("report", {})
+    if report.get("status") == "prepared":
+        return "Preparation record only; no trajectory export was produced. Preparation does not imply a training launch."
+    if report.get("status") == "failed":
+        return "Failed execution; this local record contains diagnostics but no saved trajectory export."
+    return "No supported trajectory export is available for this run."
+
+
 def saved_traces(run: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     """Read unique exported episodes, retaining valid records beside damaged ones."""
     traces = {}
@@ -93,7 +102,7 @@ def saved_traces(run: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
         except (OSError, UnicodeError):
             warnings.append(f"Cannot read episode export {path.name}.")
     if not paths:
-        warnings.append("No supported trajectory export is available for this run.")
+        warnings.append(missing_export_reason(run))
     return list(traces.values()), warnings
 
 

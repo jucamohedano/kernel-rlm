@@ -481,7 +481,7 @@
       "status": "validated",
       "intent": "Restore step 1, complete one additional Muon update, and save only adapter and training state without losing resumability.",
       "change": "Preload the pinned base before restoring LoRA and exclude frozen base weights from new checkpoints. Keep the old checkpoint unchanged.",
-      "conclusion": "Distributed restore from the original full checkpoint and optimizer step 2 passed. The new 68 MB checkpoint passed CPU readback. This does not establish better kernel generation.",
+      "conclusion": "Distributed restore from the original full checkpoint and optimizer step 2 passed. The new 68 MB checkpoint passed CPU readback. This does not establish better kernel generation.\n\nThe first resume attempt (20261016T160356Z-ae58574d) failed during checkpoint loading with a missing model.layers.0.self_attn.q_proj.base_layer.weight key. Its local archive has diagnostic logs but no trajectory export. The later 20261016T161811Z-a40752ff run is the retry after the checkpoint-key fix.",
       "decision": "Validate a distributed restart from the compact checkpoint before a longer run. Keep rank 8 and current hardware limits.",
       "limitations": [
         "A distributed restart from the new compact checkpoint has not been tested.",

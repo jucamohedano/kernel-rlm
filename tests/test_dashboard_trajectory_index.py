@@ -110,3 +110,12 @@ def test_index_missing_ids_are_distinct_across_tasks(tmp_path):
     records = data.trajectory_index(tmp_path)["trajectories"]
     assert len({record["id"] for record in records}) == 2
     assert [record["attempt"] for record in records] == [1, 1]
+
+
+def test_missing_exports_distinguish_preparation_and_failed_execution():
+    traces, warnings = data.saved_traces({"report": {"status": "prepared"}})
+    assert not traces
+    assert "Preparation record only" in warnings[0]
+    traces, warnings = data.saved_traces({"report": {"status": "failed"}})
+    assert not traces
+    assert "diagnostics" in warnings[0]
