@@ -12,7 +12,7 @@ uv run python -m dashboard.server \
   --port 7790
 ```
 
-Open <http://127.0.0.1:7790>.
+Open <http://127.0.0.1:7790>. The **Dark mode** toggle overrides your system theme and remembers your choice in this browser.
 
 - Set `--evidence-root` to an existing export directory. Use `logs/live-grpo` to browse multiple runs. Use a run directory to view one run.
 - Add `--campaign-receipt /path/to/receipt.json` to load a campaign summary.

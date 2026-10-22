@@ -365,3 +365,67 @@ code, kbd, samp { font-family: var(--font-mono); }
 button, input, select, textarea { font-family: inherit; }
 .writing-source { font-family: var(--font-mono); }
 .trajectory-meta, .metadata-row dd, .trajectory-metrics strong, .event-head .muted { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* Theme controls stay available when the mobile header hides workspace status. */
+.header-actions { display: flex; align-items: center; gap: 10px; }
+.theme-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); font: 11px var(--font-sans); white-space: nowrap; cursor: pointer; }
+.theme-toggle svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
+.theme-toggle:hover { border-color: var(--green); }
+.theme-toggle[aria-pressed="true"] { background: var(--green-soft); color: var(--green); }
+a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+
+/* Keep the existing light palette intact; share dark surfaces across all views. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #e2eae3;
+  --muted: #acb9ae;
+  --line: #3d4a40;
+  --paper: #1b231e;
+  --wash: #141a17;
+  --surface: #202a23;
+  --hover: #2b382f;
+  --green: #8cdbab;
+  --green-soft: #233f2f;
+  --purple: #c5aff2;
+  --gold: #e9c176;
+  --warning-bg: #382f1f;
+  --warning-ink: #f1cf94;
+}
+[data-theme="dark"] body { background: var(--wash); }
+[data-theme="dark"] :is(.rail, .step-index, .step-detail, .lineage-node, .file-tree, .writing-preview, .writing-source, .tool-code) { background: var(--paper); }
+[data-theme="dark"] :is(.collection, .panel, .loading, .empty, .notice, .trajectory-card, .workload-card, .lineage-card, .trace-viewer, .tool-call, .turn-group, .tabs, .token-stat, .writing-toolbar, .metrics-strip > *) { background: var(--surface); border-color: var(--line); }
+[data-theme="dark"] :is(.collection-search, .search, .collection-filter, .trajectory-picker, .writing-toolbar button, .writing-toolbar a, .trace-toolbar button) { background: var(--paper); color: var(--ink); border-color: var(--line); }
+[data-theme="dark"] :is(input, textarea)::placeholder { color: var(--muted); opacity: 1; }
+[data-theme="dark"] :is(.brand small, .nav-label, .eyebrow, .rail-foot, nav a, .event-block-title, .scope-note, .experiment-tag) { color: var(--muted); }
+[data-theme="dark"] :is(.experiment-row, .event-head, .turn-heading, .metrics-strip strong, .file-tree a, .file-tree button, .file-tree [role="treeitem"]) { color: var(--ink); }
+[data-theme="dark"] :is(.category-label, .writing-preview a[href], .markdown a[href]) { color: var(--green); }
+[data-theme="dark"] :is(.experiment-row:hover, .step-item:hover, .file-tree :is(a, button, [role="treeitem"]):hover, .writing-toolbar button:hover, .writing-toolbar a:hover) { background: var(--hover); }
+[data-theme="dark"] :is(.experiment-row.selected, .tab:hover, .lineage-node.selected) { background: var(--green-soft); color: var(--green); }
+[data-theme="dark"] :is(nav a.active, .tabs .active, .trace-toolbar button.active, .writing-toolbar button.active, .file-tree a.selected, .step-item.selected) { background: #006b45; color: #fff; border-color: #006b45; }
+[data-theme="dark"] nav a:hover:not(.active) { background: var(--green-soft); color: var(--green); }
+[data-theme="dark"] :is(.trajectory-card:hover, .workload-card:hover, .lineage-card:hover, .linked-run:hover, .run-list-row:hover) { border-color: var(--green); }
+[data-theme="dark"] :is(.linked-run, .run-list-row) { background: var(--paper); }
+[data-theme="dark"] .hero { background: var(--green-soft); border-color: var(--line); }
+[data-theme="dark"] .hero p { color: var(--muted); }
+[data-theme="dark"] :is(.unavailable, .warning) { background: var(--warning-bg); color: var(--warning-ink); border-color: var(--line); }
+[data-theme="dark"] .status-pill { background: var(--hover); color: var(--ink); }
+[data-theme="dark"] .status-pill.success { background: var(--green-soft); color: var(--green); }
+[data-theme="dark"] .status-pill.failure { background: #422824; color: #ffb4ab; }
+[data-theme="dark"] .status-pill.paused { background: var(--warning-bg); color: var(--warning-ink); }
+[data-theme="dark"] :is(pre, .markdown pre, pre.numbered-code, .markdown code:not(pre code)) { background: var(--wash); color: var(--ink); }
+[data-theme="dark"] :is(.code-frame, .code-line::before) { border-color: var(--line); }
+[data-theme="dark"] .code-line::before { color: var(--muted); }
+[data-theme="dark"] .code-label { background: var(--green-soft); color: var(--green); }
+[data-theme="dark"] .step-item { border-bottom-color: var(--line); }
+[data-theme="dark"] :is(.turn-observations, .timeline-context) { background: var(--green-soft); color: var(--muted); border-color: var(--line); }
+[data-theme="dark"] .child-summary { background: #292334; border-color: #50445f; }
+[data-theme="dark"] .child-summary > summary { color: var(--purple); }
+[data-theme="dark"] .category-tag { --category-bg: var(--hover); --category-border: var(--line); --category-ink: var(--ink); --category-dot: var(--muted); }
+[data-theme="dark"] .category-tag[data-category="Training continuation"] { --category-dot: var(--green); --category-ink: var(--green); --category-bg: var(--green-soft); }
+[data-theme="dark"] .category-tag[data-category="Fix validation"] { --category-dot: var(--gold); --category-ink: var(--gold); --category-bg: var(--warning-bg); }
+[data-theme="dark"] .category-tag[data-category="Setup validation"] { --category-dot: #a8c9f5; --category-ink: #a8c9f5; --category-bg: #233145; }
+[data-theme="dark"] .category-tag[data-category="Research pilot"] { --category-dot: var(--purple); --category-ink: var(--purple); --category-bg: #292334; }
+[data-theme="dark"] .lineage-viewport { background-color: var(--wash); background-image: radial-gradient(var(--line) 1px, transparent 1px); }
+[data-theme="dark"] .lineage-edges path { stroke: #7b9c87; }
+[data-theme="dark"] .lineage-list > li::before { background: var(--paper); border-color: var(--green); }
+[data-theme="dark"] .lineage-list > li:not(:last-child)::after { background: var(--line); }

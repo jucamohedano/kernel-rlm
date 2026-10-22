@@ -63,6 +63,7 @@ test:
 test-dashboard:
 	node --check dashboard/app.js
 	node --check dashboard/layout.js
+	node --check dashboard/theme.js
 	node --test tests/*dashboard*.test.cjs
 
 check: lint format-check test test-dashboard
