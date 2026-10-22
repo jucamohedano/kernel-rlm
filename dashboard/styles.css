@@ -214,3 +214,90 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .lineage-node { position: absolute; width: 280px; min-height: 145px; padding: 14px; background: white; border: 1px solid var(--line); border-radius: 9px; cursor: default; }
 .lineage-node.selected { border: 2px solid var(--green); background: #f1faf5; }
 .lineage-node .writing-link { margin: 8px 0; padding: 0; border: 0; color: var(--ink); font-size: 13px; font-weight: 650; }
+
+
+/* Poolside-inspired light surfaces: keep the canvas white and group content on warm gray. */
+:root {
+  --paper: #fff;
+  --wash: #fff;
+  --line: #e8e7e3;
+}
+body { background: #fff; }
+.panel, .loading, .empty, .notice, .trajectory-card, .workload-card, .lineage-card {
+  background: #f8f8f6;
+}
+.collection { background: #fafaf8; }
+
+/* Trajectory overview: quiet labels and compact, aligned values. */
+.trajectory-header-meta { display: grid; gap: 7px; margin: 0; }
+.trajectory-header-meta .metadata-row {
+  display: grid;
+  grid-template-columns: 85px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.metadata-row dt { color: var(--muted); }
+.metadata-row dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--ink); }
+.trajectory-run-stats { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 22px; color: var(--muted); font-size: 12px; }
+.trajectory-run-stats > * { display: inline-flex; gap: 5px; align-items: baseline; }
+.trajectory-metrics { display: flex; flex-wrap: wrap; gap: 18px 30px; padding: 14px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.trajectory-metrics > * { min-width: 100px; }
+.trajectory-metrics strong { display: block; font-size: 14px; font-weight: 650; }
+.trajectory-metrics span, .trajectory-metrics small { color: var(--muted); font-size: 11px; }
+.trajectory-extra { margin-top: 10px; color: var(--muted); font-size: 12px; }
+.trajectory-extra > summary { cursor: pointer; }
+
+/* Trace viewer and master/detail step browser. */
+.trace-viewer { min-width: 0; padding: 16px; border: 1px solid #e8e7e3; border-radius: 10px; background: #f7f7f5; }
+.trace-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.step-browser { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 14px; align-items: start; }
+.step-index { min-width: 0; max-height: 65vh; overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.step-item { display: block; width: 100%; margin: 0; padding: 9px 10px; border: 0; border-bottom: 1px solid #efefec; border-radius: 5px; background: transparent; color: var(--ink); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.step-item:last-child { border-bottom: 0; }
+.step-item:hover { background: #f5f5f2; }
+.step-item.selected { background: #eeefec; color: #20241f; font-weight: 600; }
+.step-detail { min-width: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.timeline-list { min-width: 0; }
+.trace-event, .event { min-width: 0; margin: 0; padding: 12px 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
+.trace-event:last-child, .event:last-child { border-bottom: 0; }
+.event-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; color: #424a42; font-size: 12px; font-weight: 650; }
+.event-label { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; }
+.event-label::before { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: #858b84; content: ""; }
+.role-assistant .event-label::before { background: var(--green); }
+.role-user .event-label::before { background: #5378bf; }
+.role-system .event-label::before { background: #8969ba; }
+.role-tool .event-label::before { background: #b28032; }
+.role-child .event-label::before { background: #ac6b9d; }
+.event-block { margin: 7px 0; padding: 0; border-radius: 0; background: transparent; }
+.event-block-title { margin-bottom: 4px; }
+.reasoning, .tool-result { border: 0; }
+.tool-call { margin: 8px 0; padding: 8px 11px; border: 1px solid #e8e7e3; border-radius: 6px; background: #f8f8f6; }
+.tool-call > summary { cursor: pointer; font-size: 12px; }
+.tool-call pre { max-height: 48vh; }
+.verifier-output { width: 100%; }
+.verifier-output pre { width: 100%; }
+@media (max-width: 700px) {
+  .step-browser { grid-template-columns: minmax(0, 1fr); }
+  .step-index { max-height: 32vh; }
+  .trace-viewer { padding: 11px; }
+  .metadata-row { grid-template-columns: 75px minmax(0, 1fr); }
+}
+.role-assistant, .role-user, .role-tool, .role-system, .role-child { background: transparent; border-left: 2px solid #a6aaa4; padding-left: 10px; }
+.role-assistant { border-left-color: var(--green); }
+.role-user { border-left-color: #5378bf; }
+.role-system { border-left-color: #8969ba; }
+.role-tool { border-left-color: #b28032; }
+.role-child { border-left-color: #ac6b9d; }
+
+.trace-toolbar .search { flex: 1 1 220px; width: auto; }
+.trace-toolbar button { padding: 8px 13px; border: 1px solid var(--line); background: #fff; border-radius: 6px; color: var(--ink); cursor: pointer; }
+.trace-toolbar button.active { color: var(--green); background: var(--green-soft); }
+.trace-viewer > .tabs { margin: 0 0 16px; }
+.trajectory-header-meta { margin-bottom: 16px; }
+.trajectory-extra { margin-bottom: 16px; }
+.trace-viewer { margin-top: 20px; }
+.verifier-summary { max-width: 700px; margin: 16px 0; }
+.event-content > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.reasoning { background: transparent; }

@@ -18,6 +18,8 @@ Writing documents use a fixed repository allowlist; there is no `--notes-root` o
 
 ## Implementation status
 
+The trajectory detail uses compact Benchmark/Model/Run metadata, a selectable step list, a flat timeline option, and a shared verifier panel. Raw events and complete code remain accessible; no text is silently truncated. The light theme uses a white canvas and warm-neutral content surfaces. This is a custom local implementation, not a verified copy of Poolside’s component library.
+
 The app separates campaign records, execution workloads, and individual trajectory attempts. The Trajectories page lists attempts, not checkpoint continuations. Distinct attempts on the same task remain separate; duplicate exported IDs within a run collapse, while cross-run rescoring records retain their provenance. A “completed” tag means a final candidate was submitted, not that it passed verification.
 
 Category colors identify training continuations (green), fix validations (amber), setup validations (blue), research pilots (purple), and tooling preparation (slate). These are purpose labels, not quality or live status. The middle pane resizes by drag or arrow keys and remembers its width; minimum width is 220 px, with 420 px reserved for the main pane when space permits. Mobile layout switches at 700 px.

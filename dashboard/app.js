@@ -225,7 +225,10 @@ async function trajectoriesPage(signal,ticket) {
   content.append(el("p","muted","Individual trajectory attempts across saved workloads. A task can have several attempts. Reused episodes remain linked to each scoring workload; they are not new samples."));
   const loading=el("p","loading","Reading local trajectory summaries…");content.append(loading);
   const data=await api("trajectories",signal);if(ticket!==renderId)return;loading.remove();
-  for(const warning of data.warnings||[])notice(warning);
+  if(data.warnings?.length) {
+    const notes=el("details","trajectory-extra");notes.append(el("summary","",`${data.warnings.length} workload records without episode exports`));
+    for(const warning of data.warnings)notes.append(el("p","muted",warning));content.append(notes);
+  }
   trajectoryList(data.trajectories,content);
 }
 async function lineagePage(focus,signal,ticket) {
@@ -272,39 +275,59 @@ async function lineagePage(focus,signal,ticket) {
   content.append(el("p","muted","Lines mean “follow-up”; read each record for exact checkpoint and replay provenance. Categories describe purpose, not success."));scale();
   if(focus&&positions.has(focus)){viewport.scrollLeft=Math.max(0,positions.get(focus).x-100);viewport.scrollTop=positions.get(focus).y;}
 }
-function renderEvents(events, parent) {
-  for (const event of events) {
-    if (event.source === "kernel_child_progress") { raw(parent, event, "Child progress log"); continue; }
-    if (Array.isArray(event.records)) {
-      for (const [i, child] of event.records.entries()) {
-        const node = el("article", "event role-child"); node.append(el("h3", "event-head", `Child ${i + 1} · ${statusLabel(child.status)}`));
-        node.append(panel("Assignment", child.prompt || child.assignment || child.input), panel("Response", child.response || child.output));
-        raw(node, child); parent.append(node);
-      }
-      continue;
+function eventTitle(event,index) {
+  if(event.source==="kernel_subcalls")return "Child assignments and responses";
+  if(event.source==="kernel_child_progress")return "Child progress";
+  const role=event.role||"event";
+  if(role==="system")return "System instructions";
+  if(role==="user")return "User request / observation";
+  if(role==="tool")return "REPL output";
+  const names=(event.tool_calls||[]).map(call=>(call.function||call).name||"tool");
+  return names.length?names.join(" · "):role==="assistant"?"Assistant response":`Event ${index+1}`;
+}
+function renderEvents(events,parent,{expanded=false}={}) {
+  for(const [position,event] of events.entries()) {
+    const role=event.role||"child";
+    const node=el("article","event trace-event role-"+role);
+    const title=el("div","event-head");title.append(el("span","event-label",`#${(event.index??position)+1} · ${eventTitle(event,position)}`));
+    if(event.usage)title.append(el("span","muted",`in ${event.usage.prompt_tokens??"—"} · out ${event.usage.completion_tokens??"—"}`));node.append(title);
+    if(event.source==="kernel_child_progress")raw(node,event.records,"Recorded child progress");
+    else if(Array.isArray(event.records))for(const [i,child] of event.records.entries()) {
+      const childBlock=el("details","tool-call");childBlock.open=expanded;childBlock.append(el("summary","",`Child ${i+1} · ${statusLabel(child.status)}`),panel("Assignment",child.prompt||child.assignment||child.input),panel("Response",child.response||child.output));raw(childBlock,child);node.append(childBlock);
     }
-    const role = event.role || "unknown";
-    const folded = role === "system" || role === "user";
-    const node = el(folded ? "details" : "article", "event role-" + role);
-    node.append(el(folded ? "summary" : "h3", "event-head", `${(event.index ?? 0) + 1} · ${role}`));
-    if (event.finish_reason || event.usage) node.append(el("p", "muted", `${event.finish_reason || ""} · ${event.usage?.completion_tokens ?? "—"} output tokens`));
-    if (event.reasoning) {
-      const reason = el("details", "reasoning event-block"); reason.append(el("summary", "", "Reasoning"), markdown(event.reasoning)); node.append(reason);
+    if(event.reasoning){const reason=el("details","reasoning");reason.append(el("summary","","Reasoning"),markdown(text(event.reasoning)));node.append(reason);}
+    if(event.content) {
+      const message=el("details","event-content");message.open=expanded||role==="assistant";
+      message.append(el("summary","",role==="tool"?"Output":role==="system"?"System prompt":"Message"));
+      message.append(role==="tool"?codeBlock(text(event.content),"REPL output"):markdown(text(event.content)));node.append(message);
     }
-    if (event.content) {
-      if (role === "tool") node.append(codeBlock(text(event.content), "REPL output"));
-      else node.append(markdown(text(event.content)));
+    for(const call of event.tool_calls||[]) {
+      const fn=call.function||call;let args=fn.arguments;
+      if(typeof args==="string"){try{args=JSON.parse(args);}catch{/* Display original malformed arguments. */}}
+      const code=typeof args?.code==="string"?args.code:text(args);
+      const tool=el("details","tool-call");tool.open=expanded;
+      tool.append(el("summary","",`${fn.name||"Tool"} · ${code.split("\n")[0].slice(0,100)}`),codeBlock(code,typeof args?.code==="string"?"Python / REPL":"Arguments"));node.append(tool);
     }
-    for (const call of event.tool_calls || []) {
-      const fn = call.function || call;
-      const tool = el("section", "tool-call"); tool.append(el("h4", "event-block-title", `${fn.name || "Tool"} · emitted call`));
-      let args = fn.arguments;
-      if (typeof args === "string") { try { args = JSON.parse(args); } catch { /* Preserve malformed recorded arguments. */ } }
-      tool.append(codeBlock(typeof args?.code === "string" ? args.code : text(args), typeof args?.code === "string" ? "Python / REPL" : "Arguments"));
-      node.append(tool);
-    }
-    raw(node, event); parent.append(node);
+    raw(node,event,"Raw event");parent.append(node);
   }
+}
+function renderStepBrowser(events,parent) {
+  const toolbar=el("div","trace-toolbar"),stepsButton=el("button","active","Steps"),timelineButton=el("button","","Timeline");
+  const filter=el("input","search");filter.type="search";filter.placeholder="Filter steps…";filter.setAttribute("aria-label","Filter trajectory steps");
+  toolbar.append(filter,stepsButton,timelineButton);parent.append(toolbar);
+  const body=el("div","step-browser");parent.append(body);let mode="steps",selected=0;
+  const update=()=>{
+    const matches=events.map((event,index)=>({event,index})).filter(({event,index})=>[eventTitle(event,index),event.role,event.content,event.reasoning,JSON.stringify(event.tool_calls)].join(" ").toLowerCase().includes(filter.value.toLowerCase()));
+    body.replaceChildren();body.className=mode==="steps"?"step-browser":"timeline-list";
+    stepsButton.classList.toggle("active",mode==="steps");timelineButton.classList.toggle("active",mode==="timeline");
+    if(!matches.length){body.append(el("p","muted","No matching steps."));return;}
+    if(mode==="timeline"){renderEvents(matches.map(item=>item.event),body);return;}
+    if(!matches.some(item=>item.index===selected))selected=matches[0].index;
+    const list=el("div","step-index"),detail=el("div","step-detail");list.setAttribute("aria-label","Trajectory steps");
+    for(const {event,index} of matches){const button=el("button","step-item"+(selected===index?" selected":""),`${index+1}  ${eventTitle(event,index)}`);button.setAttribute("aria-pressed",String(selected===index));button.addEventListener("click",()=>{const offset=list.scrollTop;selected=index;update();body.querySelector(".step-index").scrollTop=offset;});list.append(button);}
+    renderEvents([events[selected]],detail,{expanded:true});body.append(list,detail);
+  };
+  stepsButton.addEventListener("click",()=>{mode="steps";update();});timelineButton.addEventListener("click",()=>{mode="timeline";update();});filter.addEventListener("input",update);update();
 }
 function pair(parent, label, value) {
   const row = el("div", "metric-pair"); row.append(el("span", "", label), el("strong", "", text(value))); parent.append(row);
@@ -330,15 +353,20 @@ async function runPage(id, traceId, tab, signal, ticket) {
   select.addEventListener("change",()=>{location.hash=route(id,select.value);}); content.append(select);
   heading.textContent = t.title || t.task || t.id;
   const tags = el("div", "detail-actions"); experimentTags(tags,t.experiments); tags.append(badge(t.completion)); content.append(tags);
-  const metadata = panel("Trajectory");
-  pair(metadata,"Task ID / attempt",`${t.task || "Unavailable"} / ${t.attempt ?? "—"}`);
-  pair(metadata,"Benchmark",t.benchmark);pair(metadata,"Model",t.model || run.model);
-  pair(metadata,"Workload",run.title || run.id);pair(metadata,"Started",t.started_at);
-  pair(metadata,"Trajectory ID",t.id);content.append(metadata);
-  const metrics = el("div","metrics-strip");
-  for(const [label,value] of [["Root steps",t.metrics?.steps],["Emitted tool calls",t.metrics?.tool_calls],["Peak input context",t.metrics?.peak_context],["Prompt cache",typeof t.metrics?.prompt_cache === "number" ? t.metrics.prompt_cache.toFixed(1)+"%" : null],["Commands failed",t.metrics?.commands_failed]])pair(metrics,label,value);
+  const metadata=el("dl","trajectory-header-meta");
+  const metadataRow=(label,value)=>{const row=el("div","metadata-row");row.append(el("dt","",label),el("dd","",text(value)));metadata.append(row);};
+  metadataRow("Benchmark",t.benchmark);metadataRow("Model",t.model || run.model);
+  const runRow=el("div","metadata-row"),runStats=el("dd","trajectory-run-stats");
+  runStats.append(el("span","",`${t.metrics?.steps ?? "—"} steps`),el("span","",`${t.metrics?.tool_calls ?? "—"} tool calls`),el("span","muted",`Started ${t.started_at || "not recorded"}`));
+  runRow.append(el("dt","","Run"),runStats);metadata.append(runRow);content.append(metadata);
+  const metrics=el("div","trajectory-metrics");
+  for(const [label,value] of [["Peak input context",t.metrics?.peak_context == null ? "Unavailable" : `${t.metrics.peak_context.toLocaleString()} tokens`],["Prompt cache",typeof t.metrics?.prompt_cache === "number" ? t.metrics.prompt_cache.toFixed(1)+"%" : "Unavailable"],["Commands failed",t.metrics?.commands_failed]]) {
+    const stat=el("div");stat.append(el("span","muted",label),el("strong","",text(value)));metrics.append(stat);
+  }
   content.append(metrics);
-  content.append(el("p", "muted", "Completed means the attempt submitted a final candidate, not that verification passed. Peak input context is the largest recorded root prompt; missing cache/error measurements remain unavailable."));
+  const extra=el("details","trajectory-extra");extra.append(el("summary","","Details"));
+  pair(extra,"Task / attempt",`${t.task || "Unavailable"} / ${t.attempt ?? "—"}`);pair(extra,"Trajectory ID",t.id);pair(extra,"Workload",run.title || run.id);pair(extra,"Hardware",run.hardware);
+  extra.append(el("p","muted","Steps are root assistant turns; tool calls are emitted calls. Peak input context is the largest recorded root prompt, not the configured context limit. Missing measurements are not zero."));content.append(extra);
   const io = el("div", "two");
   const asked = panel("Asked", `${t.title || t.task} · ${t.task || ""}`);
   if(t.task_source) raw(asked,t.task_source,"Reference source · selected task catalog / export");
@@ -347,16 +375,25 @@ async function runPage(id, traceId, tab, signal, ticket) {
   const returned=panel("Returned",t.outcome.submitted === true ? "Final candidate submitted. See independent verification below." : "No final candidate submission was recorded.");
   if(t.raw?.info?.kernel_submission)raw(returned,t.raw.info.kernel_submission,"Submitted source");
   io.append(asked,returned);content.append(io);
-  const summaries=el("div","two"); const outcome=panel("Outcome"), setup=panel("Run");
-  pair(outcome,"Submitted",yesNo(t.outcome.submitted)); pair(outcome,"Correct",yesNo(t.outcome.correct)); pair(outcome,"Reward",metric(t.outcome.reward)); pair(outcome,"Speedup",typeof t.outcome.speedup === "number" ? metric(t.outcome.speedup)+"×" : "Unavailable");
-  pair(setup,"Status",statusLabel(run.status)); pair(setup,"Model",run.model); pair(setup,"Hardware",run.hardware); pair(setup,"Verifier",t.verification?.verification_protocol || run.verifier);
-  summaries.append(outcome,setup);content.append(summaries);
-  const tabs=el("nav","tabs");for(const name of ["trajectory","verifier","events"]){const a=link(name[0].toUpperCase()+name.slice(1),route(id,traceId,name),"tab"+((tab||"trajectory")===name?" active":""));tabs.append(a);}content.append(tabs);
+  const outcome=el("div","trajectory-metrics");
+  for(const [label,value] of [["Submitted",yesNo(t.outcome.submitted)],["Correct",yesNo(t.outcome.correct)],["Reward",metric(t.outcome.reward)],["Speedup",typeof t.outcome.speedup === "number" ? metric(t.outcome.speedup)+"×" : "Unavailable"]]) {
+    const stat=el("div");stat.append(el("span","muted",label),el("strong","",value));outcome.append(stat);
+  }
+  content.append(outcome);
+  const viewer=el("section","trace-viewer"),tabs=el("nav","tabs");
+  for(const [name,label] of [["trajectory","Trajectory"],["verifier","Verifier"],["events","Raw events"]]) {
+    tabs.append(link(label,route(id,traceId,name),"tab"+((tab||"trajectory")===name?" active":"")));
+  }
+  viewer.append(tabs);content.append(viewer);
   if(tab==="verifier") {
-    const v=t.verification||{}, summary=panel("Independent final verification");
-    pair(summary,"Status",statusLabel(v.verification_status));pair(summary,"Compiled",yesNo(v.compiled));pair(summary,"Correct",yesNo(v.correct));pair(summary,"Reference (ms)",metric(v.ref_ms));pair(summary,"Candidate (ms)",metric(v.kernel_ms));if(v.error)pair(summary,"Error",v.error);content.append(summary);raw(content,v,"Raw verifier record");
-  } else if(tab==="events") t.events.forEach(e=>raw(content,e));
-  else renderEvents(t.events,content);
+    const v=t.verification||{}, summary=el("div","verifier-summary");
+    pair(summary,"Protocol",v.verification_protocol);pair(summary,"Status",statusLabel(v.verification_status));pair(summary,"Compiled",yesNo(v.compiled));pair(summary,"Correct",yesNo(v.correct));pair(summary,"Reference (ms)",metric(v.ref_ms));pair(summary,"Candidate (ms)",metric(v.kernel_ms));viewer.append(summary);
+    const output=v.stdout || v.output || v.error;
+    if(output) {const block=codeBlock(text(output),"Verifier output");block.classList.add("verifier-output");viewer.append(block);}
+    else viewer.append(el("p","muted","No text verifier output was recorded. Structured final results are available below."));
+    raw(viewer,v,"Structured final verifier record");
+  } else if(tab==="events") (t.events||[]).forEach(e=>raw(viewer,e));
+  else renderStepBrowser(t.events||[],viewer);
   raw(content,t.raw,"Raw trajectory record");
 }
 let writingDraft = null;
