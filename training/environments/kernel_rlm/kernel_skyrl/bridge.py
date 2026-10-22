@@ -231,7 +231,11 @@ class CompletionBridge:
             return web.json_response({"error": {"message": message}}, status=502)
         finally:
             record["elapsed_seconds"] = time.monotonic() - started
-            if "call_id" in record and (record.get("error") or "outcome" in record):
+            if (
+                record.get("branch") == "child"
+                and "call_id" in record
+                and (record.get("error") or "outcome" in record)
+            ):
                 self.publish_child_progress(
                     record["call_id"],
                     started,

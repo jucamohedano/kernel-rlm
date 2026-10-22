@@ -106,7 +106,7 @@ class KernelGenerator:
         (directory / "task.json").write_text(json.dumps(task))
         episode_provenance = {
             "execution_run_id": self.execution_run_id,
-            "group_id": f"{self.group_id}:{task['name']}",
+            "group_id": f"{self.group_id}:{task['name']}" if self.group_id is not None else None,
             "attempt_id": self.attempt_id,
             "episode_id": directory.name,
         }
@@ -134,13 +134,7 @@ class KernelGenerator:
                 KERNEL_LIMITS=json.dumps({**self.limits, "bridge_owns_admission": True}),
                 KERNEL_FEEDBACK_LOG_DIR=str(directory.resolve()),
                 KERNEL_PROVENANCE=json.dumps(
-                    {
-                        "execution_run_id": self.execution_run_id,
-                        "group_id": f"{self.group_id}:{task['name']}",
-                        "attempt_id": self.attempt_id,
-                        "episode_id": directory.name,
-                        "policy_version": policy_version,
-                    }
+                    {**episode_provenance, "policy_version": policy_version}
                 ),
             )
             with (directory / "program.log").open("wb") as log:
