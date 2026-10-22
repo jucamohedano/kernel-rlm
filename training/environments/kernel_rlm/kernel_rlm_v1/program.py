@@ -40,15 +40,15 @@ from kernel_rlm.subcalls import (
 from kernel_rlm.thinking import visible_response
 from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_request_slot
 from openai import AsyncOpenAI
+from rlm_train.proxy import ClientHandle, SubLLMProxy
+from rlm_train.repl.base import ExecResult
+from rlm_train.repl.subprocess import SubprocessReplBackend
+
 from rlm.utils.prompts import (
     QueryMetadata,
     build_rlm_system_prompt,
     build_user_prompt,
 )
-
-from rlm_train.proxy import ClientHandle, SubLLMProxy
-from rlm_train.repl.base import ExecResult
-from rlm_train.repl.subprocess import SubprocessReplBackend
 
 
 async def run(task: dict) -> None:
