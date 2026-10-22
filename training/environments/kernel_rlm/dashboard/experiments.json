@@ -17,11 +17,11 @@
   },
   "experiments": [
     {
-      "id": "trl-l1-verifier-v2-repair",
+      "id": "trl-l1-final-pass",
       "follows_experiments": [
-        "trl-l1-rtx-continuation"
+        "trl-l1-verifier-v2-repair"
       ],
-      "title": "RTX L1 curriculum · verifier v2 · reward-corrected branch",
+      "title": "Final L1 pass · 35 trained · 15 deferred",
       "current_run_id": "20261020T230200Z-final-l1-pass",
       "status": "closed",
       "hardware_docs_prepared": {
@@ -33,7 +33,7 @@
         "activation_gate": "Natural checkpoint-safe pause and tested immutable descendant; never hot-patch or silently replace docs in the live run."
       },
       "intent": "Complete the remaining non-deferred L1 tasks within the $65 total RTX budget, measured from the original baseline. Preserve deferred tasks and history, verify backups, and retire only the RTX rental after training ends and with the user’s explicit authorization.",
-      "change": "The initial 25bb15f branch rebuilt step 28 with BatchNorm state-v2 using all eight original task 0017 samples; the original step 28 and its incorrect reward remain preserved. After a natural pause, descendant d1767ad inherited step 29 and repaired candidate-loading attribution. It revalidated only the exact failed task 0031 member, preserving all eight samples, the other seven scores, and prior attempts. Approved SM120 documentation applied only to fresh groups. Dataset, order, shapes, reward formula, and root-only loss were unchanged.",
+      "change": "Continued the repaired branch from 30 inherited updates to checkpoint 35, adding five updates. Inherited the BatchNorm state-v2 and candidate-loading repairs; approved SM120 documentation applied to fresh groups. Dataset, order, shapes, reward formula, and root-only loss were unchanged.",
       "conclusion": "The non-deferred pass ended with 35 trained tasks, 15 deferred, and none remaining in scope. Driver and observer exited naturally; no GPU jobs remained.\n\nIn the final task, three of eight candidates were correct (0.98719–0.99966× reference speed); none was faster, and all used ATen CTC delegation rather than custom CUDA.\n\nThe 35,696-token root audit, full step-34 optimizer restore, and native step-35 readback passed; all 320 adapters changed.\n\nThe quiescent local snapshot contained 9,504 files, five symlinks, 7,456,806,807 bytes, and 44 checkpoint manifests, with SQLite consistency verified; the pinned base poolside/Laguna-XS.2 revision a397bde and 14 shard addresses were retained.\n\nPrivate HF step 35 archive commit 833f460dfbd71918a0ad7403e1245233113d4b71 retained all eight new addresses and matching sizes (not full binary readback); old branches remain.\n\nAfter verification, only RTX instance 131552ea was terminated through the official API; the 03:07:25 UTC provider listing confirmed the rental absent. The private local CPU Trackio copy has 35 points and no VM dependency; monitor and warning are paused. $51.26 against the $65 budget is a conservative estimate, not an invoice.\n\nThe viewer has 72 traces (40 accepted, 32 weak); the 35 points represent 30 inherited and five new updates. This is not a 50-task mastery or held-out-quality claim.",
       "decision": "The pass, backups, and authorized RTX retirement are complete; the monitor and warning are paused. Preserve local and private HF data and deferred scope. Do not access or rent another VM, train, evaluate, or change the verifier without a new user request.",
       "evidence_file": "notes/results/20261021-final-pass-completion.json",
@@ -44,9 +44,70 @@
         "Fifteen tasks remain untrained and deferred; only task 0037 was deferred for operator infrastructure reasons."
       ],
       "runs": [
-        "20261020T192919Z-verifier-v2-repair",
-        "20261020T214200Z-hardware-loading-repair",
         "20261020T230200Z-final-l1-pass"
+      ],
+      "provenance": {
+        "dataset_ids": [
+          "ops6k-l1-seed42"
+        ],
+        "documented_change_commits": [
+          "0764ac9",
+          "25bb15fb5c17b85716670154d7db5bc223372a05",
+          "034f1b0b1fb37f828f97df046f5f3c7c9b98ff48",
+          "d1767ad7ea5f05128132c1583d1c6cc443364e2b",
+          "a6083e205fda189b36c495be2b35615aa921ef83",
+          "ea1790eac5cd49b314695760160032fecd0038bb"
+        ],
+        "notes": [
+          "notes/results/20261020-verifier-state-hardening.json",
+          "notes/results/20261020-verifier-v2-resume.json",
+          "notes/results/20261020-loading-owner-repair.json",
+          "notes/results/20261020-hardware-loading-hourly-2233Z.json",
+          "notes/results/20261021-final-l1-pass.json",
+          "notes/results/20261021-final-pass-monitor-2324Z.json",
+          "notes/results/20261021-final-pass-monitor-2354Z.json",
+          "notes/results/20261021-final-pass-monitor-0024Z.json",
+          "notes/results/20261021-final-pass-monitor-0039Z.json",
+          "notes/results/20261021-final-pass-monitor-0109Z.json",
+          "notes/results/20261021-final-pass-monitor-0124Z.json",
+          "notes/results/20261021-final-pass-monitor-0209Z.json",
+          "notes/results/20261021-final-pass-monitor-0239Z.json",
+          "notes/results/20261021-final-pass-completion.json"
+        ]
+      },
+      "category": "Training continuation",
+      "campaign": "L1 post-training",
+      "scope_note": "Final continuation and Stage 1 closeout after verifier and candidate-loading repairs. The 35 recorded updates include 30 inherited and five new updates; this is not a held-out quality result."
+    },
+    {
+      "id": "trl-l1-verifier-v2-repair",
+      "follows_experiments": [
+        "trl-l1-rtx-continuation"
+      ],
+      "title": "RTX L1 · verifier and candidate-loading repairs",
+      "current_run_id": "20261020T214200Z-hardware-loading-repair",
+      "status": "closed",
+      "hardware_docs_prepared": {
+        "source_commit": "034f1b0b1fb37f828f97df046f5f3c7c9b98ff48",
+        "profile": "sm120",
+        "corpus_sha256": "014eaa965b4c59250ed29f9aa37dfcfd78c4ea7ed0849dc109c1b63a3f7497c7",
+        "status": "active_for_fresh_groups_in_d1767ad_descendant",
+        "evidence_file": "notes/results/20261020-hardware-docs-audit.json",
+        "activation_gate": "Natural checkpoint-safe pause and tested immutable descendant; never hot-patch or silently replace docs in the live run."
+      },
+      "intent": "Repair verifier state handling and candidate-loading attribution before continuing the unchanged L1 pass. Preserve original samples, prior scores, and checkpoint history.",
+      "change": "The initial 25bb15f branch rebuilt step 28 with BatchNorm state-v2 using all eight original task 0017 samples; the original step 28 and its incorrect reward remain preserved. After a natural pause, descendant d1767ad inherited step 29 and repaired candidate-loading attribution. It revalidated only the exact failed task 0031 member, preserving all eight samples, the other seven scores, and prior attempts. Approved SM120 documentation applied only to fresh groups. Dataset, order, shapes, reward formula, and root-only loss were unchanged.",
+      "conclusion": "The reward-corrected branch rebuilt step 28 with BatchNorm state-v2 using all eight original task 0017 samples. The original step 28 and its incorrect reward remain preserved. The later candidate-loading repair revalidated only the exact failed task 0031 member, preserving the other seven scores and prior attempts.\n\nThe final training continuation and Stage 1 closeout are recorded separately in trl-l1-final-pass; these repairs alone are not evidence of held-out learning improvement.",
+      "decision": "Preserve the original branch, samples, scores, and repair evidence. Follow the repaired branch into the separately recorded final L1 continuation.",
+      "evidence_file": "notes/results/20261020-loading-owner-repair.json",
+      "limitations": [
+        "Reused trajectories retain earlier intermediate verifier feedback. This was final-reward revalidation, not fresh protocol rollouts.",
+        "No held-out learning improvement was established.",
+        "The old step 28 and its incorrect reward remain on the original branch."
+      ],
+      "runs": [
+        "20261020T192919Z-verifier-v2-repair",
+        "20261020T214200Z-hardware-loading-repair"
       ],
       "provenance": {
         "dataset_ids": [
@@ -79,7 +140,7 @@
       },
       "category": "Fix validation",
       "campaign": "L1 post-training",
-      "scope_note": "Verifier and candidate-loading repairs followed by completion of the main L1 training branch. This record includes the final continuation and campaign closeout, not a separate quality experiment."
+      "scope_note": "Verifier and candidate-loading repair workloads. The subsequent final continuation and closeout are a separate Training continuation record; graph edges describe research follow-ups, not inferred checkpoint inheritance."
     },
     {
       "id": "trl-l1-rtx-continuation",
