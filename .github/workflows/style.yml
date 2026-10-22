@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -19,16 +21,26 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.9.9"
 
-      - name: Install dependencies
+      - name: Install locked quality tools
+        run: uv sync --locked --group dev --no-default-groups
+
+      - name: Run read-only local checks
         run: |
-          uv pip install --system ruff==0.14.10 ty==0.0.1a21
+          uv run --no-sync make lint format-check
+          uv run --no-sync ty check --exit-zero --output-format=concise
 
-      - name: Run ruff linting
-        run: ruff check --config=pyproject.toml .
+      - name: Check changed files with pre-commit
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: uv run --no-sync pre-commit run --from-ref "$BASE_REF" --to-ref "${GITHUB_SHA}"
 
-      - name: Run ruff formatting check
-        run: ruff format --check --config=pyproject.toml .
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
 
-      - name: Run ty type checking
-        run: ty check --exit-zero --output-format=concise
+      - name: Check dashboard JavaScript
+        run: make test-dashboard

@@ -1,6 +1,6 @@
 .PHONY: help install install-dev install-modal run-all \
         quickstart docker-repl lm-repl modal-repl \
-        lint format test check
+        lint format format-check test check test-dashboard
 
 help:
 	@echo "RLM Examples Makefile"
@@ -18,10 +18,12 @@ help:
 	@echo "  make modal-repl     - Run modal_repl_example.py (needs Modal)"
 	@echo ""
 	@echo "Development:"
-	@echo "  make lint           - Run ruff linter"
-	@echo "  make format         - Run ruff formatter"
+	@echo "  make lint           - Check Ruff rules with the root pyproject.toml"
+	@echo "  make format         - Format Python files with Ruff"
+	@echo "  make format-check   - Check formatting without changing files"
 	@echo "  make test           - Run tests"
-	@echo "  make check          - Run lint + format + tests"
+	@echo "  make test-dashboard - Check dashboard JavaScript and run its tests (Node 22+)"
+	@echo "  make check          - Run read-only lint, format, Python, and dashboard checks"
 
 install:
 	uv sync
@@ -46,13 +48,21 @@ lm-repl: install
 modal-repl: install-modal
 	uv run python -m examples.modal_repl_example
 
-lint: install-dev
-	uv run ruff check .
+lint:
+	uv run --no-sync ruff check --config=pyproject.toml .
 
-format: install-dev
-	uv run ruff format .
+format:
+	uv run --no-sync ruff format --config=pyproject.toml .
 
-test: install-dev
-	uv run pytest
+format-check:
+	uv run --no-sync ruff format --check --config=pyproject.toml .
 
-check: lint format test
+test:
+	uv run --no-sync pytest
+
+test-dashboard:
+	node --check dashboard/app.js
+	node --check dashboard/layout.js
+	node --test tests/*dashboard*.test.cjs
+
+check: lint format-check test test-dashboard
