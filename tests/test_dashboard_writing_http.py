@@ -47,3 +47,28 @@ def test_write_requires_origin_token_and_current_version(tmp_path, monkeypatch):
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+def test_static_assets_have_content_type(tmp_path):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(tmp_path))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+
+    try:
+        thread.start()
+        for path, content_type in {
+            "/": "text/html; charset=utf-8",
+            "/app.js": "text/javascript; charset=utf-8",
+            "/styles.css": "text/css; charset=utf-8",
+            "/fonts/InterVariable.woff2": "font/woff2",
+        }.items():
+            conn = HTTPConnection("127.0.0.1", server.server_port)
+            conn.request("GET", path)
+            response = conn.getresponse()
+            assert response.status == 200
+            assert response.getheader("Content-Type") == content_type
+            response.read()
+            conn.close()
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
