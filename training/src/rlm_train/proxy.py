@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from aiohttp import web
@@ -129,6 +129,13 @@ class SubLLMProxy:
         self._handles.pop(rollout_id, None)
         self._semaphores.pop(rollout_id, None)
 
+    def _dispatch_handle(self, handle: ClientHandle) -> ClientHandle:
+        if isinstance(handle.state_ref, dict) and (
+            handle.fake_query is not None or handle.fake_query_batched is not None
+        ):
+            return replace(handle, state_ref=dict(handle.state_ref))
+        return handle
+
     async def _handle_single(self, request: web.Request) -> web.Response:
         rollout_id = request.match_info["rollout_id"]
         handle = self._handles.get(rollout_id)
@@ -142,6 +149,7 @@ class SubLLMProxy:
         if prompt is None:
             return web.json_response({"error": "missing 'prompt'"}, status=400)
         model = body.get("model") or handle.model
+        handle = self._dispatch_handle(handle)
         try:
             text, meta = await self._completion(handle, prompt, model)
         except Exception as e:  # noqa: BLE001
@@ -167,6 +175,7 @@ class SubLLMProxy:
         if not isinstance(prompts, list):
             return web.json_response({"error": "missing 'prompts' list"}, status=400)
         model = body.get("model") or handle.model
+        handle = self._dispatch_handle(handle)
 
         if handle.fake_query_batched is not None:
             try:

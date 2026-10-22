@@ -1,6 +1,7 @@
 """One phase-shared TRL/Muon update with compact policy continuation, or audit only."""
 
 import argparse
+import hashlib
 import json
 import os
 import time
@@ -8,7 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 
 
-def tracking_configuration(arguments, version: int) -> dict:
+def tracking_configuration(arguments, version: int, run_name: str | None = None) -> dict:
     return {
         "report_to": "none"
         if arguments.audit_only
@@ -17,7 +18,7 @@ def tracking_configuration(arguments, version: int) -> dict:
         else getattr(arguments, "report_to", "trackio"),
         "project": "laguna-kernel-rlm",
         "trackio_space_id": None,
-        "run_name": f"{arguments.output_dir.parents[2].name}-step-{version + 1}",
+        "run_name": run_name or f"{arguments.output_dir.parents[2].name}-step-{version + 1}",
     }
 
 
@@ -49,6 +50,7 @@ def run(arguments) -> dict:
         require_probability_agreement,
     )
     from kernel_trl.replay_trainer import rlm_grpo_trainer
+    from kernel_trl.tracking import trainer_tracking_identity
 
     group = json.loads(arguments.group.read_text()) if arguments.group else None
     memory_tokens = getattr(arguments, "memory_probe_tokens", None)
@@ -123,6 +125,16 @@ def run(arguments) -> dict:
         if row_count % world_size:
             raise ValueError("Exact replay rows must divide evenly between learner ranks")
         gas = row_count // world_size
+        identity_fields = (
+            (group.get("execution_run_id"), group.get("group_id"), group.get("attempt_id"))
+            if group
+            else (None, None, None)
+        )
+        identity = (
+            trainer_tracking_identity(*identity_fields[:2], version + 1, identity_fields[2])
+            if group and all(identity_fields) and not arguments.audit_only and not memory_tokens
+            else None
+        )
         settings = GRPOConfig(
             output_dir=str(directory / "trainer-output"),
             bf16=True,
@@ -139,7 +151,7 @@ def run(arguments) -> dict:
             lr_scheduler_type="constant",
             beta=0.0,
             temperature=1.0,
-            **tracking_configuration(arguments, version),
+            **tracking_configuration(arguments, version, identity["name"] if identity else None),
             save_strategy="no",
             logging_steps=1,
             disable_tqdm=True,
@@ -231,6 +243,18 @@ def run(arguments) -> dict:
         output = save_training_state(trainer, directory, version + 1)
         return {
             "status": "passed",
+            "producer": "rlm_update",
+            "execution_run_id": group.get("execution_run_id"),
+            "group_id": group.get("group_id"),
+            "attempt_id": group.get("attempt_id"),
+            "group_input_path": str(arguments.group) if arguments.group else None,
+            "group_input_sha256": hashlib.sha256(arguments.group.read_bytes()).hexdigest()
+            if arguments.group
+            else None,
+            "generation_sha256": group.get("generation_sha256"),
+            "optimizer_step": version + 1,
+            "trackio_run_name": identity["name"] if identity else None,
+            "trackio_config": identity["config"] if identity else None,
             "global_step": version + 1,
             "local_optimizer_steps": 1,
             "sampled_policy_version": version,

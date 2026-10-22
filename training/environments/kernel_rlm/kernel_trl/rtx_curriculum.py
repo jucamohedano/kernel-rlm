@@ -125,7 +125,9 @@ def migration_state(bundle: Path, dataset: Path, checkpoint: Path) -> dict:
     return state
 
 
-def collector_command(arguments, output: Path, task: str, version: int) -> list[str]:
+def collector_command(
+    arguments, output: Path, task: str, version: int, group_id: str, attempt_id: str
+) -> list[str]:
     return [
         arguments.python,
         "-m",
@@ -136,6 +138,12 @@ def collector_command(arguments, output: Path, task: str, version: int) -> list[
         str(arguments.dataset),
         "--output-dir",
         str(output),
+        "--execution-run-id",
+        arguments.run_id,
+        "--group-id",
+        group_id,
+        "--attempt-id",
+        attempt_id,
         "--rollouts",
         "8",
         "--max-turns",
@@ -283,6 +291,33 @@ async def revalidate_pending(output: Path, version: int, budget: dict, tracker) 
             )
 
 
+def initialize_coordinator_tracking(
+    trackio, arguments, state: dict, history_metrics_sha256: str
+) -> None:
+    trackio.init(
+        project="laguna-kernel-rlm",
+        name=arguments.run_id,
+        resume="allow",
+        space_id=None,
+        auto_log_gpu=False,
+        auto_log_cpu=False,
+        embed=False,
+        config={
+            "run_kind": "coordinator",
+            "execution_run_id": arguments.run_id,
+            "goal_resume_step": state["continuation_parent"]["policy_version"],
+            "source_commit": arguments.source_commit,
+            "gpu_roles": "RTX GPU1 inference; GPU0 verifier or learner",
+            "historical_metrics_are_inherited_not_replayed": True,
+            "history_source": str(arguments.history_metrics),
+            "history_source_sha256": history_metrics_sha256,
+            "parent_execution_run_id": state["continuation_parent"].get("run_id"),
+            "parent_state_sha256": state["continuation_parent"].get("state_sha256"),
+            "parent_checkpoint_state": str(arguments.checkpoint_state),
+        },
+    )
+
+
 async def run(arguments):
     os.environ["TRACKIO_DIR"] = str(arguments.trackio_dir.resolve())
     import trackio
@@ -313,6 +348,9 @@ async def run(arguments):
         ):
             raise ValueError("Resume changed immutable source or dataset")
         checkpoint_metadata(Path(state["checkpoint"]), state["policy_version"], 1)
+        history_metrics_sha256 = inputs.get("history_metrics_sha256") or digest(
+            arguments.history_metrics
+        )
     else:
         if state_path.exists():
             raise ValueError("Existing run requires --resume")
@@ -330,8 +368,14 @@ async def run(arguments):
         shutil.copytree(arguments.migration_bundle / "pending", pending)
         state["pending_directory"] = str(pending)
         state["migration_pending"] = True
+        history_metrics_sha256 = digest(arguments.history_metrics)
         inputs = {
             "run_id": arguments.run_id,
+            "execution_run_id": arguments.run_id,
+            "run_kind": "coordinator",
+            "history_metrics_source": str(arguments.history_metrics),
+            "history_metrics_sha256": history_metrics_sha256,
+            "parent_checkpoint_state": str(arguments.checkpoint_state),
             "experiment_id": arguments.experiment_id,
             "backend": "trl",
             "provider": "cloudrift",
@@ -363,37 +407,7 @@ async def run(arguments):
         ).hexdigest()
         write_json(arguments.output_dir / "inputs.json", inputs)
         write_json(state_path, state)
-    trackio.init(
-        project="laguna-kernel-rlm",
-        name=arguments.run_id,
-        resume="allow",
-        space_id=None,
-        auto_log_gpu=False,
-        auto_log_cpu=False,
-        embed=False,
-        config={
-            "goal_resume_step": state["continuation_parent"]["policy_version"],
-            "source_commit": arguments.source_commit,
-            "gpu_roles": "RTX GPU1 inference; GPU0 verifier or learner",
-            "historical_metrics_are_inherited": True,
-        },
-    )
-    if not state.get("history_logged"):
-        for row in [
-            json.loads(line)
-            for line in arguments.history_metrics.read_text().splitlines()
-            if line.strip()
-        ]:
-            if row["step"] <= state["continuation_parent"]["policy_version"]:
-                trackio.log(
-                    {
-                        "train/loss": row["loss/mean"],
-                        "policy/global_step": row["step"],
-                        "history/inherited": 1,
-                    }
-                )
-        state["history_logged"] = True
-        write_json(state_path, state)
+    initialize_coordinator_tracking(trackio, arguments, state, history_metrics_sha256)
     server = None
 
     def save():
@@ -405,6 +419,13 @@ async def run(arguments):
             gpu_topology="Two RTX PRO6000: GPU1 inference, GPU0 verifier/one-rank learner",
             new_optimizer_steps=state["policy_version"]
             - state["continuation_parent"]["policy_version"],
+            run_kind="coordinator",
+            execution_run_id=arguments.run_id,
+            history_metrics_source=str(arguments.history_metrics),
+            history_metrics_sha256=history_metrics_sha256,
+            parent_execution_run_id=state["continuation_parent"].get("run_id"),
+            parent_state_sha256=state["continuation_parent"].get("state_sha256"),
+            parent_checkpoint_state=str(arguments.checkpoint_state),
         )
         write_json(arguments.output_dir / "report.json", report)
 
@@ -509,7 +530,17 @@ async def run(arguments):
                     if f"kernel-policy-{version}" not in [item["id"] for item in models["data"]]:
                         raise ValueError("Inference did not load the active sampled adapter")
                 await phase(
-                    collector_command(arguments, output, task, version), directory, "collect", 4800
+                    collector_command(
+                        arguments,
+                        output,
+                        task,
+                        version,
+                        group_id=f"policy-step-{version + 1:03d}",
+                        attempt_id=f"attempt-{max(state.setdefault('attempts', {}).get(task, 1), 1):02d}",
+                    ),
+                    directory,
+                    "collect",
+                    4800,
                 )
                 await stop_group(server.pid)
                 await server.wait()

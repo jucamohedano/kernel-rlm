@@ -198,3 +198,54 @@ def test_selected_episode_is_the_only_full_payload(tmp_path):
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+def test_run_detail_api_exposes_recorded_elapsed_scope_and_trajectory_metrics(tmp_path):
+    run = tmp_path / "20261020T230200Z-final-l1-pass"
+    run.mkdir()
+    (run / "report.json").write_text(
+        json.dumps(
+            {
+                "run_id": run.name,
+                "status": "completed",
+                "elapsed_seconds": 13819.226649284363,
+                "elapsed_scope": "run",
+            }
+        )
+    )
+    trace = {
+        "id": "t1",
+        "info": {
+            "kernel_model_calls": [
+                {
+                    "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+                    "elapsed_seconds": 2.5,
+                }
+            ],
+            "kernel_subcalls": [
+                {
+                    "response": {
+                        "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}
+                    },
+                    "elapsed_seconds": 1.25,
+                }
+            ],
+        },
+    }
+    (run / "traces.jsonl").write_text(json.dumps({"traces": [trace]}))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(tmp_path))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, _, body = request(server, f"/api/runs/{run.name}")
+        result = json.loads(body)
+        assert status == 200
+        assert result["run"]["elapsed_seconds"] == 13819.226649284363
+        assert result["run"]["elapsed_scope"] == "run"
+        usage = result["trajectories"][0]["metrics"]["token_usage"]
+        assert usage["root"]["elapsed_seconds"] == {"sum": 2.5, "recorded": 1, "total": 1}
+        assert usage["children"]["elapsed_seconds"] == {"sum": 1.25, "recorded": 1, "total": 1}
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()

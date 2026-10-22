@@ -121,6 +121,8 @@ def make_handler(root: Path, receipt_path: Path | None = None, task_catalog: Pat
                     "status": report.get("status"),
                     "model": report.get("model_id") or report.get("model"),
                     "hardware": report.get("gpu_topology") or report.get("hardware"),
+                    "elapsed_seconds": report.get("elapsed_seconds"),
+                    "elapsed_scope": report.get("elapsed_scope"),
                     "verifier": None,
                     "source": run_id,
                     "evidence_available": found.get("evidence_available", False),

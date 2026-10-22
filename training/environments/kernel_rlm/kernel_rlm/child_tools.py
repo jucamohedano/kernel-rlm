@@ -8,6 +8,7 @@ import re
 import signal
 import sys
 import time
+import uuid
 from pathlib import Path
 
 from kernel_rlm.submission_contract import validate_submission_source
@@ -195,8 +196,14 @@ class IterativeSubcalls:
             assignment = self.hardware_context + "\n" + assignment
         if len(assignment.encode()) > 65536 or self.count_tokens(assignment) > 4096:
             raise ValueError("Child reference plus assignment exceeds 4096 input tokens")
+        dispatch_context = dict(state or {})
         self.calls_used += 1
         record = {
+            "child_invocation_id": uuid.uuid4().hex,
+            "requests": [],
+            "parent_turn_id": dispatch_context.get("parent_turn_id"),
+            "parent_tool_call_id": dispatch_context.get("parent_tool_call_id"),
+            "parent_tool_call_id_generated": dispatch_context.get("parent_tool_call_id_generated"),
             "call_index": self.calls_used,
             "mode": "compile_repair",
             "prompt": prompt,
@@ -219,10 +226,28 @@ class IterativeSubcalls:
                     remaining = 4096 - record["completion_tokens"]
                     if remaining < 128 or self.count_tokens(json.dumps(messages)) > 8192:
                         raise ValueError("Child aggregate token or history budget exhausted")
+                    request_id = uuid.uuid4().hex
+                    request_record = {"call_id": request_id, "step": step + 1}
+                    request_record.update(
+                        parent_turn_id=record["parent_turn_id"],
+                        parent_tool_call_id=record["parent_tool_call_id"],
+                        parent_tool_call_id_generated=record["parent_tool_call_id_generated"],
+                        parent_action_id=record.get("parent_action_id"),
+                    )
+                    record["requests"].append(request_record)
                     response = await self.client.chat.completions.create(
                         model=self.model,
                         messages=messages,
                         max_tokens=remaining,
+                        extra_headers={
+                            "X-Kernel-Call-Id": request_id,
+                            "X-Kernel-Parent-Turn-Id": record["parent_turn_id"] or "",
+                            "X-Kernel-Parent-Tool-Call-Id": record["parent_tool_call_id"] or "",
+                            "X-Kernel-Parent-Tool-Call-Id-Generated": str(
+                                bool(record["parent_tool_call_id_generated"])
+                            ).lower(),
+                            "X-Kernel-Parent-Action-Id": record.get("parent_action_id") or "",
+                        },
                         extra_body={"chat_template_kwargs": {"enable_thinking": True}},
                     )
                     choice = response.choices[0]

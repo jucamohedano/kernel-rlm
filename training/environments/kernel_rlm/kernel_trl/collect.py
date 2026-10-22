@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import time
@@ -225,6 +226,9 @@ async def collect(arguments):
                 ),
             },
             defer_scoring=getattr(arguments, "defer_scoring", False),
+            execution_run_id=arguments.execution_run_id,
+            group_id=arguments.group_id,
+            attempt_id=arguments.attempt_id,
         )
         tasks = {task["name"]: task for task in load_tasks(arguments.dataset)}
         attempts = []
@@ -329,6 +333,10 @@ async def collect(arguments):
                 admitted = not infrastructure_errors and has_signal(rewards) and max(rewards) > 0.1
                 attempts.append(
                     {
+                        "producer": "kernel_trl_collect",
+                        "execution_run_id": arguments.execution_run_id,
+                        "group_id": f"{arguments.group_id}:{task_id}",
+                        "attempt_id": arguments.attempt_id,
                         "task": task_id,
                         "rewards": rewards,
                         "admitted": admitted,
@@ -354,7 +362,16 @@ async def collect(arguments):
                     )
                 if admitted:
                     group = training_rows(episodes, arguments.policy_version, context_tokens)
-                    group["task"] = task_id
+                    group.update(
+                        producer="kernel_trl_collect",
+                        execution_run_id=arguments.execution_run_id,
+                        group_id=f"{arguments.group_id}:{task_id}",
+                        attempt_id=arguments.attempt_id,
+                        task=task_id,
+                    )
+                    group["artifact_sha256"] = hashlib.sha256(
+                        json.dumps(group, sort_keys=True, separators=(",", ":")).encode()
+                    ).hexdigest()
                     (directory / "training-group.json").write_text(json.dumps(group, indent=2))
                     print(
                         json.dumps(
@@ -398,6 +415,9 @@ def main():
     parser.add_argument("--inference-http-timeout-s", type=float)
     parser.add_argument("--episode-timeout-s", type=float, default=700)
     parser.add_argument("--group-timeout-s", type=float)
+    parser.add_argument("--execution-run-id", required=True)
+    parser.add_argument("--group-id", required=True)
+    parser.add_argument("--attempt-id", required=True)
     parser.add_argument("--policy-version", type=int, default=0)
     parser.add_argument("--adapter-name", default="kernel-base")
     parser.add_argument("--report-to", choices=("trackio", "none"), default="trackio")

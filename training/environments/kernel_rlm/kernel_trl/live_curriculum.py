@@ -661,6 +661,7 @@ async def collect_task(
     task_id: str,
     version: int,
     checkpoint: Path | None,
+    attempt: int,
     inference=None,
 ) -> dict:
     deadline = phase_deadline(budget, time.time(), 2400)
@@ -715,6 +716,12 @@ async def collect_task(
             str(arguments.dataset),
             "--output-dir",
             str(output_directory),
+            "--execution-run-id",
+            str(arguments.run_id),
+            "--group-id",
+            step_directory.name,
+            "--attempt-id",
+            f"attempt-{attempt:02d}",
             "--rollouts",
             str(GROUP_SIZE),
             "--model-timeout-s",
@@ -1153,6 +1160,7 @@ async def train_task(arguments, budget: dict, state: dict, task_id: str, inferen
                     task_id,
                     version,
                     checkpoint,
+                    attempt,
                     **({"inference": inference} if inference is not None else {}),
                 )
             if collection.get("status") == "generated":

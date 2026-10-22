@@ -56,7 +56,17 @@ def capture_generation(
             name: digest(episode / name) for name in ("task.json", "submission.json", "calls.jsonl")
         }
         entries.append({"directory": episode.name, "sha256": files})
-    manifest = {"task": task_id, "policy_version": version, "episodes": entries}
+    provenance = read_json(directory / entries[0]["directory"] / "submission.json")
+    identity = {
+        key: provenance[key]
+        for key in ("execution_run_id", "group_id", "attempt_id")
+        if key in provenance
+    }
+    for entry in entries:
+        record = read_json(directory / entry["directory"] / "submission.json")
+        if any(record.get(key) != value for key, value in identity.items()):
+            raise ValueError("Episode provenance differs within captured group")
+    manifest = {"task": task_id, "policy_version": version, **identity, "episodes": entries}
     if context_tokens != LEGACY_CONTEXT_TOKENS:
         manifest["context_tokens"] = context_tokens
     destination = directory / "generation-manifest.json"
@@ -97,8 +107,22 @@ def load_episodes(directory: Path, manifest: dict) -> list[dict]:
             or "error" in roots[-1]
         ):
             raise ValueError("Context exhaustion is not a matching terminal root outcome")
+        provenance_keys = (
+            "execution_run_id",
+            "group_id",
+            "attempt_id",
+            "episode_id",
+            "policy_version",
+            "root_turn_id",
+            "call_id",
+            "model_call_id",
+        )
         samples = [
-            exact_sample(call["response"], context_tokens)
+            exact_sample(
+                call["response"],
+                context_tokens,
+                {key: call[key] for key in provenance_keys if key in call},
+            )
             for call in roots
             if call.get("outcome") != "context_exhausted"
         ]
@@ -109,6 +133,11 @@ def load_episodes(directory: Path, manifest: dict) -> list[dict]:
                 "directory": episode,
                 "task": task,
                 "record": record,
+                **{
+                    key: record[key]
+                    for key in ("execution_run_id", "group_id", "attempt_id", "episode_id")
+                    if key in record
+                },
                 "samples": samples,
             }
         )
@@ -197,6 +226,12 @@ async def score_generated(
     rewards = [episode["reward"] for episode in episodes]
     admitted = not errors and max(rewards) > 0.1 and has_signal(rewards)
     record = {
+        "producer": "kernel_trl_scoring",
+        **{
+            key: manifest[key]
+            for key in ("execution_run_id", "group_id", "attempt_id")
+            if key in manifest
+        },
         "task": task_id,
         "policy_version": version,
         "rewards": rewards,
@@ -216,7 +251,17 @@ async def score_generated(
         group = training_rows(
             episodes, version, manifest.get("context_tokens", LEGACY_CONTEXT_TOKENS)
         )
-        group.update(task=task_id, generation_sha256=digest(manifest_path))
+        group.update(
+            producer="kernel_trl_scoring",
+            execution_run_id=manifest.get("execution_run_id"),
+            group_id=manifest.get("group_id"),
+            attempt_id=manifest.get("attempt_id"),
+            task=task_id,
+            generation_sha256=digest(manifest_path),
+        )
+        group["artifact_sha256"] = hashlib.sha256(
+            json.dumps(group, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
         write_json(directory / "training-group.json", group)
     return record
 

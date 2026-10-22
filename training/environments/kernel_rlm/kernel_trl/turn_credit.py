@@ -50,12 +50,30 @@ def training_rows(
                     "terminal_reward": rewards[trajectory],
                     "policy_version": policy_version,
                     "padding": False,
+                    "execution_run_id": episode.get("execution_run_id"),
+                    "group_id": episode.get("group_id"),
+                    "attempt_id": episode.get("attempt_id"),
+                    "episode_id": episode.get("episode_id"),
+                    "root_turn_id": sample.provenance.get("root_turn_id"),
+                    "call_id": sample.provenance.get("call_id"),
+                    "model_call_id": sample.provenance.get("model_call_id"),
+                    "completion_token_start": 0,
+                    "completion_token_end": len(sample.response_ids),
+                    "loss_mask": [1] * len(sample.response_ids),
+                    "effective_loss_mask": [1] * len(sample.response_ids),
                 }
             )
     tokens = sum(len(row["completion_ids"]) for row in rows)
     real_rows = len(rows)
     while len(rows) % len(episodes):
-        rows.append({**rows[0], "advantage": 0.0, "padding": True})
+        rows.append(
+            {
+                **rows[0],
+                "advantage": 0.0,
+                "effective_loss_mask": [0] * len(rows[0]["completion_ids"]),
+                "padding": True,
+            }
+        )
     return {
         "rows": rows,
         "real_rows": real_rows,
@@ -64,6 +82,11 @@ def training_rows(
         "advantages": advantages,
         "policy_version": policy_version,
         "context_tokens": context_tokens,
+        "producer": "kernel_trl_training_rows",
+        "execution_run_id": episodes[0].get("execution_run_id"),
+        "group_id": episodes[0].get("group_id"),
+        "attempt_id": episodes[0].get("attempt_id"),
+        "episode_ids": [episode.get("episode_id") for episode in episodes],
         "normalization": "sum root-token PPO losses / real root tokens; no turn-count reward normalization",
         "padding": "duplicates a real root row with exactly zero advantage and no auxiliary loss",
     }

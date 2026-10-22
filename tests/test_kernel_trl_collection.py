@@ -94,6 +94,9 @@ def collector(monkeypatch):
 def arguments(tmp_path):
     return SimpleNamespace(
         output_dir=tmp_path / "collection",
+        execution_run_id="run-test",
+        group_id="group-test",
+        attempt_id="attempt-0",
         endpoint="http://127.0.0.1:8006",
         checkpoint=tmp_path / "model",
         dataset=tmp_path / "dataset",
@@ -119,6 +122,7 @@ def test_eight_rollouts_use_four_slots_and_one_policy(collector, tmp_path):
     result = json.loads((args.output_dir / "training-group.json").read_text())
     assert len(result["rewards"]) == 8
     assert result["policy_version"] == 7
+    assert result["group_id"] == "group-test:task-a"
     assert observed["generator_kwargs"]["limits"]["model_timeout_s"] == 600
     assert observed["generator_kwargs"]["episode_timeout_s"] == 1500
     assert observed["inference_http_timeout"] == 630
@@ -295,6 +299,12 @@ def test_main_enables_shared_gpu_control_for_workers_and_final_scorer(
             str(tmp_path / "dataset"),
             "--output-dir",
             str(tmp_path / "output"),
+            "--execution-run-id",
+            "run-test",
+            "--group-id",
+            "group-test",
+            "--attempt-id",
+            "attempt-0",
         ],
     )
 

@@ -18,9 +18,13 @@ def test_commands_keep_measured_split_card_protocol():
         dataset=Path("tasks"),
         cuda_docs=Path("docs"),
         cuda_docs_sha256="hash",
+        run_id="campaign-123",
     )
-    command = module.collector_command(arguments, Path("out"), "task-a", 19)
+    command = module.collector_command(arguments, Path("out"), "task-a", 19, "group-a", "attempt-2")
     for name, value in (
+        ("--execution-run-id", "campaign-123"),
+        ("--group-id", "group-a"),
+        ("--attempt-id", "attempt-2"),
         ("--rollouts", "8"),
         ("--context-tokens", "16384"),
         ("--max-turns", "10"),
@@ -248,3 +252,29 @@ def test_migration_validates_complete_history_and_exact_source(migration, fault)
         assert migrated["completed_task_ids"] == order[:19]
         assert migrated["policy_version"] == 19
         assert migrated["task_order"] == order
+
+
+def test_coordinator_tracking_initializes_lineage_without_replaying_history():
+    calls = []
+    tracker = SimpleNamespace(
+        init=lambda **kwargs: calls.append(("init", kwargs)),
+        log=lambda *args, **kwargs: calls.append(("log", args)),
+    )
+    arguments = SimpleNamespace(
+        run_id="campaign",
+        source_commit="abc",
+        history_metrics=Path("history.jsonl"),
+        checkpoint_state=Path("parent-checkpoint"),
+    )
+    state = {
+        "continuation_parent": {"policy_version": 19, "run_id": "parent", "state_sha256": "sha"}
+    }
+
+    module.initialize_coordinator_tracking(tracker, arguments, state, "history-sha")
+
+    assert [kind for kind, *_ in calls] == ["init"]
+    config = calls[0][1]["config"]
+    assert config["run_kind"] == "coordinator"
+    assert config["execution_run_id"] == "campaign"
+    assert config["history_source_sha256"] == "history-sha"
+    assert config["parent_execution_run_id"] == "parent"
