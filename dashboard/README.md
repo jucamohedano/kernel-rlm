@@ -20,6 +20,23 @@ Open <http://127.0.0.1:7790>. The **Dark mode** toggle overrides your system the
 - Keep the server on localhost. Do not expose private evidence to a network.
 - Do not use your home directory or a checkpoint backup as the evidence root.
 
+## Start Trackio
+
+Trackio shows saved trainer metrics. It does not show the trajectory viewer. Existing histories are unchanged; new logging rules apply to future runs.
+
+Use a review copy. The Trackio viewer can write to its database. Set `TRACKIO_SOURCE` to the saved `laguna-kernel-rlm.db` file. For the final campaign, use `logs/trackio-final-local`, not the older `logs/trackio-viewer` snapshot.
+
+```bash
+export TRACKIO_SOURCE=/path/to/logs/trackio-final-local/laguna-kernel-rlm.db
+export TRACKIO_DIR="$(mktemp -d)"
+python3 -c 'import os, sqlite3; source = sqlite3.connect("file:" + os.environ["TRACKIO_SOURCE"] + "?mode=ro", uri=True); target = sqlite3.connect(os.environ["TRACKIO_DIR"] + "/laguna-kernel-rlm.db"); source.backup(target); target.close(); source.close()'
+uv run --no-project --python 3.12 --with trackio==0.40.0 python -c 'import trackio; trackio.show(project="laguna-kernel-rlm", host="127.0.0.1", server_port=7861, share=False, open_browser=False, block_thread=True)'
+```
+
+Open <http://127.0.0.1:7861/?project=laguna-kernel-rlm>. This command can download Trackio and Python if they are not cached. It does not start training or publish metrics. Do not log training into the review copy.
+
+Use separate terminals for the two dashboards. Press **Ctrl+C** in each terminal to stop its server. Use a different port if one is already in use.
+
 ## Read the results
 
 - A completed trajectory has a submitted candidate. It has not necessarily passed verification.
