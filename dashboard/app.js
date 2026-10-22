@@ -130,10 +130,10 @@ function rows(parent, records, target) {
 function experimentNav(experiments, selected, {view = "experiments", onSelect} = {}) {
   document.body.classList.add("has-collection");
   collection.hidden = false;
-  collection.replaceChildren(el("div", "collection-heading", "L1 post-training"));
-  collection.append(el("p", "collection-context", "One campaign · training and supporting work"));
+  collection.replaceChildren(el("div", "collection-heading", "L1 simple kernels · Stage 1"));
+  collection.append(el("p", "collection-context", "Training, fixes and supporting work"));
   const search = el("input", "collection-search");
-  search.type = "search"; search.placeholder = "Search records…"; search.setAttribute("aria-label", "Search campaign records");
+  search.type = "search"; search.placeholder = "Search records…"; search.setAttribute("aria-label", "Search stage records");
   const filter = el("select", "collection-filter");
   filter.setAttribute("aria-label", "Filter record category");
   const categories = [...new Set(experiments.map(ex => ex.category).filter(Boolean))];
@@ -184,10 +184,10 @@ async function experimentsPage(id, signal, ticket) {
   if (!selected) { notice("Experiment not found."); return; }
   heading.textContent = selected.title;
   const actions = el("div", "detail-actions");
-  actions.append(categoryTag(selected.category), el("span", "muted", `${selected.campaign || "Campaign"} · saved status: ${statusLabel(selected.status)}`));
+  actions.append(categoryTag(selected.category), el("span", "muted", `Stage 1 · saved status: ${statusLabel(selected.status)}`));
   content.append(actions);
   const context = el("div", "campaign-context");
-  context.append(el("p", "", "The project began with Modal trials and moved to CloudRift after the compute grant. These records cover training, setup checks, applied fixes and pilot branches—not independent proof of improvement."), link("Read the campaign history →", "#writing/first-campaign"));
+  context.append(el("p", "", "The project began with Modal trials and moved to CloudRift after the compute grant. These records cover training, setup checks, applied fixes and pilot branches—not independent proof of improvement."), link("Read the stage history →", "#writing/first-campaign"));
   content.append(context);
   if (selected.scope_note) content.append(el("p", "scope-note", selected.scope_note));
   content.append(panel("Intent", selected.intent), panel("Conclusion", selected.conclusion));
@@ -252,7 +252,7 @@ async function trajectoriesPage(signal,ticket) {
 }
 async function lineagePage(focus,signal,ticket) {
   const data=await api("experiments",signal);if(ticket!==renderId)return;
-  heading.textContent="L1 campaign lineage";
+  heading.textContent="L1 simple kernels · Stage 1 lineage";
   content.append(el("p","scope-note","Recorded research follow-ups—not checkpoint inheritance. The Modal and native TRL trainer lineages are separate; pilot branches are not cumulative training progress."));
   const byId=new Map(data.experiments.map(ex=>[ex.id,ex]));
   if (!byId.has(focus)) focus = data.experiments[0]?.id;
@@ -324,16 +324,60 @@ function eventTitle(event,index) {
   const names=(event.tool_calls||[]).map(call=>(call.function||call).name||"tool");
   return names.length?names.join(" · "):role==="assistant"?"Assistant response":`Event ${index+1}`;
 }
+function readableChildText(value) {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return null;
+  const message = value.choices?.[0]?.message || value.message;
+  if (message) return readableChildText(message.content);
+  if (typeof value.content === "string") return value.content;
+  if (Array.isArray(value)) return value.filter(part=>part?.type === "text").map(part=>part.text).join("\n") || null;
+  return null;
+}
+function renderChildCalls(records,parent) {
+  parent.append(el("p","muted","Recorded child calls. Their placement here does not establish which root turn invoked them."));
+  for (const [i,child] of records.entries()) {
+    const section=el("section","child-summary");
+    const choices=child.response?.choices || [];
+    section.append(el("h3","",`Child ${i+1}`));
+    const summary=el("p","muted");
+    summary.textContent=[child.status,choices[0]?.finish_reason,typeof child.elapsed_seconds==="number"?`${child.elapsed_seconds.toFixed(1)} seconds`:null].filter(Boolean).join(" · ");section.append(summary);
+    const assignment=readableChildText(child.prompt||child.assignment||child.input) || (child.request?.messages||[]).filter(m=>m.role==="user").map(m=>readableChildText(m.content)).filter(Boolean).join("\n\n");
+    const response=readableChildText(child.response||child.output);
+    const assignmentPanel=panel("Assignment");
+    assignmentPanel.append(el("div","child-assignment-text",assignment||"Assignment text not recorded"));
+    section.append(assignmentPanel,panel("Response",response||"Response text not recorded"));
+    if(child.error)section.append(panel("Error",readableChildText(child.error)||"See raw events for structured error details."));
+    parent.append(section);
+  }
+}
+function renderTurnTimeline(events,parent) {
+  const groups=[];let current=null;
+  for(const event of events) {
+    if(event.source==="kernel_child_progress"||event.source==="kernel_subcalls")continue;
+    if(event.role==="assistant") {current={assistant:event,observations:[]};groups.push(current);}
+    else if(current)current.observations.push(event);
+    else {const context=el("details","timeline-context");context.append(el("summary","",event.role==="system"?"System instructions":"Initial request"));renderEvents([event],context,{expanded:true});parent.append(context);}
+  }
+  for(const [index,group] of groups.entries()) {
+    const turn=el("section","turn-group");turn.append(el("h3","turn-heading",`Turn ${index+1}`));
+    const body=el("div","turn-body");renderEvents([group.assistant],body,{expanded:true});turn.append(body);
+    if(group.observations.length){const observations=el("details","turn-observations");observations.append(el("summary","",`Observations · ${group.observations.length}`));renderEvents(group.observations,observations,{expanded:true});turn.append(observations);}
+    parent.append(turn);
+  }
+  const children=events.filter(event=>event.source==="kernel_subcalls");
+  if(children.length){const section=el("details","timeline-context");section.append(el("summary","","Child assignments and responses"));for(const event of children)renderChildCalls(event.records||[],section);parent.append(section);}
+}
+
 function renderEvents(events,parent,{expanded=false}={}) {
   for(const [position,event] of events.entries()) {
     const role=event.role||"child";
     const node=el("article","event trace-event role-"+role);
-    const title=el("div","event-head");title.append(el("span","event-label",`#${(event.index??position)+1} · ${eventTitle(event,position)}`));
+    const title=el("div","event-head");title.append(el("span","event-label",`${event.index == null ? "" : "#"+(event.index+1)+" · "}${eventTitle(event,position)}`));
     if(event.usage)title.append(el("span","muted",`in ${event.usage.prompt_tokens??"—"} · out ${event.usage.completion_tokens??"—"}`));node.append(title);
-    if(event.source==="kernel_child_progress")raw(node,event.records,"Recorded child progress");
-    else if(Array.isArray(event.records))for(const [i,child] of event.records.entries()) {
-      const childBlock=el("details","tool-call");childBlock.open=expanded;childBlock.append(el("summary","",`Child ${i+1} · ${statusLabel(child.status)}`),panel("Assignment",child.prompt||child.assignment||child.input),panel("Response",child.response||child.output));raw(childBlock,child);node.append(childBlock);
-    }
+    if(event.source==="kernel_child_progress") {
+      const latest=new Map();for(const record of event.records||[])latest.set(record.call_id,record);
+      for(const record of latest.values())node.append(el("p","muted",`${statusLabel(record.stage)} · ${record.completion_tokens ?? "—"} generated tokens · ${typeof record.elapsed_seconds === "number" ? record.elapsed_seconds.toFixed(1)+" seconds" : "Duration unavailable"}`));
+    } else if(Array.isArray(event.records))renderChildCalls(event.records,node);
     if(event.reasoning){const reason=el("details","reasoning");reason.append(el("summary","","Reasoning"),markdown(text(event.reasoning)));node.append(reason);}
     if(event.content) {
       const message=el("details","event-content");message.open=expanded||role==="assistant";
@@ -347,26 +391,25 @@ function renderEvents(events,parent,{expanded=false}={}) {
       const tool=el("details","tool-call");tool.open=expanded;
       tool.append(el("summary","",`${fn.name||"Tool"} · ${code.split("\n")[0].slice(0,100)}`),codeBlock(code,typeof args?.code==="string"?"Python / REPL":"Arguments"));node.append(tool);
     }
-    raw(node,event,"Raw event");parent.append(node);
+    parent.append(node);
   }
 }
 function renderStepBrowser(events,parent) {
   const toolbar=el("div","trace-toolbar"),stepsButton=el("button","active","Steps"),timelineButton=el("button","","Timeline");
-  const filter=el("input","search");filter.type="search";filter.placeholder="Filter steps…";filter.setAttribute("aria-label","Filter trajectory steps");
-  toolbar.append(filter,stepsButton,timelineButton);parent.append(toolbar);
+  toolbar.append(stepsButton,timelineButton);parent.append(toolbar);
   const body=el("div","step-browser");parent.append(body);let mode="steps",selected=0;
   const update=()=>{
-    const matches=events.map((event,index)=>({event,index})).filter(({event,index})=>[eventTitle(event,index),event.role,event.content,event.reasoning,JSON.stringify(event.tool_calls)].join(" ").toLowerCase().includes(filter.value.toLowerCase()));
+    const matches=events.map((event,index)=>({event,index}));
     body.replaceChildren();body.className=mode==="steps"?"step-browser":"timeline-list";
     stepsButton.classList.toggle("active",mode==="steps");timelineButton.classList.toggle("active",mode==="timeline");
     if(!matches.length){body.append(el("p","muted","No matching steps."));return;}
-    if(mode==="timeline"){renderEvents(matches.map(item=>item.event),body);return;}
+    if(mode==="timeline"){renderTurnTimeline(events,body);return;}
     if(!matches.some(item=>item.index===selected))selected=matches[0].index;
     const list=el("div","step-index"),detail=el("div","step-detail");list.setAttribute("aria-label","Trajectory steps");
     for(const {event,index} of matches){const button=el("button","step-item"+(selected===index?" selected":""),`${index+1}  ${eventTitle(event,index)}`);button.setAttribute("aria-pressed",String(selected===index));button.addEventListener("click",()=>{const offset=list.scrollTop;selected=index;update();body.querySelector(".step-index").scrollTop=offset;});list.append(button);}
     renderEvents([events[selected]],detail,{expanded:true});body.append(list,detail);
   };
-  stepsButton.addEventListener("click",()=>{mode="steps";update();});timelineButton.addEventListener("click",()=>{mode="timeline";update();});filter.addEventListener("input",update);update();
+  stepsButton.addEventListener("click",()=>{mode="steps";update();});timelineButton.addEventListener("click",()=>{mode="timeline";update();});update();
 }
 function pair(parent, label, value) {
   const row = el("div", "metric-pair"); row.append(el("span", "", label), el("strong", "", text(value))); parent.append(row);
@@ -442,22 +485,25 @@ async function writingPage(id,signal,ticket) {
   const index=await api("writing",signal);if(ticket!==renderId)return;
   document.body.classList.add("has-collection");collection.hidden=false;
   collection.replaceChildren(el("div","collection-heading","Writing"));
-  const tree=el("div","file-tree");tree.append(el("div","muted","docs / research /"));
-  for(const doc of index.documents){const a=link(doc.path?.split("/").pop()||doc.title,"#writing/"+encodeURIComponent(doc.id),"writing-link"+(id===doc.id?" selected":""));tree.append(a);}
-  collection.append(tree);
   const selected=id||index.documents[0]?.id;if(!selected)return;
+  const tree=el("div","file-tree");tree.append(el("div","muted","docs / research /"));
+  for(const doc of index.documents){const a=link(doc.path?.split("/").pop()||doc.title,"#writing/"+encodeURIComponent(doc.id),"writing-link"+(selected===doc.id?" selected":""));tree.append(a);}
+  collection.append(tree);
   const doc=await api("writing/"+encodeURIComponent(selected),signal);if(ticket!==renderId)return;
-  heading.textContent=doc.path||doc.title;
+  heading.textContent=doc.markdown.match(/^#\s+(.+)$/m)?.[1] || doc.title;
+  content.append(el("p","writing-path",doc.path));
   const toolbar=el("div","writing-toolbar");
   const previewButton=el("button","active","Preview"),sourceButton=el("button","","Source / Edit"),save=el("button","","Save file"),revert=el("button","","Discard edits"),status=el("span","muted","Saved local file");
-  const preview=el("article","writing-preview");preview.append(markdown(doc.markdown));
+  const preview=el("article","writing-preview");
+  const previewMarkdown=value=>markdown(value.replace(/^#\s+[^\n]+\n?/, ""));
+  preview.append(previewMarkdown(doc.markdown));
   const editor=el("textarea","writing-source");editor.value=doc.markdown;editor.spellcheck=false;editor.setAttribute("aria-label","Markdown source");editor.hidden=true;
   writingDraft={editor,original:doc.markdown,hash:location.hash};
   const update=()=>{const dirty=editor.value!==writingDraft.original;save.disabled=!dirty;revert.disabled=!dirty;status.textContent=dirty?"Unsaved changes":"Saved local file";};
-  previewButton.addEventListener("click",()=>{preview.replaceChildren(markdown(editor.value));preview.hidden=false;editor.hidden=true;previewButton.classList.add("active");sourceButton.classList.remove("active");});
+  previewButton.addEventListener("click",()=>{preview.replaceChildren(previewMarkdown(editor.value));preview.hidden=false;editor.hidden=true;previewButton.classList.add("active");sourceButton.classList.remove("active");});
   sourceButton.addEventListener("click",()=>{preview.hidden=true;editor.hidden=false;sourceButton.classList.add("active");previewButton.classList.remove("active");});
   editor.addEventListener("input",update);
-  revert.addEventListener("click",()=>{if(confirm("Discard unsaved edits to this file?")){editor.value=writingDraft.original;preview.replaceChildren(markdown(editor.value));update();}});
+  revert.addEventListener("click",()=>{if(confirm("Discard unsaved edits to this file?")){editor.value=writingDraft.original;preview.replaceChildren(previewMarkdown(editor.value));update();}});
   save.addEventListener("click",async()=>{
     save.disabled=true;status.textContent="Saving…";
     const submitted=editor.value;
@@ -491,7 +537,7 @@ async function render() {
     else if(view==="writing") await writingPage(parts[0],signal,ticket);
     else {
       const d=await api("home",signal);if(ticket!==renderId)return;
-      const summary=panel("First L1 campaign");pair(summary,"Status",statusLabel(d.campaign.status));pair(summary,"Trained",d.campaign.trained);pair(summary,"Deferred",d.campaign.deferred);content.append(summary);
+      const summary=panel("L1 simple kernels · Stage 1");pair(summary,"Status",statusLabel(d.campaign.status));pair(summary,"Trained",d.campaign.trained);pair(summary,"Deferred",d.campaign.deferred);content.append(summary);
       content.append(el("h2","section-title","Research workspace"),el("p","muted","Explore experiments, inspect the evidence, and develop your own research direction."));
       for(const ex of d.experiments.slice(0,3))content.append(link(ex.title,"#experiments/"+ex.id,"writing-link"));
     }
