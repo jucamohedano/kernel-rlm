@@ -174,7 +174,13 @@ def test_import_recurses_full_run_groups_and_hashes_rlm_sources(tmp_path, monkey
     )
     groups = [
         {"task": "task-first", "rewards": [0.1, 0.8], "admitted": True},
-        {"task": "task-next", "rewards": [0.1, 0.9], "admitted": True},
+        {
+            "task": "task-next",
+            "rewards": [0.1, 0.9],
+            "admitted": True,
+            "group_id": "g-next",
+            "episodes": [{"episode_id": "e-next", "attempt_id": "a1"}],
+        },
     ]
     report = {
         "run_id": "20261019T000001Z-curriculum",
@@ -202,7 +208,8 @@ def test_import_recurses_full_run_groups_and_hashes_rlm_sources(tmp_path, monkey
     )
     attempt = source / "groups/step-002-task-next/collection/rollouts/group-0-trajectory-0"
     attempt.mkdir(parents=True)
-    (attempt / "task.json").write_text(json.dumps({"name": "task-next"}))
+    identity = {"group_id": "g-next", "episode_id": "e-next", "attempt_id": "a1"}
+    (attempt / "task.json").write_text(json.dumps({"name": "task-next", **identity}))
     (attempt / "submission.json").write_text(
         json.dumps(
             {
@@ -212,11 +219,12 @@ def test_import_recurses_full_run_groups_and_hashes_rlm_sources(tmp_path, monkey
                 ],
                 "submission": "kernel source",
                 "termination_reason": "submitted",
+                **identity,
             }
         )
     )
     (attempt / "score.json").write_text(
-        json.dumps({"reward": 0.9, "verification": {"correct": True}})
+        json.dumps({"reward": 0.9, "verification": {"correct": True}, **identity})
     )
     call = {
         "branch": "root",
@@ -272,7 +280,13 @@ def test_import_multigroup_training_metrics_feedback_and_nested_telemetry(tmp_pa
     source.mkdir()
     groups = [
         {"task": "task-first", "rewards": [0.2, 0.8], "admitted": True},
-        {"task": "task-next", "rewards": [0.1, 0.9], "admitted": True},
+        {
+            "task": "task-next",
+            "rewards": [0.1, 0.9],
+            "admitted": True,
+            "group_id": "g-next",
+            "episodes": [{"episode_id": "e-next", "attempt_id": "a1"}],
+        },
     ]
     (source / "report.json").write_text(
         json.dumps(
@@ -328,7 +342,8 @@ def test_import_multigroup_training_metrics_feedback_and_nested_telemetry(tmp_pa
     )
     group = source / "groups/step-002-task-next/collection/rollouts/group-0-trajectory-0"
     group.mkdir(parents=True)
-    (group / "task.json").write_text(json.dumps({"name": "task-next"}))
+    identity = {"group_id": "g-next", "episode_id": "e-next", "attempt_id": "a1"}
+    (group / "task.json").write_text(json.dumps({"name": "task-next", **identity}))
     (group / "submission.json").write_text(
         json.dumps(
             {
@@ -338,11 +353,12 @@ def test_import_multigroup_training_metrics_feedback_and_nested_telemetry(tmp_pa
                 ],
                 "submission": "kernel source",
                 "termination_reason": "submitted",
+                **identity,
             }
         )
     )
     (group / "score.json").write_text(
-        json.dumps({"reward": 0.9, "verification": {"correct": True}})
+        json.dumps({"reward": 0.9, "verification": {"correct": True}, **identity})
     )
     call = {
         "branch": "root",

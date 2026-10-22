@@ -3,6 +3,7 @@
 import asyncio
 import os
 import time
+import uuid
 
 from kernel_rlm.actions import submission_turn
 from kernel_rlm.thinking import visible_response
@@ -169,8 +170,19 @@ class BoundedSubcalls:
             raise ValueError(
                 f"Subcall prompt exceeds the {self.prompt_tokens:,}-token limit; shorten it"
             )
+        dispatch_context = dict(state or {})
         self.calls_used += 1
-        entry = {"prompt": prompt, "model": self.model, "status": "running"}
+        child_call_id = uuid.uuid4().hex
+        entry = {
+            "prompt": prompt,
+            "model": self.model,
+            "status": "running",
+            "call_id": child_call_id,
+            "parent_turn_id": dispatch_context.get("parent_turn_id"),
+            "parent_tool_call_id": dispatch_context.get("parent_tool_call_id"),
+            "parent_tool_call_id_generated": dispatch_context.get("parent_tool_call_id_generated"),
+            "parent_action_id": dispatch_context.get("parent_action_id"),
+        }
         entry["call_index"] = self.calls_used
         self.records.append(entry)
         started = time.monotonic()
@@ -190,6 +202,22 @@ class BoundedSubcalls:
                         ],
                         "max_tokens": SUBCALL_REPLY_TOKENS,
                     }
+                    request_args["extra_headers"] = {
+                        "X-Kernel-Call-Id": child_call_id,
+                        "X-Kernel-Parent-Turn-Id": dispatch_context.get("parent_turn_id", ""),
+                        "X-Kernel-Parent-Tool-Call-Id": dispatch_context.get(
+                            "parent_tool_call_id", ""
+                        ),
+                        "X-Kernel-Parent-Tool-Call-Id-Generated": str(
+                            bool(dispatch_context.get("parent_tool_call_id_generated"))
+                        ).lower(),
+                        "X-Kernel-Parent-Action-Id": dispatch_context.get("parent_action_id", ""),
+                    }
+                    entry.update(
+                        call_id=child_call_id,
+                        parent_turn_id=dispatch_context.get("parent_turn_id"),
+                        parent_tool_call_id=dispatch_context.get("parent_tool_call_id"),
+                    )
                     if self.enable_thinking:
                         request_args["extra_body"] = {
                             "chat_template_kwargs": {"enable_thinking": True}

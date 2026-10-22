@@ -254,3 +254,40 @@ def test_successful_scores_survive_interrupted_retry(saved):
     repaired = AsyncMock(return_value=(0.85, {"verification_status": "completed"}))
     assert asyncio.run(module.score_generated(directory, 1, "task-a", repaired))["admitted"]
     assert repaired.await_count == 1
+
+
+def test_capture_load_score_training_preserves_provenance(saved):
+    module, directory, _task = saved
+    identity = {
+        "execution_run_id": "exec-9",
+        "group_id": "step-3:task-a",
+        "attempt_id": "attempt-2",
+    }
+    for index in range(4):
+        episode = directory / f"group-0-trajectory-{index}"
+        submission = json.loads((episode / "submission.json").read_text())
+        submission.update(**identity, episode_id=f"episode-{index}")
+        (episode / "submission.json").write_text(json.dumps(submission))
+        calls = [json.loads(line) for line in (episode / "calls.jsonl").read_text().splitlines()]
+        calls[0].update(
+            **identity,
+            episode_id=f"episode-{index}",
+            root_turn_id=f"turn-{index}",
+            call_id=f"call-{index}",
+            model_call_id=f"call-{index}",
+        )
+        (episode / "calls.jsonl").write_text("\n".join(json.dumps(call) for call in calls))
+    (directory / "generation-manifest.json").unlink()
+    manifest = module.capture_generation(directory, "task-a", 1, 4)
+    assert manifest["execution_run_id"] == "exec-9"
+    loaded = module.load_episodes(directory, manifest)
+    assert loaded[0]["samples"][0].provenance["call_id"] == "call-0"
+    scorer = AsyncMock(return_value=(0.85, {"verification_status": "completed", "correct": True}))
+    assert asyncio.run(module.score_generated(directory, 1, "task-a", scorer))["admitted"]
+    group = json.loads((directory / "training-group.json").read_text())
+    assert group["execution_run_id"] == "exec-9"
+    assert group["group_id"] == "step-3:task-a"
+    assert group["rows"][0]["root_turn_id"] == "turn-0"
+    assert group["rows"][0]["call_id"] == "call-0"
+    assert group["artifact_sha256"]
+    assert group["rows"][0]["episode_id"] == "episode-0"

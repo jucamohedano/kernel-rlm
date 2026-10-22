@@ -84,6 +84,13 @@ h1 { margin: 6px 0 0; font-size: 26px; letter-spacing: -.6px; }
 @media (max-width: 700px) { .rail { position: static; width: auto; padding: 12px; }.brand { margin: 0 4px 10px; }nav { display: flex; overflow-x: auto; margin: 0; }.nav-label, .rail-foot { display: none; }.collection { position: static; width: auto; max-height: 240px; border-right: 0; border-bottom: 1px solid var(--line); padding: 14px; }main, body:not(:has(.experiment-list)) main { width: auto; margin: 0; padding: 20px 15px 40px; }.experiment-summary { grid-template-columns: 1fr; }.run-list-row { grid-template-columns: minmax(0, 1fr) auto; }.run-list-row .status-pill { grid-column: 2; }.linked-run { grid-template-columns: minmax(0, 1fr) auto; }.local { display: none; } }
 
 [hidden] { display: none !important; }
+.token-panel { margin: 10px 0; }
+.token-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.token-stat { display: grid; gap: 3px; padding: 9px 11px; border-radius: 8px; background: #f7f8f5; }
+.token-stat strong { font: 600 16px var(--font-mono); }
+.token-stat small { font-size: 10px; }
+@media (max-width: 700px) { .token-grid { grid-template-columns: 1fr; } }
+
 #content > .panel { margin-bottom: 16px; }
 .detail-actions { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
 .section-title { margin: 24px 0 14px; font-size: 18px; }

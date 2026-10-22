@@ -21,6 +21,40 @@ def read_json(path: Path):
     return json.loads(path.read_text()) if path.exists() else {}
 
 
+def compact_call_record(row: dict) -> dict:
+    fields = {
+        "branch",
+        "execution_run_id",
+        "group_id",
+        "attempt_id",
+        "episode_id",
+        "policy_version",
+        "root_turn_id",
+        "call_id",
+        "model_call_id",
+        "parent_turn_id",
+        "parent_tool_call_id",
+        "producer",
+        "policy_ref",
+        "policy_revision",
+        "usage",
+        "elapsed_seconds",
+        "started_at",
+        "completed_at",
+        "status",
+        "error",
+        "error_type",
+        "failure",
+        "request_id",
+        "model",
+        "provider",
+        "finish_reason",
+        "message_index",
+        "assistant_message_index",
+    }
+    return {key: value for key, value in row.items() if key in fields}
+
+
 def episode_trace(directory: Path, run_id: str, trace_id: str | None = None) -> dict:
     record = read_json(directory / "submission.json")
     score = read_json(directory / "score.json")
@@ -31,29 +65,82 @@ def episode_trace(directory: Path, run_id: str, trace_id: str | None = None) -> 
         else []
     )
     roots = [row for row in rows if row.get("branch") == "root" and "response" in row]
-    nodes = []
+    failed_roots = [row for row in rows if row.get("branch") == "root" and "response" not in row]
+    call_fields = (
+        "execution_run_id",
+        "root_turn_id",
+        "call_id",
+        "model_call_id",
+        "producer",
+        "group_id",
+        "episode_id",
+        "attempt_id",
+        "policy_version",
+        "optimizer_step",
+        "parent_turn_id",
+        "parent_tool_call_id",
+        "policy_ref",
+        "policy_revision",
+        "usage",
+        "elapsed_seconds",
+        "started_at",
+        "completed_at",
+        "status",
+        "error",
+        "error_type",
+        "failure",
+        "request_id",
+    )
     calls = []
+    nodes = []
     root_index = 0
     messages = record.get("messages", [])
-    for message in messages:
+    explicit_mapping = any(
+        "message_index" in root or "assistant_message_index" in root for root in roots
+    )
+    roots_by_message = {
+        root.get("assistant_message_index", root.get("message_index")): root
+        for root in roots
+        if root.get("assistant_message_index", root.get("message_index")) is not None
+    }
+    for message_index, message in enumerate(messages):
         original = message
-        if message.get("role") == "assistant" and root_index < len(roots):
-            root = roots[root_index]
-            choice = root["response"]["choices"][0]
+        matched_root = None
+        call_node = None
+        if message.get("role") == "assistant":
+            if explicit_mapping:
+                matched_root = roots_by_message.get(message_index)
+            elif root_index < len(roots):
+                matched_root = roots[root_index]
+        if matched_root is not None:
+            choice = matched_root["response"]["choices"][0]
             original = dict(choice["message"])
             original["reasoning_content"] = original.get(
                 "reasoning_content", original.get("reasoning", "")
             )
+            call_node = len(nodes)
             calls.append(
                 {
-                    "node": len(nodes),
+                    **{key: matched_root[key] for key in call_fields if key in matched_root},
+                    "node": call_node,
+                    "status": matched_root.get("status", "completed"),
                     "finish_reason": choice.get("finish_reason"),
-                    "usage": root["response"].get("usage", {}),
-                    "elapsed_seconds": root["elapsed_seconds"],
+                    "usage": matched_root.get("usage", matched_root["response"].get("usage", {})),
                 }
             )
             root_index += 1
-        nodes.append({"message": original, "parent": len(nodes) - 1 if nodes else None})
+        node = {"message": original, "parent": len(nodes) - 1 if nodes else None}
+        if matched_root is not None:
+            node.update({key: matched_root[key] for key in call_fields if key in matched_root})
+        nodes.append(node)
+    calls.extend(
+        {
+            **{key: root[key] for key in call_fields if key in root},
+            "node": None,
+            "status": root.get("status", "failed"),
+        }
+        for root in failed_roots
+    )
     children = [row for row in rows if row.get("branch") == "child"]
     for child in children:
         for message in child.get("request", {}).get("messages", [])[:1]:
@@ -62,18 +149,42 @@ def episode_trace(directory: Path, run_id: str, trace_id: str | None = None) -> 
     feedback = []
     for path in sorted(directory.glob("feedback-*.jsonl")):
         feedback.extend(json.loads(line) for line in path.read_text().splitlines() if line.strip())
+    episode_fields = {
+        "execution_run_id",
+        "group_id",
+        "episode_id",
+        "attempt_id",
+        "optimizer_step",
+        "policy_version",
+        "producer",
+        "policy_ref",
+        "policy_revision",
+    }
+    provenance = {
+        key: value
+        for source in (record, task, score)
+        for key, value in source.items()
+        if key in episode_fields
+    }
+    for key in ("execution_run_id", "group_id", "episode_id", "attempt_id"):
+        values = {row[key] for row in rows if key in row}
+        if key not in provenance and len(values) == 1:
+            provenance[key] = values.pop()
     return {
         "id": run_id + ":" + (trace_id or directory.name),
+        **provenance,
         "task": {"data": {"name": task.get("name", directory.name)}},
         "nodes": nodes,
         "calls": calls,
         "rewards": {"kernel_reward": {"score": score.get("reward")}},
         "info": {
+            **provenance,
             "kernel_reward": score.get("reward"),
             "kernel_submission": record.get("submission", ""),
             "kernel_termination": record.get("termination_reason", "unknown"),
             "kernel_verify": score.get("verification", {}),
             "kernel_model_calls": calls,
+            "kernel_raw_call_records": [compact_call_record(row) for row in rows],
             "kernel_subcalls": children,
             "kernel_child_progress": [
                 json.loads(line)
@@ -90,6 +201,80 @@ def episode_trace(directory: Path, run_id: str, trace_id: str | None = None) -> 
             "transport_failure": read_json(directory / "failure.json"),
         },
     }
+
+
+def trace_identity(record: dict) -> tuple:
+    info = record.get("info", {})
+    return tuple(record.get(key, info.get(key)) for key in ("group_id", "episode_id", "attempt_id"))
+
+
+def admitted_identities(groups: list) -> set[tuple]:
+    identities = set()
+    for group in groups:
+        if not isinstance(group, dict) or not group.get("admitted"):
+            continue
+        group_id = group.get("group_id")
+        episode_rows = group.get("episodes", [])
+        if isinstance(episode_rows, list):
+            for episode in episode_rows:
+                if not isinstance(episode, dict):
+                    continue
+                episode_id = episode.get("episode_id")
+                attempt_id = episode.get("attempt_id", group.get("attempt_id"))
+                if group_id is not None and episode_id is not None and attempt_id is not None:
+                    identities.add((group_id, episode_id, attempt_id))
+        episode_ids = group.get("episode_ids", [])
+        attempts = group.get("attempt_ids", [])
+        if isinstance(episode_ids, list) and isinstance(attempts, list):
+            for episode_id, attempt_id in zip(episode_ids, attempts, strict=False):
+                if group_id is not None and episode_id is not None and attempt_id is not None:
+                    identities.add((group_id, episode_id, attempt_id))
+        identity = (group_id, group.get("episode_id"), group.get("attempt_id"))
+        if all(value is not None for value in identity):
+            identities.add(identity)
+    return identities
+
+
+def source_trace_directory(value: str | Path) -> tuple[str, ...] | None:
+    raw_parts = str(value).replace("\\", "/").split("/")
+    parts = tuple(part for part in raw_parts if part not in {"", "."})
+    if ".." in parts:
+        return None
+    group_indexes = [index for index, part in enumerate(parts) if part == "groups"]
+    candidates = [parts[index:] for index in group_indexes]
+    matches = [
+        candidate
+        for candidate in candidates
+        if len(candidate) >= 4 and candidate[-2:] == ("collection", "rollouts")
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def admitted_trace_directories(results: list) -> set[tuple[str, ...]]:
+    return {
+        relative
+        for result in results
+        if isinstance(result, dict) and result.get("status") == "trained"
+        if isinstance((path := result.get("trace_directory")), str)
+        if (relative := source_trace_directory(path)) is not None
+    }
+
+
+def trace_matches_directory(trace_id: str, directories: set[tuple[str, ...]]) -> bool:
+    raw_parts = str(trace_id).replace("\\", "/").split("/")
+    parts = tuple(part for part in raw_parts if part not in {"", "."})
+    if ".." in parts:
+        return False
+    group_indexes = [index for index, part in enumerate(parts) if part == "groups"]
+    candidates = [parts[index:] for index in group_indexes]
+    return any(
+        candidate[: len(directory)] == directory
+        and len(candidate) > len(directory)
+        and candidate[len(directory)].startswith("group-")
+        and "trajectory-" in candidate[len(directory)]
+        for candidate in candidates
+        for directory in directories
+    )
 
 
 def import_run(source: Path, destination: Path, source_commit: str | None = None):
@@ -117,15 +302,7 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
             }
             for result in report["results"]
         ]
-    report.update(
-        title=report.get("title", "TRL L1 · exact-turn GRPO · TP2 inference"),
-        model_id="poolside/Laguna-XS.2",
-        model_revision="a397bde04501591d0ac3d74a5d9d0a4ec298ffb8",
-        gpu_topology=report.get(
-            "gpu_topology", "Two shared L40S; vLLM and TRL run in separate phases"
-        ),
-        groups=groups,
-    )
+    report.update(groups=groups)
     if isinstance(report["groups"], dict):
         report["groups"] = []
     write_json(destination / "report.json", report)
@@ -141,12 +318,17 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
         for directory in episodes
     ]
     (destination / "traces.jsonl").write_text(json.dumps({"traces": traces}) + "\n")
-    admitted_tasks = {group.get("task") for group in report["groups"] if group.get("admitted")}
-    effective_traces = [
-        trace
-        for trace in traces
-        if trace.get("task", {}).get("data", {}).get("name") in admitted_tasks
-    ]
+    admitted = admitted_identities(report["groups"])
+    admitted_directories = admitted_trace_directories(report.get("results", []))
+    effective_traces = []
+    for trace in traces:
+        identity = trace_identity(trace)
+        if any(value is not None for value in identity):
+            if all(value is not None for value in identity) and identity in admitted:
+                effective_traces.append(trace)
+            continue
+        if trace_matches_directory(trace["id"].split(":", 1)[-1], admitted_directories):
+            effective_traces.append(trace)
     if effective_traces:
         effective = destination / "effective"
         effective.mkdir()
@@ -154,23 +336,40 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
     metrics_by_step = {}
     for result in report.get("results", []):
         step = result.get("optimizer_step")
-        values = result.get("metrics", {})
-        if not values and result.get("update_reports"):
-            values = result["update_reports"][0].get("metrics", {})
+        values = dict(result.get("metrics", {}))
+        provenance_keys = {
+            "execution_run_id",
+            "producer",
+            "group_id",
+            "attempt_id",
+            "policy_version",
+            "trackio_run_id",
+            "trackio_run_name",
+            "trackio_space_id",
+            "trackio_project",
+            "trackio_url",
+            "trackio_step",
+            "trackio_config",
+            "trackio_metadata",
+        }
+        provenance = {key: value for key, value in result.items() if key in provenance_keys}
+        for update_report in result.get("update_reports", []):
+            values.update(update_report.get("metrics", {}))
+            provenance.update(
+                {key: value for key, value in update_report.items() if key in provenance_keys}
+            )
         if step is not None and isinstance(values.get("train_loss"), int | float):
             metrics_by_step[step] = {
-                "producer": "trainer",
+                **provenance,
+                "producer": result.get("producer", "trainer"),
                 "step": step,
+                "optimizer_step": result.get("optimizer_step", step),
                 "loss/mean": float(values["train_loss"]),
                 "source": "native TRL report",
                 **{
-                    key: float(values[key])
-                    for key in (
-                        "train_runtime",
-                        "train_steps_per_second",
-                        "train_samples_per_second",
-                    )
-                    if isinstance(values.get(key), int | float)
+                    key: float(value)
+                    for key, value in values.items()
+                    if isinstance(value, int | float) and not isinstance(value, bool)
                 },
             }
     for log_path in sorted(source.rglob("*.log")):
@@ -210,14 +409,6 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
             )
             entry.setdefault("source", "native TRL report with trainer log metrics")
     metrics = [metrics_by_step[step] for step in sorted(metrics_by_step)]
-    if report.get("passed") and not metrics:
-        metrics.append(
-            {
-                "producer": "trainer",
-                "step": report.get("optimizer_steps", 1),
-                "loss/mean": report["reports"][0]["metrics"]["train_loss"],
-            }
-        )
     (destination / "metrics.jsonl").write_text(
         "".join(json.dumps(value) + "\n" for value in metrics)
     )
@@ -243,7 +434,7 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
                                 int(row[0])
                             ]
                             if "gpu_memory_total_mib_by_index" in captured
-                            else 46068,
+                            else None,
                             "gpu_utilization_percent": float(row[3].split()[0]),
                         }
                     ],
@@ -325,7 +516,7 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
             datetime.fromisoformat(completed["utc"]) - datetime.fromisoformat(events[0]["utc"])
         ).total_seconds()
         write_json(destination / "report.json", report)
-    if (source / "training-runtime.json").exists():
+    if (source / "training-runtime.json").exists() or (source / "inference-runtime.json").exists():
         write_json(
             destination / "runtime.json",
             {
@@ -337,37 +528,75 @@ def import_run(source: Path, destination: Path, source_commit: str | None = None
         "".join(json.dumps({**row, "event": row["phase"]}) + "\n" for row in events)
     )
     manifest = {
+        **{
+            key: value
+            for key, value in {**captured, **report}.items()
+            if key
+            in {
+                "execution_run_id",
+                "producer",
+                "root_turn_id",
+                "policy_ref",
+                "policy_revision",
+                "model_id",
+                "model_revision",
+                "gpu_topology",
+                "hardware",
+                "trl_version",
+                "vllm_version",
+                "trackio_run_id",
+                "trackio_run_name",
+                "trackio_space_id",
+                "trackio_project",
+                "trackio_url",
+            }
+        },
         "run_id": run_id,
-        "experiment_id": captured.get("experiment_id", report.get("experiment_id", "trl-rlm-l40s")),
+        "experiment_id": captured.get("experiment_id", report.get("experiment_id")),
         "capture_kind": "source hashes captured before rollout; normalized offline after execution",
         "created_at_utc": events[0]["utc"] if events else report.get("started_at_utc"),
         "inputs": inputs,
         "pins": {
-            "model_revision": report["model_revision"],
-            "trl": "1.9.2",
-            "vllm": "0.25.1",
-            "source_equivalent_rlm_commit": source_commit,
+            key: value
+            for key, value in {
+                "model_revision": report.get("model_revision", captured.get("model_revision")),
+                "trl": captured.get("trl_version", report.get("trl_version")),
+                "vllm": captured.get("vllm_version", report.get("vllm_version")),
+                "source_equivalent_rlm_commit": source_commit,
+            }.items()
+            if value is not None
         },
-        "datasets": {"sha256": captured.get("dataset_sha256"), "upstream_revision": None},
+        "datasets": {
+            "sha256": captured.get("dataset_sha256"),
+            "upstream_revision": captured.get("dataset_revision"),
+        },
         "config": {
             "group_size": len(report["groups"][0].get("rewards", []))
             if report.get("groups")
             else None,
-            "root_tokens": 4096,
-            "context": captured.get("context_tokens", 12288),
-            "max_turns": captured.get("max_turns", 8),
-            "enable_thinking": captured.get("enable_thinking"),
-            "cuda_docs": captured.get("cuda_docs"),
-            "children": 2,
-            "child_prompt_tokens": captured.get("child_prompt_tokens"),
-            "child_reply_tokens": captured.get("child_reply_tokens"),
-            "child_tools": captured.get("child_tools", False),
-            "learner_world_size": captured.get("learner_world_size", 2),
-            "inference_tensor_parallel_size": captured.get("inference_tensor_parallel_size", 2),
-            "max_optimizer_steps": report.get("optimizer_steps", 0),
+            **{
+                key: value
+                for key, value in {
+                    "root_tokens": captured.get("root_tokens"),
+                    "context": captured.get("context_tokens"),
+                    "max_turns": captured.get("max_turns"),
+                    "enable_thinking": captured.get("enable_thinking"),
+                    "cuda_docs": captured.get("cuda_docs"),
+                    "children": captured.get("children"),
+                    "child_prompt_tokens": captured.get("child_prompt_tokens"),
+                    "child_reply_tokens": captured.get("child_reply_tokens"),
+                    "child_tools": captured.get("child_tools"),
+                    "learner_world_size": captured.get("learner_world_size"),
+                    "inference_tensor_parallel_size": captured.get(
+                        "inference_tensor_parallel_size"
+                    ),
+                    "max_optimizer_steps": report.get("optimizer_steps"),
+                }.items()
+                if value is not None
+            },
         },
-        "parent": None,
-        "artifacts": {"weights": "Remain on CloudRift; not downloaded"},
+        "parent": captured.get("parent", report.get("parent")),
+        "artifacts": captured.get("artifacts", report.get("artifacts", {})),
     }
     write_json(destination / "provenance.json", manifest)
     return {

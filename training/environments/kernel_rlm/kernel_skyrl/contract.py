@@ -1,7 +1,7 @@
 """Exact-token, root-only training samples for the existing kernel RLM loop."""
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -11,9 +11,12 @@ class RootSample:
     response_ids: list[int]
     logprobs: list[float]
     stop_reason: str
+    provenance: dict[str, Any] = field(default_factory=dict)
 
 
-def exact_sample(response: dict[str, Any], context_limit: int) -> RootSample:
+def exact_sample(
+    response: dict[str, Any], context_limit: int, provenance: dict[str, Any] | None = None
+) -> RootSample:
     choices = response.get("choices", [])
     if len(choices) != 1:
         raise ValueError("Expected exactly one completion per model request")
@@ -38,7 +41,7 @@ def exact_sample(response: dict[str, Any], context_limit: int) -> RootSample:
     reason = choice.get("finish_reason")
     if reason not in {"stop", "length", "tool_calls"}:
         raise ValueError(f"Unusable completion finish reason: {reason}")
-    return RootSample(list(prompt), list(tokens), logprobs, reason)
+    return RootSample(list(prompt), list(tokens), logprobs, reason, dict(provenance or {}))
 
 
 def terminal_reward(result: dict[str, Any], speed_weight: float = 0.1) -> float:

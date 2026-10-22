@@ -55,6 +55,7 @@ def summarize(result: dict, episodes: list[dict]) -> dict:
     ]
     metrics = {
         "curves/optimizer_step": result["optimizer_step"],
+        "policy/global_step": result["optimizer_step"],
         "curves/sampled_policy_version": result["policy_version"],
         "train/loss": result["metrics"]["train_loss"],
         "outcomes/correct_fraction": len(correct) / 8,
@@ -155,8 +156,13 @@ def main():
         auto_log_cpu=False,
         embed=False,
         config={
+            "run_kind": "derived_learning_curve_view",
+            "execution_run_id": read_json(arguments.run_directory / "inputs.json").get("run_id"),
             "source_run": arguments.run_directory.name,
+            "source_run_kind": "coordinator",
             "read_only_training_observer": True,
+            "derived_view_not_execution_metrics": True,
+            "history_source": str(arguments.history),
             "history_sha256": arguments.history_sha256,
             "scope": "Accepted training groups; changing tasks, not fixed held-out evaluation",
             "hardware_boundary": "Steps1-19 L40S; step20 onward RTX; speed ratios not hardware-paired",

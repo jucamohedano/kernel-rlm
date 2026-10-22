@@ -78,6 +78,10 @@ def test_child_checks_repairs_and_returns_only_measured_status(module, tmp_path,
     assert records[0]["child_tokens_in_root_loss"] == 0
     assert records[0]["status"] == "completed"
     requests = client.chat.completions.create.call_args_list
+    call_ids = [call.kwargs["extra_headers"]["X-Kernel-Call-Id"] for call in requests]
+    assert len(set(call_ids)) == 3
+    assert records[0]["child_invocation_id"]
+    assert [item["call_id"] for item in records[0]["requests"]] == call_ids
     assert [call.kwargs["max_tokens"] for call in requests] == [4096, 3996, 3896]
     assert "undeclared index" in requests[1].kwargs["messages"][3]["content"]
     assert all(
@@ -543,7 +547,17 @@ def test_tool_children_are_reachable_from_the_real_root_repl(module, tmp_path, m
     result = asyncio.run(run())
     assert client.children == 2
     assert len(result["samples"]) == 2
+    model_calls = result["record"]["model_calls"]
+    assert len(model_calls) == 2
+    assert len({call["root_turn_id"] for call in model_calls}) == 2
+    assert all(call["call_id"] == call["model_call_id"] for call in model_calls)
+    assert all(call["message_index"] >= 0 for call in model_calls)
     child_record = result["record"]["subcalls"][0]
     assert child_record["mode"] == "compile_repair"
     assert child_record["status"] == "completed"
     assert child_record["checks"][0]["result"]["verification_status"] == "static_rejected"
+    assert child_record["child_invocation_id"]
+    request_ids = [request["call_id"] for request in child_record["requests"]]
+    assert len(request_ids) == 2 and len(set(request_ids)) == 2
+    assert all(request["parent_turn_id"] for request in child_record["requests"])
+    assert all(request["parent_tool_call_id_generated"] for request in child_record["requests"])

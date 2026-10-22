@@ -58,6 +58,9 @@ class KernelGenerator:
         scorer=score_submission,
         program_command: list[str] | None = None,
         defer_scoring: bool = False,
+        execution_run_id: str | None = None,
+        group_id: str | None = None,
+        attempt_id: str | None = None,
     ):
         if not 1 <= max_sample_batches <= 3 or episode_timeout_s <= 0:
             raise ValueError("Use a positive timeout and at most three sampled groups")
@@ -88,6 +91,9 @@ class KernelGenerator:
         self.episode_timeout_s = episode_timeout_s
         self.scorer = scorer
         self.defer_scoring = defer_scoring
+        self.execution_run_id = execution_run_id
+        self.group_id = group_id
+        self.attempt_id = attempt_id
         self.program_command = program_command or [
             sys.executable,
             "-m",
@@ -98,6 +104,12 @@ class KernelGenerator:
     async def run_episode(self, task: dict, directory: Path, policy_version: int) -> dict:
         directory.mkdir(parents=True, exist_ok=False)
         (directory / "task.json").write_text(json.dumps(task))
+        episode_provenance = {
+            "execution_run_id": self.execution_run_id,
+            "group_id": f"{self.group_id}:{task['name']}",
+            "attempt_id": self.attempt_id,
+            "episode_id": directory.name,
+        }
         bridge = CompletionBridge(
             self.client,
             self.adapter_name,
@@ -106,6 +118,7 @@ class KernelGenerator:
             policy_version,
             directory / "calls.jsonl",
             self.limits["model_timeout_s"],
+            provenance=episode_provenance,
         )
         process = None
         try:
@@ -120,6 +133,15 @@ class KernelGenerator:
                 KERNEL_MODEL=self.tokenizer_path,
                 KERNEL_LIMITS=json.dumps({**self.limits, "bridge_owns_admission": True}),
                 KERNEL_FEEDBACK_LOG_DIR=str(directory.resolve()),
+                KERNEL_PROVENANCE=json.dumps(
+                    {
+                        "execution_run_id": self.execution_run_id,
+                        "group_id": f"{self.group_id}:{task['name']}",
+                        "attempt_id": self.attempt_id,
+                        "episode_id": directory.name,
+                        "policy_version": policy_version,
+                    }
+                ),
             )
             with (directory / "program.log").open("wb") as log:
                 process = await asyncio.create_subprocess_exec(
@@ -134,8 +156,11 @@ class KernelGenerator:
             if process.returncode or bridge.failures:
                 raise RuntimeError(f"REPL transport/program failed; see {directory}")
             record = json.loads((directory / "submission.json").read_text())
+            provenance = {**episode_provenance, "policy_version": policy_version}
+            record.update(provenance)
+            (directory / "submission.json").write_text(json.dumps(record))
             if self.defer_scoring:
-                return {"samples": bridge.samples, "reward": None, "record": record}
+                return {**provenance, "samples": bridge.samples, "reward": None, "record": record}
             reward, verification = await self.scorer(task, record)
             (directory / "score.json").write_text(
                 json.dumps(
@@ -150,6 +175,7 @@ class KernelGenerator:
                 )
             )
             return {
+                **provenance,
                 "samples": bridge.samples,
                 "reward": reward,
                 "record": record,

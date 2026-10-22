@@ -216,6 +216,8 @@ def run_records(root: Path, *, count_trajectories: bool = True) -> list[dict[str
                     if run["id"] in (experiment.get("runs") or [])
                 ],
                 "trajectory_count": trajectory_count,
+                "elapsed_seconds": (run.get("report") or {}).get("elapsed_seconds"),
+                "elapsed_scope": (run.get("report") or {}).get("elapsed_scope"),
                 "evidence_available": has_export or bool(run.get("traces")),
                 "warnings": warnings,
                 "_reader": run,
@@ -376,7 +378,87 @@ def load_task_catalog(path: Path, modified: int) -> dict[str, dict[str, Any]]:
     return catalog
 
 
-def trajectory_metrics(trace: dict[str, Any]) -> dict[str, int | float | None]:
+def usage_counts(records: list[dict[str, Any]], total_calls: int | None = -1) -> dict[str, Any]:
+    result = {}
+    for key, label in (
+        ("prompt_tokens", "input_tokens"),
+        ("completion_tokens", "output_tokens"),
+        ("total_tokens", "total_tokens"),
+    ):
+        values = [
+            record[key]
+            for record in records
+            if isinstance(record.get(key), int) and record[key] >= 0
+        ]
+        total = len(records) if total_calls is None else None if total_calls < 0 else total_calls
+        result[label] = {
+            "sum": sum(values) if values else 0 if total == 0 else None,
+            "recorded": len(values),
+            "total": total,
+        }
+    return result
+
+
+def elapsed_counts(records: list[dict[str, Any]], total_calls: int | None) -> dict[str, Any]:
+    values = [
+        record["elapsed_seconds"]
+        for record in records
+        if isinstance(record.get("elapsed_seconds"), (int, float))
+        and record["elapsed_seconds"] >= 0
+    ]
+    total = len(records) if total_calls is None else None if total_calls < 0 else total_calls
+    return {
+        "sum": sum(values) if values else 0 if total == 0 else None,
+        "recorded": len(values),
+        "total": total,
+    }
+
+
+def token_usage(trace: dict[str, Any]) -> dict[str, Any]:
+    info = trace.get("info") if isinstance(trace.get("info"), dict) else {}
+    root_calls = info.get("kernel_model_calls")
+    if not isinstance(root_calls, list):
+        root_calls = trace.get("calls")
+    root_known = isinstance(root_calls, list)
+    calls = root_calls if root_known else []
+    roots = [
+        call["usage"]
+        for call in calls
+        if isinstance(call, dict) and isinstance(call.get("usage"), dict)
+    ]
+    child_ledger = info.get("kernel_subcalls")
+    child_known = isinstance(child_ledger, list)
+    child_ledger = child_ledger if child_known else []
+    children = []
+    for child in child_ledger:
+        if not isinstance(child, dict):
+            continue
+        response = child.get("response")
+        usage = response.get("usage") if isinstance(response, dict) else None
+        usage = usage if isinstance(usage, dict) else child.get("usage")
+        if isinstance(usage, dict):
+            children.append(usage)
+    root = usage_counts(roots, len(calls) if root_known else -1)
+    child = usage_counts(children, len(child_ledger) if child_known else -1)
+    all_calls = roots + children
+    total = len(calls) + len(child_ledger) if root_known and child_known else -1
+    root["elapsed_seconds"] = elapsed_counts(calls, len(calls) if root_known else -1)
+    child["elapsed_seconds"] = elapsed_counts(
+        child_ledger, len(child_ledger) if child_known else -1
+    )
+    root_durations = [item for item in calls if isinstance(item, dict)]
+    child_durations = [item for item in child_ledger if isinstance(item, dict)]
+    return {
+        "root": root,
+        "children": child,
+        "all": {
+            **usage_counts(all_calls, total),
+            "elapsed_seconds": elapsed_counts(root_durations + child_durations, total),
+        },
+    }
+
+
+def trajectory_metrics(trace: dict[str, Any]) -> dict[str, Any]:
     info = trace.get("info") if isinstance(trace.get("info"), dict) else {}
     calls = info.get("kernel_model_calls") or trace.get("calls") or []
     nodes = trace.get("nodes") or []
@@ -416,6 +498,7 @@ def trajectory_metrics(trace: dict[str, Any]) -> dict[str, int | float | None]:
         cache_ratio = 100 * sum(cached) / sum(prompt_tokens)
     failed = info.get("commands_failed")
     return {
+        "token_usage": token_usage(trace),
         "steps": sum(
             item.get("role") == "assistant" for item in transcript if isinstance(item, dict)
         )
@@ -497,7 +580,11 @@ def trajectory_metadata(
         "started_at": started_at,
         "completion": completion,
         "outcome": outcome,
-        "metrics": trajectory_metrics(trace),
+        "metrics": {
+            **trajectory_metrics(trace),
+            "run_elapsed_seconds": (run.get("report") or {}).get("elapsed_seconds"),
+            "run_elapsed_scope": (run.get("report") or {}).get("elapsed_scope"),
+        },
         "experiments": run.get("experiments", []),
         "run": {"id": run["id"]},
     }

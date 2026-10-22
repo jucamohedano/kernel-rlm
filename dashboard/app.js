@@ -119,6 +119,31 @@ function markdown(source) {
   return article;
 }
 function notice(message) { content.append(el("div", "warning", message)); }
+function tokenPanel(title, usage) {
+  const node = el("section", "panel token-panel");
+  node.append(el("h2", "panel-title", title));
+  const grid = el("div", "token-grid");
+  for (const [key, label] of [["input_tokens", "Input"], ["output_tokens", "Output"], ["total_tokens", "Total"]]) {
+    const metric = usage?.[key];
+    const value = metric?.sum == null ? "Unknown" : metric.sum.toLocaleString();
+    const coverage = metric ? metric.total == null ? `${metric.recorded} calls recorded · coverage unknown` : `${metric.recorded}/${metric.total} calls recorded${metric.recorded < metric.total ? " · partial sum" : " · complete"}` : "Not recorded";
+    const item = el("div", "token-stat"); item.append(el("span", "muted", label), el("strong", "", value), el("small", "muted", coverage)); grid.append(item);
+  }
+  node.append(grid);
+  const elapsed = usage?.elapsed_seconds;
+  const elapsedText = elapsed?.sum == null ? "Elapsed sum unavailable" : `${elapsed.sum.toFixed(3)} s summed across ${elapsed.recorded}/${elapsed.total ?? "?"} calls (not wall time)`;
+  node.append(el("small", "muted", elapsedText));
+  return node;
+}
+function aggregateRunUsage(traces) {
+  const aggregate = {root: {}, children: {}, all: {}};
+  for (const group of ["root", "children", "all"]) for (const key of ["input_tokens", "output_tokens", "total_tokens", "elapsed_seconds"]) {
+    const entries = traces.map(t => t.metrics?.token_usage?.[group]?.[key]).filter(Boolean);
+    const known = entries.filter(entry => entry.sum != null);
+    aggregate[group][key] = {sum: known.length ? known.reduce((sum, entry) => sum + entry.sum, 0) : null, recorded: entries.reduce((sum, entry) => sum + entry.recorded, 0), total: entries.every(entry => entry.total != null) ? entries.reduce((sum, entry) => sum + entry.total, 0) : null};
+  }
+  return aggregate;
+}
 function rows(parent, records, target) {
   for (const record of records) {
     const row = link("", target(record), "run-list-row");
@@ -425,6 +450,9 @@ async function runPage(id, traceId, tab, signal, ticket) {
   if (!traces.length) { notice("No trajectory export is available for this record. The historical record has not been deleted."); return; }
   if (!traceId) {
     content.append(el("p", "muted", `${traces.length} saved trajectory attempts in this workload. Repeated task names are separate sampled attempts, not experiment names.`));
+    const aggregate = aggregateRunUsage(traces);
+    content.append(tokenPanel("Recorded run token usage · root calls", aggregate.root), tokenPanel("Recorded child-call token usage", aggregate.children), tokenPanel("Combined recorded calls", aggregate.all));
+    if (run.elapsed_seconds != null) content.append(panel("Run elapsed time", `${run.elapsed_seconds} seconds${run.elapsed_scope ? ` · ${run.elapsed_scope}` : " · scope not recorded"}. This is run elapsed time, not a sum of per-call durations.`));
     trajectoryList(traces,content,id);
     return;
   }
@@ -446,6 +474,13 @@ async function runPage(id, traceId, tab, signal, ticket) {
     const stat=el("div");stat.append(el("span","muted",label),el("strong","",text(value)));metrics.append(stat);
   }
   content.append(metrics);
+  const tokenUsage = t.metrics?.token_usage;
+  if (tokenUsage) {
+    content.append(tokenPanel("Root-call usage", tokenUsage.root));
+    content.append(tokenPanel("Child-call usage", tokenUsage.children));
+    content.append(tokenPanel("Combined usage", tokenUsage.all));
+  }
+  if (t.metrics?.run_elapsed_seconds != null) content.append(panel("Run elapsed time", `${t.metrics.run_elapsed_seconds} seconds${t.metrics.run_elapsed_scope ? ` · ${t.metrics.run_elapsed_scope}` : " · scope not recorded"}. Per-call durations are not wall time.`));
   const extra=el("details","trajectory-extra");extra.append(el("summary","","Details"));
   pair(extra,"Task / attempt",`${t.task || "Unavailable"} / ${t.attempt ?? "—"}`);pair(extra,"Trajectory ID",t.id);pair(extra,"Workload",run.title || run.id);pair(extra,"Hardware",run.hardware);
   extra.append(el("p","muted","Steps are root assistant turns; tool calls are emitted calls. Peak input context is the largest recorded root prompt, not the configured context limit. Missing measurements are not zero."));content.append(extra);
@@ -470,6 +505,9 @@ async function runPage(id, traceId, tab, signal, ticket) {
   if(tab==="verifier") {
     const v=t.verification||{}, summary=el("div","verifier-summary");
     pair(summary,"Protocol",v.verification_protocol);pair(summary,"Status",statusLabel(v.verification_status));pair(summary,"Compiled",yesNo(v.compiled));pair(summary,"Correct",yesNo(v.correct));pair(summary,"Reference (ms)",metric(v.ref_ms));pair(summary,"Candidate (ms)",metric(v.kernel_ms));viewer.append(summary);
+    const timings = v.timings && typeof v.timings === "object" ? v.timings : null;
+    if (timings) { const timingPanel = panel("Final verifier timing breakdown", Object.entries(timings).map(([name,value]) => `${name}: ${typeof value === "number" ? value.toFixed(3) + " s" : text(value)}`)); viewer.append(timingPanel); }
+    else viewer.append(panel("Final verifier timing breakdown", "Unavailable; no final timing breakdown was recorded."));
     const output=v.stdout || v.output || v.error;
     if(output) {const block=codeBlock(text(output),"Verifier output");block.classList.add("verifier-output");viewer.append(block);}
     else viewer.append(el("p","muted","No text verifier output was recorded. Structured final results are available below."));

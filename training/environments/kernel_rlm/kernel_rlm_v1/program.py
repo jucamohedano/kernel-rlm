@@ -40,15 +40,15 @@ from kernel_rlm.subcalls import (
 from kernel_rlm.thinking import visible_response
 from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_request_slot
 from openai import AsyncOpenAI
-from rlm_train.proxy import ClientHandle, SubLLMProxy
-from rlm_train.repl.base import ExecResult
-from rlm_train.repl.subprocess import SubprocessReplBackend
-
 from rlm.utils.prompts import (
     QueryMetadata,
     build_rlm_system_prompt,
     build_user_prompt,
 )
+
+from rlm_train.proxy import ClientHandle, SubLLMProxy
+from rlm_train.repl.base import ExecResult
+from rlm_train.repl.subprocess import SubprocessReplBackend
 
 
 async def run(task: dict) -> None:
@@ -103,7 +103,10 @@ async def run(task: dict) -> None:
         )
     if not limits.get("enable_subcall"):
         messages[0]["content"] += " Subcalls are disabled for this run."
+    provenance = json.loads(os.environ.get("KERNEL_PROVENANCE", "{}"))
     record = {
+        **provenance,
+        "producer": "kernel_rlm_v1",
         "submission": "",
         "repl_calls": 0,
         "feedback_calls": 0,
@@ -162,6 +165,7 @@ async def run(task: dict) -> None:
                     hardware_context=hardware_context,
                 )
             proxy = SubLLMProxy()
+            child_provenance = {}
             proxy.register(
                 "bounded-v1",
                 ClientHandle(
@@ -169,6 +173,7 @@ async def run(task: dict) -> None:
                     model=os.environ["KERNEL_MODEL"],
                     fake_query=subcalls.query,
                     max_concurrent=1,
+                    state_ref=child_provenance,
                 ),
             )
             await proxy.start()
@@ -254,12 +259,20 @@ async def run(task: dict) -> None:
                 if turn + 1 == deadline_turn
                 else "iteration"
             )
+            root_turn_id = uuid.uuid4().hex
+            model_call_id = uuid.uuid4().hex
+            model_message_index = len(messages)
             request_args = {
                 "model": os.environ["KERNEL_MODEL"],
                 "messages": messages,
                 "max_tokens": requested_tokens,
                 "tools": [REPL_TOOL],
                 "tool_choice": "auto",
+            }
+            request_args["extra_headers"] = {
+                "X-Kernel-Root-Turn-Id": root_turn_id,
+                "X-Kernel-Call-Id": model_call_id,
+                "X-Kernel-Assistant-Message-Index": str(model_message_index),
             }
             if limits.get("enable_thinking"):
                 request_args["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
@@ -282,6 +295,12 @@ async def run(task: dict) -> None:
                 )
                 record["model_calls"].append(
                     {
+                        **provenance,
+                        "producer": "kernel_rlm_v1",
+                        "root_turn_id": root_turn_id,
+                        "message_index": model_message_index,
+                        "call_id": model_call_id,
+                        "model_call_id": model_call_id,
                         "turn": turn + 1,
                         "phase": phase,
                         "requested_max_tokens": requested_tokens,
@@ -354,6 +373,12 @@ async def run(task: dict) -> None:
             completion_details = usage.get("completion_tokens_details") or {}
             record["model_calls"].append(
                 {
+                    **provenance,
+                    "producer": "kernel_rlm_v1",
+                    "root_turn_id": root_turn_id,
+                    "message_index": model_message_index,
+                    "call_id": model_call_id,
+                    "model_call_id": model_call_id,
                     "turn": turn + 1,
                     "phase": phase,
                     "requested_max_tokens": requested_tokens,
@@ -378,7 +403,25 @@ async def run(task: dict) -> None:
                     record["action_rejections"].append({"turn": turn + 1, "error": rejection})
                     result = ExecResult(stderr=rejection)
                 else:
-                    result = await backend.execute(code)
+                    if proxy is not None:
+                        action_id = uuid.uuid4().hex
+                        tool_call_id = (
+                            repl_calls[code_index]["id"]
+                            if structured_action
+                            else f"generated-{root_turn_id}-{code_index}"
+                        )
+                        child_provenance.clear()
+                        child_provenance.update(
+                            parent_turn_id=root_turn_id,
+                            parent_tool_call_id=tool_call_id,
+                            parent_tool_call_id_generated=not structured_action,
+                            parent_action_id=action_id,
+                        )
+                    try:
+                        result = await backend.execute(code)
+                    finally:
+                        if proxy is not None:
+                            child_provenance.clear()
                 record["repl_calls"] += 1
                 observation = "REPL output:\n" + (result.stdout + result.stderr)[:20000]
                 for line in result.stdout.splitlines():

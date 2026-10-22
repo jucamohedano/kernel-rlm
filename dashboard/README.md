@@ -50,3 +50,10 @@ Priorities for the follow-up PR:
 - Let an optional agent draft evidence-linked interpretation after deterministic calculations, with human review. An agent is not needed to load or count results, and prose must not become the measurements' source of truth.
 
 No training settings, loss/reward semantics, or historical artifacts are changed by this dashboard PR.
+
+
+## Recorded metrics
+
+Trajectory detail presents recorded root and child model-call input, output, and total token counts separately. Root calls use `info.kernel_model_calls` when present, otherwise the historical `calls` list; node/transcript renderings are not counted again. Child usage reads `response.usage` and supports older direct `usage` records. Each metric shows its known sum and recorded-call coverage. A partial sum is not presented as a complete total; missing values remain unavailable, while explicitly recorded zero remains zero.
+
+Run elapsed time is shown only when recorded by the report and is distinct from summed per-call elapsed durations (which may overlap and are not wall time). Verifier timing is displayed only from the selected trajectory's final recorded verification object, with missing breakdowns called unavailable. The dashboard does not infer parent joins or aggregate across duplicate exports from different runs.

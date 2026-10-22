@@ -28,6 +28,7 @@ class CompletionBridge:
         policy_version: int,
         trace_path,
         timeout_s: float = 150,
+        provenance: dict | None = None,
     ):
         if not adapter_name:
             raise ValueError("An explicit LoRA adapter name is required")
@@ -40,6 +41,7 @@ class CompletionBridge:
         self.api_key = secrets.token_urlsafe(32)
         self.policy_version = policy_version
         self.trace_path = trace_path
+        self.provenance = dict(provenance or {})
         self.samples = []
         self.failures = []
         self.child_calls = 0
@@ -91,9 +93,30 @@ class CompletionBridge:
         if request.headers.get("Authorization") != f"Bearer {self.api_key}":
             raise web.HTTPUnauthorized()
         started = time.monotonic()
-        record = {"policy_version": self.policy_version}
+        record = {
+            "producer": "kernel_inference_bridge",
+            **self.provenance,
+            "policy_version": self.policy_version,
+        }
         try:
             body = copy.deepcopy(await request.json())
+            headers = request.headers
+            if headers.get("X-Kernel-Root-Turn-Id"):
+                record["root_turn_id"] = headers["X-Kernel-Root-Turn-Id"]
+            if headers.get("X-Kernel-Call-Id"):
+                record["call_id"] = headers["X-Kernel-Call-Id"]
+            if headers.get("X-Kernel-Assistant-Message-Index"):
+                record["assistant_message_index"] = int(headers["X-Kernel-Assistant-Message-Index"])
+            if headers.get("X-Kernel-Parent-Turn-Id"):
+                record["parent_turn_id"] = headers["X-Kernel-Parent-Turn-Id"]
+            if headers.get("X-Kernel-Parent-Tool-Call-Id"):
+                record["parent_tool_call_id"] = headers["X-Kernel-Parent-Tool-Call-Id"]
+            if headers.get("X-Kernel-Parent-Tool-Call-Id-Generated"):
+                record["parent_tool_call_id_generated"] = (
+                    headers["X-Kernel-Parent-Tool-Call-Id-Generated"] == "true"
+                )
+            if headers.get("X-Kernel-Parent-Action-Id"):
+                record["parent_action_id"] = headers["X-Kernel-Parent-Action-Id"]
             messages = body["messages"]
             child = bool(
                 messages
@@ -117,8 +140,10 @@ class CompletionBridge:
                 cache_salt=f"kernel-{self.policy_version}",
             )
             record.update(branch="child" if child else "root", request=copy.deepcopy(body))
-            if child:
+            if not record.get("call_id"):
                 record["call_id"] = uuid.uuid4().hex
+            record["model_call_id"] = record["call_id"]
+            if child:
                 self.publish_child_progress(
                     record["call_id"], started, stage="queued", completion_tokens=0
                 )
@@ -146,7 +171,24 @@ class CompletionBridge:
                     completion = self.client.chat_completion({"json": body})
                 response = await asyncio.wait_for(completion, self.timeout_s)
             record["response"] = response
-            sample = exact_sample(response, self.context_limit)
+            sample = exact_sample(
+                response,
+                self.context_limit,
+                {
+                    key: record[key]
+                    for key in (
+                        "execution_run_id",
+                        "group_id",
+                        "attempt_id",
+                        "episode_id",
+                        "policy_version",
+                        "root_turn_id",
+                        "call_id",
+                        "model_call_id",
+                    )
+                    if key in record
+                },
+            )
             if len(sample.response_ids) > body["max_tokens"]:
                 raise ValueError("Inference exceeded this call's output cap")
             if child:
