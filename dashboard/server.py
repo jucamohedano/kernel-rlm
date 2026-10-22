@@ -145,6 +145,7 @@ def make_handler(root: Path, receipt_path: Path | None = None, task_catalog: Pat
                 "/app.js": "app.js",
                 "/styles.css": "styles.css",
                 "/layout.js": "layout.js",
+                "/theme.js": "theme.js",
                 "/fonts/InterVariable.woff2": "fonts/InterVariable.woff2",
                 "/fonts/JetBrainsMono-Regular.woff2": "fonts/JetBrainsMono-Regular.woff2",
                 "/fonts/JetBrainsMono-Medium.woff2": "fonts/JetBrainsMono-Medium.woff2",

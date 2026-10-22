@@ -68,6 +68,9 @@ def test_http_api_routes_and_writing_safety(tmp_path):
         assert status == 200 and json.loads(body)["runs"][0]["id"] == "r1"
         status, content_type, font = request(server, "/fonts/InterVariable.woff2")
         assert status == 200 and content_type == "font/woff2" and font[:4] == b"wOF2"
+        status, content_type, script = request(server, "/theme.js")
+        assert status == 200 and "javascript" in content_type
+        assert script == (Path(__file__).parents[1] / "dashboard/theme.js").read_bytes()
         status, _, _ = request(server, "/fonts/../../README.md")
         assert status == 404
         status, _, body = request(server, "/api/home")
