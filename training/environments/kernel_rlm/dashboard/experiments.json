@@ -23,7 +23,7 @@
       ],
       "title": "RTX L1 curriculum · verifier v2 · reward-corrected branch",
       "current_run_id": "20261020T230200Z-final-l1-pass",
-  "status": "closed",
+      "status": "closed",
       "hardware_docs_prepared": {
         "source_commit": "034f1b0b1fb37f828f97df046f5f3c7c9b98ff48",
         "profile": "sm120",
@@ -32,16 +32,16 @@
         "evidence_file": "notes/results/20261020-hardware-docs-audit.json",
         "activation_gate": "Natural checkpoint-safe pause and tested immutable descendant; never hot-patch or silently replace docs in the live run."
       },
-      "intent": "Finish remaining nondeferred L1 pass within65USDtotal RTX fromoriginalbaseline; preserve all deferred/history data,verify complete backups and retireonlyRTXaftertraining ends under user's explicit authorization.",
-      "change": "Initial25bb15f rebuilt28with BatchNorm state-v2 using all8original0017samples; originalbad28preserved. Newd1767ad descendantinherits29and repairs candidate loading attribution after natural pause, explicitly revalidates onlythe exactfailed0031member, preservesall8samples/7other scores/attempts, and activates approvedSM120docsforfreshgroups. Dataset/order/shapes/rewardformula/root-onlyloss unchanged.",
-  "conclusion": "Nondeferredpassfinishedat35trained/15deferred/0remaining;driver/observerexitednaturally,noGPUjobs. Final0004threeof8correctat0.98719–0.99966x,nonefaster,allATenCTCdelegationnotcustomCUDA.35696ROOTaudit/full34optimizerrestore/native35readbackpassed,changed320. ALLquiescentsnapshot9504files+5symlinks/7456806807bytes/44checkpointmanifests/consistentSQLiteverifiedlocally;pinnedbasepoolside/Laguna-XS.2a397bde+14shardaddressesretained. PRIVATEHFfinal35833f460all8newaddresses/sizeschecked(notfullbinaryreadback),alloldbranchesretained. OfficialAPIterminatedONLYRTX131552eaafterverification;providerlist03:07:25UTCconfirmsrentalABSENT. PrivateLOCALCPUTrackio35points/noVMdependency;monitorandwarningPAUSED. Conservativeestimate51.26/65notinvoice. Viewer72traces=40accepted+32weak;35points=30inherited+5new. No50taskmasteryorheldoutqualityclaim.",
-  "decision": "Pass/backups/authorizedRTXretirementcompleted;monitorandwarningPAUSED. Preservealllocal/privateHFdataanddeferredscope.NoadditionalVMaccess,rentals,training,evaluationorverifierchangeswithoutnewuserrequest.",
-  "evidence_file": "notes/results/20261021-final-pass-completion.json",
+      "intent": "Complete the remaining non-deferred L1 tasks within the $65 total RTX budget, measured from the original baseline. Preserve deferred tasks and history, verify backups, and retire only the RTX rental after training ends and with the user’s explicit authorization.",
+      "change": "The initial 25bb15f branch rebuilt step 28 with BatchNorm state-v2 using all eight original task 0017 samples; the original step 28 and its incorrect reward remain preserved. After a natural pause, descendant d1767ad inherited step 29 and repaired candidate-loading attribution. It revalidated only the exact failed task 0031 member, preserving all eight samples, the other seven scores, and prior attempts. Approved SM120 documentation applied only to fresh groups. Dataset, order, shapes, reward formula, and root-only loss were unchanged.",
+      "conclusion": "The non-deferred pass ended with 35 trained tasks, 15 deferred, and none remaining in scope. Driver and observer exited naturally; no GPU jobs remained.\n\nIn the final task, three of eight candidates were correct (0.98719–0.99966× reference speed); none was faster, and all used ATen CTC delegation rather than custom CUDA.\n\nThe 35,696-token root audit, full step-34 optimizer restore, and native step-35 readback passed; all 320 adapters changed.\n\nThe quiescent local snapshot contained 9,504 files, five symlinks, 7,456,806,807 bytes, and 44 checkpoint manifests, with SQLite consistency verified; the pinned base poolside/Laguna-XS.2 revision a397bde and 14 shard addresses were retained.\n\nPrivate HF step 35 archive commit 833f460dfbd71918a0ad7403e1245233113d4b71 retained all eight new addresses and matching sizes (not full binary readback); old branches remain.\n\nAfter verification, only RTX instance 131552ea was terminated through the official API; the 03:07:25 UTC provider listing confirmed the rental absent. The private local CPU Trackio copy has 35 points and no VM dependency; monitor and warning are paused. $51.26 against the $65 budget is a conservative estimate, not an invoice.\n\nThe viewer has 72 traces (40 accepted, 32 weak); the 35 points represent 30 inherited and five new updates. This is not a 50-task mastery or held-out-quality claim.",
+      "decision": "The pass, backups, and authorized RTX retirement are complete; the monitor and warning are paused. Preserve local and private HF data and deferred scope. Do not access or rent another VM, train, evaluate, or change the verifier without a new user request.",
+      "evidence_file": "notes/results/20261021-final-pass-completion.json",
       "limitations": [
-        "Old intermediate verifier feedback remains in reused trajectories; this is explicit final-reward revalidation, not fresh protocol rollouts.",
-        "No held-out learning improvement established.",
-        "Old checkpoint28and its bad reward remain preserved on their original branch.",
-        "Fifteen tasks are deferred and remain untrained; only0037was an operator infrastructure deferral."
+        "Reused trajectories retain earlier intermediate verifier feedback. This was final-reward revalidation, not fresh protocol rollouts.",
+        "No held-out learning improvement was established.",
+        "The old step 28 and its incorrect reward remain on the original branch.",
+        "Fifteen tasks remain untrained and deferred; only task 0037 was deferred for operator infrastructure reasons."
       ],
       "runs": [
         "20261020T192919Z-verifier-v2-repair",
@@ -70,88 +70,179 @@
           "notes/results/20261021-final-pass-monitor-2354Z.json",
           "notes/results/20261021-final-pass-monitor-0024Z.json",
           "notes/results/20261021-final-pass-monitor-0039Z.json",
-      "notes/results/20261021-final-pass-monitor-0109Z.json",
-      "notes/results/20261021-final-pass-monitor-0124Z.json",
-      "notes/results/20261021-final-pass-monitor-0209Z.json",
-      "notes/results/20261021-final-pass-monitor-0239Z.json",
-      "notes/results/20261021-final-pass-completion.json"
+          "notes/results/20261021-final-pass-monitor-0109Z.json",
+          "notes/results/20261021-final-pass-monitor-0124Z.json",
+          "notes/results/20261021-final-pass-monitor-0209Z.json",
+          "notes/results/20261021-final-pass-monitor-0239Z.json",
+          "notes/results/20261021-final-pass-completion.json"
         ]
-      }
+      },
+      "category": "Fix validation",
+      "campaign": "L1 post-training",
+      "scope_note": "Verifier and candidate-loading repairs followed by completion of the main L1 training branch. This record includes the final continuation and campaign closeout, not a separate quality experiment."
     },
     {
       "id": "trl-l1-rtx-continuation",
-      "follows_experiments": ["trl-l1-child-progress", "trl-rtx-child-research"],
+      "follows_experiments": [
+        "trl-l1-child-progress",
+        "trl-rtx-child-research"
+      ],
       "title": "RTX L1 curriculum · continuation from goal checkpoint 19",
       "current_run_id": "20261020T141800Z-rtx-resume",
       "status": "open",
-      "intent": "Continue the unchanged 50-task L1 pass from verified goal checkpoint19 on the two RTX PRO6000 cards, within the revised40USD total RTX authorization.",
-      "change": "Role-aware driver:GPU1 TP1 inference,GPU0 verifier or one-rank nativeTRL/Muon. Explicit one-time hardware/repair revalidation preserves the exact old0006group and prior attempts. Fresh groups use measured16K context and bounded compiler-enabled children; no reward/task/order change.",
-      "conclusion": "Paused18:20:53UTC at policy28 during0037finals:member2 exhausted two candidate_extension timeouts; seven scores and all8samples preserved, no29update or retry. Step28/0017 passed audit45249/native restore/readback but one reward1 sample only returned input through a host extension, yielding spurious478.8x under initialized BatchNorm tolerance. Checkpoint28 is retained with a warning, not a validated CUDA speedup.28recorded task updates=19inherited+9RTX;4deferred+1generated/untrained+17unvisited remain. Local checkpoint28 archive and3file hashes verified;8new privateHF addresses matchcc560342.80viewertraces/28points; failed group separately backed up. CPUobserver exited normally,TrackioUIonline. No source/reward/timeout changes or GPU retries.",
-      "decision": "Keep training and hourly monitor paused pending verifier integrity and candidate-timeout review. Do not reset attempts, resample, silently rewrite step28 rewards, bypass safety or claim checkpoint27 independently clean. Preserve all states and plotting data. Idle rental bills; user alone controls VM termination. New verifier0764ac9/batchnorm-state-v2 is separately validated: exactidentity fails onCUDA, two realCUDAcontrols pass3states, all8oldcandidates rechecked without rewriting originals.0037timeout and checkpointbranch decision remain; current full-group budget reservation does not fit40USD. See notes/results/20261020-verifier-state-hardening.json.",
+      "intent": "Continue the unchanged 50-task L1 pass from verified goal checkpoint 19 on two RTX PRO 6000 cards, within the revised $40 total RTX authorization.",
+      "change": "A role-aware driver assigned GPU 1 to TP1 inference and GPU 0 to verification or one-rank native TRL/Muon. One-time hardware and repair revalidation preserved the exact old task 0006 group and prior attempts. Fresh groups used measured 16K context and bounded compiler-enabled children. Reward, tasks, and order did not change.",
+      "conclusion": "Training paused at 18:20:53 UTC at policy step 28, during task 0037 final scoring: member 2 exhausted two candidate-extension timeouts. Seven scores and all eight samples were preserved; there was no step 29 update or retry.\n\nStep 28 passed the 45,249-token audit and native restore/readback, but one reward-1 sample returned only its input through a host extension and received a spurious 478.8× speed result under initialized BatchNorm tolerance. Step 28 is retained with a warning, not as a validated CUDA speedup.\n\nIts 28 recorded task updates comprise 19 inherited and nine RTX updates; four deferred, one generated but untrained, and 17 unvisited tasks remain.\n\nThe local step-28 archive and three file hashes were verified; eight new private HF addresses match cc560342. The viewer has 80 traces and 28 points; the failed group was separately backed up. CPU observer exited normally and Trackio UI remained online. No source, reward, or timeout changes or GPU retries occurred.",
+      "decision": "Keep training and the hourly monitor paused pending verifier-integrity and candidate-timeout review. Do not reset attempts, resample, silently rewrite step-28 rewards, bypass safety, or claim step 27 is independently clean. Preserve all states and plotting data. The idle rental bills; only the user controls VM termination. Verifier 0764ac9 (BatchNorm state-v2) was separately validated: the exact identity fails on CUDA, two real CUDA controls pass across three states, and all eight old candidates were rechecked without rewriting originals. The task 0037 timeout and checkpoint-branch decision remain unresolved; the current full-group budget reservation does not fit $40. See notes/results/20261020-verifier-state-hardening.json.",
       "evidence_file": "notes/results/20261020-rtx-training-resume.json",
-      "limitations": ["No new optimizer step or held-out improvement confirmed at launch.", "Context,children,hardware and infrastructure changed together; not a single-variable ablation.", "Inference fully exits before final scoring/audit/learner; not native asynchronousGRPO.", "Conservative phase reservations can stop expansion before40USD literal spend; idle rental still bills."],
-      "runs": ["20261020T141800Z-rtx-resume"],
-      "provenance": {"dataset_ids": ["ops6k-l1-seed42"], "documented_change_commits": ["5675647", "aba545a"], "notes": ["notes/results/20261020-verifier-repair.json", "notes/results/20261020-rtx-training-resume.json"]}
+      "limitations": [
+        "No new optimizer step or held-out improvement was confirmed at launch.",
+        "Context, children, hardware, and infrastructure changed together; this is not a single-variable ablation.",
+        "Inference exits before final scoring, audit, and learning; this is not native asynchronous GRPO.",
+        "Conservative phase reservations may stop expansion before $40 of literal spend; an idle rental still bills."
+      ],
+      "runs": [
+        "20261020T141800Z-rtx-resume"
+      ],
+      "provenance": {
+        "dataset_ids": [
+          "ops6k-l1-seed42"
+        ],
+        "documented_change_commits": [
+          "5675647",
+          "aba545a"
+        ],
+        "notes": [
+          "notes/results/20261020-verifier-repair.json",
+          "notes/results/20261020-rtx-training-resume.json"
+        ]
+      },
+      "category": "Training continuation",
+      "campaign": "L1 post-training",
+      "scope_note": "RTX continuation within the L1 post-training campaign; paused with verifier and candidate-timeout issues unresolved."
     },
     {
       "id": "trl-rtx-split-baseline",
-      "follows_experiments": ["trl-l1-child-progress"],
+      "follows_experiments": [
+        "trl-l1-child-progress"
+      ],
       "title": "RTX split-card · unchanged eight-rollout baseline",
       "current_run_id": "20261020T103000Z-split-baseline-retry",
       "status": "open",
-      "intent": "Validate dedicated TP1 inference and one-rank TRL/Muon with unchanged task0026, checkpoint17 and rollout protocol before expanding research tools.",
-      "change": "RTX PRO6000 hardware, explicit two-to-one Muon state conversion, dedicated GPU1 inference and GPU0 verification/learner phases. No root prompt/reward/context/rollout-count change.",
-      "conclusion": "Eight complete rollouts,3correct kernels, no final infrastructure errors. Exact39416root-token audit passed; all320adapters changed in one update17→18. Native readback restored all320momentum tensors plus scheduler/RNG/counter. One new optimizer point, not18new updates. Collection-through-readback1137.97seconds, excluding initial inference startup. Historical L40S task cycle2284.54seconds, but trajectories/token work differ; no repeatable hardware-only speedup or quality claim.",
-      "decision": "Completed control; do not repeat or merge this independent branch over the newer L40S policy19. Expanded child pilot remains separately gated within RTX20USD total.",
+      "intent": "Before expanding research tools, validate dedicated TP1 inference and one-rank TRL/Muon using unchanged task 0026, checkpoint 17, and rollout protocol.",
+      "change": "Used RTX PRO 6000 hardware, explicit two-to-one Muon state conversion, dedicated GPU 1 inference, and GPU 0 verification/learner phases. Root prompt, reward, context, and rollout count did not change.",
+      "conclusion": "Eight rollouts completed, with three correct kernels and no final infrastructure errors.\n\nThe exact 39,416-root-token audit passed. All 320 adapters changed in one update, step 17 to 18. Native readback restored all 320 momentum tensors plus scheduler, RNG, and counter. This was one new optimizer point, not 18 new updates.\n\nCollection through readback took 1,137.97 seconds, excluding initial inference startup. The historical L40S task cycle took 2,284.54 seconds, but trajectories and token work differ; this does not establish a repeatable hardware-only speedup or quality gain.",
+      "decision": "Control run complete. Do not repeat it or merge this independent branch over the newer L40S policy 19. The expanded child pilot remains separately gated within a $20 total RTX budget.",
       "evidence_file": "notes/results/20261020-rtx-split-progression.json",
-      "limitations": ["Fresh stochastic trajectories, not bitwise-paired samples.", "Different GPU reference timings affect speed rewards.", "Only one update; no held-out quality evaluation.", "Training and verification alternate on GPU0; not a production async curriculum driver."],
-      "runs": ["20261020T103000Z-split-baseline-retry"],
-      "provenance": {"dataset_ids": ["ops6k-l1-seed42"], "documented_change_commits": ["5c18655", "f7f9e46"], "notes": ["notes/results/20261020-rtx-split-progression.json"]}
+      "limitations": [
+        "Fresh stochastic trajectories were used; samples were not bitwise paired.",
+        "Different GPU reference timings affect speed rewards.",
+        "Only one update was made; there was no held-out quality evaluation.",
+        "Training and verification alternate on GPU 0; this is not a production asynchronous curriculum driver."
+      ],
+      "runs": [
+        "20261020T103000Z-split-baseline-retry"
+      ],
+      "provenance": {
+        "dataset_ids": [
+          "ops6k-l1-seed42"
+        ],
+        "documented_change_commits": [
+          "5c18655",
+          "f7f9e46"
+        ],
+        "notes": [
+          "notes/results/20261020-rtx-split-progression.json"
+        ]
+      },
+      "category": "Setup validation",
+      "campaign": "L1 post-training",
+      "scope_note": "Supporting RTX setup/control validation for the L1 post-training campaign, not a cumulative update to the L40S branch."
     },
     {
       "id": "trl-rtx-child-research",
-      "follows_experiments": ["trl-rtx-split-baseline"],
+      "follows_experiments": [
+        "trl-rtx-split-baseline"
+      ],
       "title": "RTX research pilot · 16K context · compiler children",
       "current_run_id": "20261020T111000Z-child-research-repair",
       "status": "open",
-      "intent": "Test a larger bounded research workflow only after resident verification, single-rank resume, full baseline and actual child tool checks pass.",
-      "change": "Root16384context, child4096input/4096aggregate output, up to2children with2compiler/correctness checks each. Reasoning and root-only loss preserved. New fenced-source action protocol avoids JSON-escaping CUDA source; format repair shares the same token budget.",
-      "conclusion": "Completed eight rollouts:4correct kernels,no final infrastructure errors. Exact45635root-token audit passed,all320adapters changed in one17→18update,and native checkpoint readback passed. Cycle1272.11seconds excluding initial inference startup. All51root replies reasoning,maxactualcontext11502,no length finishes,one turn-limit missing final. Actualchildren0,docslookups0. Separate diagnostic child completed3560tokens/4requests with2format repairs and1correctCUDAcheck; failed-compile repair cycle unproven.",
-      "decision": "Bounded pilot complete and checkpoint backed up. Keep2children: spontaneous use and benefit were not demonstrated. This and baseline18are separate branches sampled from17,not continued L40S coverage or proof of learned improvement. No automatic curriculum migration.",
+      "intent": "Test a larger, bounded research workflow only after resident verification, single-rank resume, the full baseline, and actual child-tool checks pass.",
+      "change": "Used 16,384 root context, 4,096 child input and aggregate output limits, and up to two children with two compiler/correctness checks each. Reasoning and root-only loss were preserved. A fenced-source action protocol avoided JSON-escaping CUDA source; format repair used the same token budget.",
+      "conclusion": "Eight rollouts completed: four correct kernels and no final infrastructure errors.\n\nThe exact 45,635-root-token audit passed; all 320 adapters changed in one step-17-to-18 update, and native checkpoint readback passed. Cycle time was 1,272.11 seconds, excluding initial inference startup.\n\nAll 51 root replies used reasoning; maximum actual context was 11,502, with no length finishes and one turn-limit reply missing its final answer. There were no actual child calls or documentation lookups.\n\nA separate diagnostic child completed 3,560 tokens across four requests, with two format repairs and one correct CUDA check; a failed-compile repair cycle remains unproven.",
+      "decision": "The bounded pilot is complete and its checkpoint is backed up. Keep the two-child option: spontaneous use and benefit were not demonstrated. This and the baseline step 18 are separate branches sampled from step 17, not continued L40S coverage or proof of learned improvement. Do not migrate this automatically into the curriculum.",
       "evidence_file": "notes/results/20261020-rtx-split-progression.json",
-      "limitations": ["Several protocol changes together; not a single-variable ablation.", "Actual tool availability is not proof of useful spontaneous delegation.", "Both pilot branches start from17; their step18checkpoints are different models.", "The earlier JSON-format diagnostic and zero-sample refused waiter remain preserved."],
-      "runs": ["20261020T111000Z-child-research-repair"],
-      "provenance": {"dataset_ids": ["ops6k-l1-seed42"], "documented_change_commits": ["6206d12", "bba9aaa", "420df34", "8c45656"], "notes": ["notes/results/20261020-rtx-split-progression.json"]}
+      "limitations": [
+        "Several protocol changes were combined; this is not a single-variable ablation.",
+        "Tool availability does not prove useful spontaneous delegation.",
+        "Both pilot branches start from step 17; their step-18 checkpoints are different models.",
+        "The earlier JSON-format diagnostic and zero-sample refused waiter remain preserved."
+      ],
+      "runs": [
+        "20261020T111000Z-child-research-repair"
+      ],
+      "provenance": {
+        "dataset_ids": [
+          "ops6k-l1-seed42"
+        ],
+        "documented_change_commits": [
+          "6206d12",
+          "bba9aaa",
+          "420df34",
+          "8c45656"
+        ],
+        "notes": [
+          "notes/results/20261020-rtx-split-progression.json"
+        ]
+      },
+      "category": "Research pilot",
+      "campaign": "L1 post-training",
+      "scope_note": "Independent RTX research pilot supporting the L1 post-training campaign; its step 18 is a separate branch, not cumulative L40S training."
     },
     {
       "id": "trl-l1-child-progress",
-      "follows_experiments": ["trl-l1-docs-ten-turn"],
+      "follows_experiments": [
+        "trl-l1-docs-ten-turn"
+      ],
       "title": "L1 continuation · child token progress · 4K child replies",
       "current_run_id": "20261020T081007Z-child-progress",
       "status": "open",
-      "intent": "Continue the unchanged L1 curriculum from verified checkpoint16, make child decoding observable, and permit4096child output tokens while retaining root-only loss.",
-      "change": "New immutable source690af12 includes event-driven child-only streaming counters and4096childreplycap. Two calls,2048input,90sdeadline,root14336context,rewards,optimizer and dataset unchanged. User resumed beyond the expired10amcutoff; ORIGINAL60USD total ceiling remains.",
-      "conclusion": "Saved17/18/19 on0007/0026/0027;19/50trained. Sixteen inherited plus3new optimizer points,24completed traces. Paused naturally10:21:59UTC on0006after three final-verifier workers segfaulted; no step20. CPU inspection found host dereferences of CUDA pointers in those candidates. Full failed-group traces and checkpoints through19are backed up; scores/attempts unchanged. No held-out quality improvement claimed.",
-      "decision": "Keep paused pending safe candidate-crash diagnosis/attribution. Do not silently retry/resample/regrade the failed group or replace checkpoint19with an RTXpilot18. Original60USD baseline unchanged; idle VM still bills. User controls termination.",
+      "intent": "Continue the unchanged L1 curriculum from verified checkpoint 16, make child decoding observable, and allow up to 4,096 child output tokens while keeping root-only loss.",
+      "change": "Immutable source 690af12 added event-driven child-only streaming counters and a 4,096-token child reply cap. The two-call limit, 2,048-token input, 90-second deadline, 14,336 root context, rewards, optimizer, and dataset stayed unchanged. The user resumed after the expired 10:00 cutoff; the original $60 total ceiling remained.",
+      "conclusion": "Steps 17, 18, and 19 were saved on tasks 0007, 0026, and 0027; 19 of 50 tasks were trained. The 19 optimizer points comprise 16 inherited and three new; 24 traces completed.\n\nTraining paused naturally at 10:21:59 UTC on task 0006 after three final-verifier workers segfaulted; there was no step 20. CPU inspection found host dereferences of CUDA pointers in those candidates.\n\nFailed-group traces and checkpoints through 19 are backed up; scores and attempts are unchanged. No held-out improvement is claimed.",
+      "decision": "Keep paused pending safe diagnosis and attribution of the candidate crashes. Do not silently retry, resample, or regrade the failed group, or replace checkpoint 19 with an RTX pilot step 18. The original $60 baseline is unchanged; the idle VM still bills, and the user controls termination.",
       "evidence_file": "notes/results/20261020-child-progress-training.json",
       "limitations": [
-        "CPU integration passes; first real GPU child streaming call and4096token KV/latency behavior remain unobserved.",
-        "A larger child output cap does not extend the unchanged90second deadline.",
-        "Recovered group was sampled before this change and cannot measure its benefit.",
-        "Root/child reasoning enabled; only sampled root tokens receive loss.16inherited metrics are not16new updates."
+        "CPU integration passes, but the first real GPU child-streaming call and 4,096-token KV/latency behavior remain unobserved.",
+        "A larger child output cap does not extend the unchanged 90-second deadline.",
+        "The recovered group was sampled before this change and cannot measure its effect.",
+        "Root and child reasoning are enabled, but only sampled root tokens receive loss. Sixteen inherited metrics are not 16 new updates."
       ],
-      "runs": ["20261020T081007Z-child-progress"],
+      "runs": [
+        "20261020T081007Z-child-progress"
+      ],
       "provenance": {
-        "dataset_ids": ["ops6k-l1-seed42"],
+        "dataset_ids": [
+          "ops6k-l1-seed42"
+        ],
         "code_paths": [
           "rlm/training/environments/kernel_rlm/kernel_rlm/subcalls.py",
           "rlm/training/environments/kernel_rlm/kernel_skyrl/bridge.py",
           "rlm/training/environments/kernel_rlm/kernel_trl/child_stream.py"
         ],
-        "notes": ["notes/results/20261020-child-progress.json", "notes/results/20261020-child-progress-training.json"],
-        "documented_change_commits": ["28fde6b", "690af126f88bebe1458093291ab183cbf24f2418"],
+        "notes": [
+          "notes/results/20261020-child-progress.json",
+          "notes/results/20261020-child-progress-training.json"
+        ],
+        "documented_change_commits": [
+          "28fde6b",
+          "690af126f88bebe1458093291ab183cbf24f2418"
+        ],
         "historical_attestation": "Runtime source hashes, original budget, operator authorization and exact recovered-group hashes were captured before launching. UI registry was refreshed after dispatch; do not claim a preregistered performance ablation."
-      }
+      },
+      "category": "Training continuation",
+      "campaign": "L1 post-training",
+      "scope_note": "L1 training continuation in the overarching campaign; tests child-stream visibility and a larger child reply cap, not a quality result."
     },
     {
       "id": "trl-l1-docs-ten-turn",
@@ -161,16 +252,16 @@
       "title": "L1 continuation · searchable CUDA docs · 10 turns",
       "current_run_id": "20261020T031000Z-admission-fair-retry",
       "status": "open",
-      "intent": "Continue the preserved policy8 through unchanged L1 tasks with searchable archived CUDA guidance and a later submission deadline.",
-      "change": "CUDA13.3 reference stored in REPL;8 normal turns plus2 recovery, first deadline warning at8; focused child example; reasoning enabled; CPU precompile and bounded inference shutdown. Production warm retention is disabled.",
-      "conclusion": "Steps15/16 saved at06:17/06:59UTC;16/50trained,8docs-variant updates(5current-run,11inherited). Both groups submitted8/8;5correct each. Speed0.977–1.134x(MaxPool3d) and1.093–1.119x(adaptiveMaxPool2d). Audits42191/35022tokens passed; both ranks fully restored14→15→16 and changedall320adapters each update. No root admission or final infrastructure errors. All92root replies reasoning,no length/capacity/child outcomes;one recovery submitted,two docssearches. Same driver started0007policy16. Forty traces/16metrics synced; local15/16archive+4filehashes verified. Next scoring cannot fit65minbound before08:00UTC;preserve its samples at guard. No held-out policy improvement established.",
-      "decision": "Paused naturally at09:31Madrid before task0007 scoring could fit the20October10:00cutoff. Policy16and all8unscored submissions/generation manifest are preserved; no step17. Hourly monitor paused. ORIGINAL60USD baseline unchanged; VM still bills. Child progress/4096output is CPU-tested new source only, not deployed into this run. Further training requires renewed time authorization and preserved sampled-protocol provenance.",
+      "intent": "Continue preserved policy 8 through unchanged L1 tasks, using searchable archived CUDA guidance and a later submission deadline.",
+      "change": "Stored the CUDA 13.3 reference in the REPL; allowed eight normal turns plus two recovery turns, with the first deadline warning at turn eight. Added a focused child example, enabled reasoning, and used CPU precompilation and bounded inference shutdown. Production warm retention stayed disabled.",
+      "conclusion": "Steps 15 and 16 were saved at 06:17 and 06:59 UTC; 16 of 50 tasks were trained. The 16 total updates comprise 11 inherited and five new updates in this run. Eight of the total used the documentation variant.\n\nBoth groups submitted all eight candidates, with five correct each. Speeds were 0.977–1.134× for MaxPool3d and 1.093–1.119× for adaptiveMaxPool2d.\n\nThe 42,191- and 35,022-token audits passed; both ranks restored fully from 14 to 15 to 16, and all 320 adapters changed at each update. There were no root-admission or final infrastructure errors.\n\nAll 92 root replies used reasoning, with no length, capacity, or child outcomes; one recovery was submitted and two documentation searches were used.\n\nThe same driver started task 0007 at policy 16. Forty traces and 16 metrics synced; local step-15/16 archives and four file hashes were verified.\n\nThe next scoring phase could not fit within the 65-minute bound before 08:00 UTC, so samples were preserved at the guard. No held-out policy improvement is established.",
+      "decision": "Training paused naturally at 09:31 Madrid time before task 0007 scoring could fit the October 20 10:00 cutoff. Policy 16 and all eight unscored submissions and the generation manifest are preserved; there was no step 17. The hourly monitor is paused. The original $60 baseline is unchanged and the VM still bills. Child progress and the 4,096-token output cap are CPU-tested source only; they were not deployed in this run. Further training needs renewed time authorization and preserved sampled-protocol provenance.",
       "evidence_file": "notes/results/20261020-docs-training.json",
       "limitations": [
-        "Multiple protocol/infrastructure changes are combined; this is not a single-variable ablation.",
-        "42tasks untrained at launch, including3previous deferrals.",
+        "Multiple protocol and infrastructure changes are combined; this is not a single-variable ablation.",
+        "Forty-two tasks were untrained at launch, including three prior deferrals.",
         "Child outputs remain context only; root reasoning tokens receive GRPO credit but are not replayed in later context.",
-        "No inference/learner residency overlap. VM rental continues after workload exit."
+        "Inference and learner residency do not overlap. The VM rental continues after workload exit."
       ],
       "runs": [
         "20261019T225000Z-docs-turn10",
@@ -199,146 +290,333 @@
           "07c4008a5a7fcfba21084cfdf86347cee71f2349"
         ],
         "historical_attestation": "Registered before GPU dispatch. Execution source6c245d8 and pinned corpus hash are separate from UI metadata; old snapshots are unchanged."
-      }
+      },
+      "category": "Training continuation",
+      "campaign": "L1 post-training",
+      "scope_note": "L1 training continuation in the overarching campaign with searchable CUDA documentation; later child-progress changes were not deployed in this run."
     },
     {
       "id": "trl-l1-grpo-baseline",
-      "follows_experiments": ["trl-rlm-l40s"],
+      "follows_experiments": [
+        "trl-rlm-l40s"
+      ],
       "title": "L1 curriculum · TRL + Muon · eight rollouts",
       "current_run_id": "20261019T160431Z-context-resume",
       "status": "paused",
-      "intent": "Train the pinned Laguna policy through TRL across all 50 unchanged L1 tasks in easy-first order, using eight trajectories per task and exact root-only credit.",
-      "change": "Checkpoint-correct rotary settings; constructor-aware CUDA verification; eight trajectories at initial concurrency four; 1,024-token recovery; phase-shared inference and training on the existing two L40S GPUs.",
-      "conclusion": "Step8 saved at21:33Madrid on task0035; the driver then paused normally at the authorized three-update limit. One of eight kernels was correct, reward0.769 at0.6875x reference speed (slower). Six submissions, no final infrastructure errors. Audit49540tokens passed; both ranks fully restored7 then changed all320 adapters. Eight of50 tasks are trained;0047,0019 and0042 are deferred. Forty trajectories and eight optimizer points are synced. No held-out quality improvement is established.",
-      "decision": "The authorized block is complete: no additional update or GPU evaluation was launched. Compact checkpoint8 is independently verified locally; all deferred samples remain intact. The hourly monitor is paused while Trackio stays available. The VM remains rented and bills when idle; do not stop it without authorization. Post-run repairs and opt-in inference reuse/CPU precompilation are implemented. A zero-update fixed-policy GPU diagnostic measured66.1s cold versus2.1s wake and99.5s serial versus69.9s overlapped (29.8% less time); this is not full GRPO throughput. Use a new bounded continuation with explicit scope; the old source/run stays immutable. The old0038/0041 evaluation pair is not held-out; validate a coverage-aware replacement first.",
+      "intent": "Train the pinned Laguna policy with TRL across the unchanged 50-task L1 set in easy-first order, using eight trajectories per task and exact root-only credit.",
+      "change": "Used checkpoint-correct rotary settings, constructor-aware CUDA verification, eight trajectories at initial concurrency four, 1,024-token recovery, and phase-shared inference/training on the existing two L40S GPUs.",
+      "conclusion": "Step 8 was saved at 21:33 Madrid time on task 0035; the driver then paused normally at the authorized three-update limit.\n\nOne of eight kernels was correct, with reward 0.769 at 0.6875× reference speed (slower). Six submissions completed; there were no final infrastructure errors.\n\nThe 49,540-token audit passed; both ranks restored fully from step 7, then changed all 320 adapters.\n\nEight of 50 tasks have trained updates; 0047, 0019, and 0042 are deferred. Forty trajectories and eight optimizer points synced. No held-out quality improvement is established.",
+      "decision": "The authorized block is complete; no additional update or GPU evaluation was launched. Compact checkpoint 8 is independently verified locally, and all deferred samples remain intact. The hourly monitor is paused while Trackio stays available. The VM remains rented and bills when idle; do not stop it without authorization. Post-run repairs and opt-in inference reuse/CPU precompilation are implemented. A zero-update fixed-policy GPU diagnostic measured 66.1 seconds cold versus 2.1 seconds wake, and 99.5 seconds serial versus 69.9 seconds overlapped (29.8% less time); this is not full GRPO throughput. Use a new bounded continuation with explicit scope; the old source/run stays immutable. The old 0038/0041 evaluation pair is not held out; validate a coverage-aware replacement first.",
       "evidence_file": "notes/results/20261019-context-resume.json",
-      "limitations": ["Eight of50 tasks have saved updates;42 remain untrained, including deferred0047,0019 and0042. No held-out quality evaluation is complete.", "Task difficulty requires source and constructor values: task0047 has learned-state contracts but only single-channel1x1 convolution arithmetic.", "Task0035 had four intermediate GPU-queue timeouts, three length-limited1024-token recovery replies and a recovery-only rule rejection. Final scoring had no infrastructure failure.", "Task0042's missing final followed recovery-only rule rejections, not token-cap finishes. One child timed out at90.1s despite a saved backend response at133.7s; the bridge cancellation repair now passes CPU disconnect/admission tests, but live GPU abort and throughput measurements remain unvalidated.", "Full distributed learner restore from7 into8 passed. Remote8 and local8 passed all four file hashes; earlier backups remain verified. A future distributed restore from8 remains unobserved.", "Post-run repairs and scheduling flags are implemented; fixed-policy GPU component tests passed four CUDA verifications. Full eight-trajectory integration, live child-cancellation latency and learner/sleeping-server coexistence are not established. The immutable baseline was not hot-patched or restarted.", "Trackio uses separate generation, scoring and one-update trainer runs. A single continuous optimizer-loss curve is not yet wired.", "Reference KL is not computed because beta is zero; missing KL must not be interpreted as zero divergence.", "Dollar costs use the displayed rate, not an invoice. The VM continues billing when GPU processes stop.", "The registry was refreshed after launch; it is not a new attestation of the immutable source snapshot."],
-      "runs": ["20261018T235332Z-4b40f63d", "20261019T030616Z", "20261019T061127Z-contract", "20261019T065300Z-easy-first", "20261019T072942Z-recovery", "20261019T083616Z-phased", "20261019T111522Z-admission-retry", "20261019T140720Z-deferred-curriculum", "20261019T160431Z-context-resume"],
+      "limitations": [
+        "Eight of 50 tasks have saved updates; 42 remain untrained, including deferred 0047, 0019, and 0042. No held-out quality evaluation is complete.",
+        "Task difficulty requires source and constructor values: task 0047 has learned-state contracts but only single-channel 1×1 convolution arithmetic.",
+        "Task 0035 had four intermediate GPU-queue timeouts, three length-limited 1,024-token recovery replies, and a recovery-only rule rejection. Final scoring had no infrastructure failure.",
+        "Task 0042’s missing final followed recovery-only rule rejections, not token-cap finishes. One child timed out at 90.1 seconds despite a saved backend response at 133.7 seconds; the bridge cancellation repair passes CPU disconnect/admission tests, but live GPU abort and throughput remain unvalidated.",
+        "Full distributed learner restore from 7 into 8 passed. Remote and local step 8 passed all four file hashes; earlier backups remain verified. A future distributed restore from 8 remains unobserved.",
+        "Post-run repairs and scheduling flags are implemented; fixed-policy GPU component tests passed four CUDA verifications. Full eight-trajectory integration, live child-cancellation latency, and learner/sleeping-server coexistence are not established. The immutable baseline was not hot-patched or restarted.",
+        "Trackio uses separate generation, scoring, and one-update trainer runs. A single continuous optimizer-loss curve is not wired.",
+        "Reference KL is not computed because beta is zero; missing KL must not be interpreted as zero divergence.",
+        "Dollar costs use the displayed rate, not an invoice. The VM continues billing when GPU processes stop.",
+        "The registry was refreshed after launch; it is not a new attestation of the immutable source snapshot."
+      ],
+      "runs": [
+        "20261018T235332Z-4b40f63d",
+        "20261019T030616Z",
+        "20261019T061127Z-contract",
+        "20261019T065300Z-easy-first",
+        "20261019T072942Z-recovery",
+        "20261019T083616Z-phased",
+        "20261019T111522Z-admission-retry",
+        "20261019T140720Z-deferred-curriculum",
+        "20261019T160431Z-context-resume"
+      ],
       "provenance": {
-        "dataset_ids": ["ops6k-l1-seed42"],
-        "code_paths": ["rlm/training/environments/kernel_rlm/kernel_skyrl/laguna_policy.py", "rlm/training/environments/kernel_rlm/kernel_trl/collect.py", "rlm/training/environments/kernel_rlm/kernel_trl/rlm_update.py", "rlm/training/environments/kernel_rlm/kernel_trl/spending.py", "rlm/training/environments/kernel_rlm/kernel_rlm/candidate.py", "rlm/training/environments/kernel_rlm/kernel_rlm/verifier.py"],
-        "notes": ["notes/results/20261019-l1-budget.json", "notes/results/20261019-phased-training.json", "notes/results/20261019-cpu-preflight.json", "notes/results/20261019-admission-retry.json", "notes/results/20261019-three-update-block.json", "notes/results/20261019-feedback-cpu-check.json", "notes/results/20261019-feedback-repair.json", "notes/results/20261019-scheduling-probe.json", "notes/curriculum/lvl1_seed42_easy_first.jsonl", "rlm/training/environments/kernel_rlm/kernel_trl/ROTARY_COMPATIBILITY.md", "rlm/training/environments/kernel_rlm/kernel_rlm/STATEFUL_TASKS.md"],
-        "documented_change_commits": ["0d19bc5", "20b430e", "9108299", "405036f", "ca273bf", "b7216e5"],
+        "dataset_ids": [
+          "ops6k-l1-seed42"
+        ],
+        "code_paths": [
+          "rlm/training/environments/kernel_rlm/kernel_skyrl/laguna_policy.py",
+          "rlm/training/environments/kernel_rlm/kernel_trl/collect.py",
+          "rlm/training/environments/kernel_rlm/kernel_trl/rlm_update.py",
+          "rlm/training/environments/kernel_rlm/kernel_trl/spending.py",
+          "rlm/training/environments/kernel_rlm/kernel_rlm/candidate.py",
+          "rlm/training/environments/kernel_rlm/kernel_rlm/verifier.py"
+        ],
+        "notes": [
+          "notes/results/20261019-l1-budget.json",
+          "notes/results/20261019-phased-training.json",
+          "notes/results/20261019-cpu-preflight.json",
+          "notes/results/20261019-admission-retry.json",
+          "notes/results/20261019-three-update-block.json",
+          "notes/results/20261019-feedback-cpu-check.json",
+          "notes/results/20261019-feedback-repair.json",
+          "notes/results/20261019-scheduling-probe.json",
+          "notes/curriculum/lvl1_seed42_easy_first.jsonl",
+          "rlm/training/environments/kernel_rlm/kernel_trl/ROTARY_COMPATIBILITY.md",
+          "rlm/training/environments/kernel_rlm/kernel_rlm/STATEFUL_TASKS.md"
+        ],
+        "documented_change_commits": [
+          "0d19bc5",
+          "20b430e",
+          "9108299",
+          "405036f",
+          "ca273bf",
+          "b7216e5"
+        ],
         "historical_attestation": "The user authorized this goal before admission. Committed model/environment source and dataset hashes were captured before generation; the UI registration was added during startup, not backfilled as a launch-snapshot attestation. Admission source commit: 9108299."
-      }
+      },
+      "category": "Training continuation",
+      "campaign": "L1 post-training",
+      "scope_note": "Initial bounded native TRL/Muon L1 training stage in the overarching campaign; 8 updates, not a completed 50-task pass."
     },
     {
       "id": "trl-rlm-l40s",
-      "follows_experiments": ["checkpoint-resume"],
+      "follows_experiments": [
+        "checkpoint-resume"
+      ],
       "title": "Train exact RLM turns with TRL on two L40S",
       "status": "concluded",
-      "intent": "Can fast tensor-parallel inference supply genuine CUDA RLM trajectories for a correctly normalized native TRL/Muon update on the same GPU pair?",
-      "change": "Separate vLLM runtime; exact per-turn prompts and root-only targets; trajectory-level GRPO advantages; native DAPO PPO loss; phase-separated one-step training and compact adapter export.",
-      "conclusion": "A real L1 group produced 22 exact root turns and one native TRL/Muon update. Compact export, CPU read-back and vLLM trained-adapter inference passed. Rewards were 0.1/0/0.1/0.1; zero of four kernels were correct. The update carried submission-format signal, not positive correctness/speed signal.",
-      "decision": "Keep the TRL/TP2 training route. Fix constructor-state interfaces and verifier feedback delays, then audit sampler/learner clipping before spending on a longer run.",
+      "intent": "Test whether fast tensor-parallel inference can supply genuine CUDA RLM trajectories for a correctly normalized native TRL/Muon update on the same GPU pair.",
+      "change": "Used a separate vLLM runtime, exact per-turn prompts and root-only targets, trajectory-level GRPO advantages, native DAPO PPO loss, phase-separated one-step training, and compact adapter export.",
+      "conclusion": "A real L1 group produced 22 exact root turns and one native TRL/Muon update. Compact export, CPU readback, and vLLM inference with the trained adapter passed. Rewards were 0.1, 0, 0.1, and 0.1; none of the four kernels was correct. The update carried submission-format signal, not positive correctness or speed signal.",
+      "decision": "Keep the TRL/TP2 training route. Fix constructor-state interfaces and verifier feedback delays, then audit sampler/learner clipping before funding a longer run.",
       "evidence_file": "notes/results/20261018-trl-live.json",
-      "limitations": ["No quality improvement is established by one update or by adapter reload.", "This run starts from the pinned base, not the old Prime checkpoint.", "Full fresh-process optimizer/scheduler/sampler resume remains untested.", "Native initial clipping statistic was about 0.306, averaged over microbatches and including padding in metrics."],
-      "runs": ["20261018T212420Z-50f5a8cb"],
+      "limitations": [
+        "One update or adapter reload does not establish quality improvement.",
+        "This run starts from the pinned base, not the earlier Prime checkpoint.",
+        "Fresh-process optimizer, scheduler, and sampler resume remain untested.",
+        "The native initial clipping statistic was about 0.306, averaged over microbatches and including padding in metrics."
+      ],
+      "runs": [
+        "20261018T212420Z-50f5a8cb"
+      ],
       "provenance": {
-        "dataset_ids": ["ops6k-l1-seed42"],
-        "code_paths": ["rlm/training/environments/kernel_rlm/kernel_trl/turn_credit.py", "rlm/training/environments/kernel_rlm/kernel_trl/replay_trainer.py", "rlm/training/environments/kernel_rlm/kernel_trl/rlm_update.py", "rlm/training/environments/kernel_rlm/kernel_trl/collect.py", "rlm/training/environments/kernel_rlm/kernel_skyrl/generator.py", "rlm/training/environments/kernel_rlm/kernel_rlm_v1/program.py"],
-        "notes": ["rlm/training/environments/kernel_rlm/kernel_trl/RLM_TRAINING.md", "notes/datasets.md"],
-        "documented_change_commits": ["9f73e79"],
+        "dataset_ids": [
+          "ops6k-l1-seed42"
+        ],
+        "code_paths": [
+          "rlm/training/environments/kernel_rlm/kernel_trl/turn_credit.py",
+          "rlm/training/environments/kernel_rlm/kernel_trl/replay_trainer.py",
+          "rlm/training/environments/kernel_rlm/kernel_trl/rlm_update.py",
+          "rlm/training/environments/kernel_rlm/kernel_trl/collect.py",
+          "rlm/training/environments/kernel_rlm/kernel_skyrl/generator.py",
+          "rlm/training/environments/kernel_rlm/kernel_rlm_v1/program.py"
+        ],
+        "notes": [
+          "rlm/training/environments/kernel_rlm/kernel_trl/RLM_TRAINING.md",
+          "notes/datasets.md"
+        ],
+        "documented_change_commits": [
+          "9f73e79"
+        ],
         "historical_attestation": "Uploaded source hashes were captured before rollout and verified equivalent to 9f73e79 on import. Remote Git checkout state was not measured. Earlier Prime provenance is not reused."
-      }
+      },
+      "category": "Research pilot",
+      "campaign": "L1 post-training",
+      "scope_note": "Early native TRL/RLM L1 pilot in the broader campaign. It is a separate trainer/checkpoint lineage from earlier Prime/Modal work and started from the pinned base; registry evidence associates it with ops6k-l1-seed42."
     },
     {
       "id": "factory-provenance",
-      "follows_experiments": ["checkpoint-resume"],
+      "follows_experiments": [
+        "checkpoint-resume"
+      ],
       "title": "Trace experiments from inputs to artifacts",
       "status": "prepared",
       "intent": "Require a registered research question and exact input evidence before future GRPO launches.",
-      "change": "Record both repository commits, dataset/config/source hashes, small snapshots, lifecycle events and checkpoint parents. Validate mounted inputs before the trainer starts.",
-      "conclusion": "Offline tests passed. A real clean-repository preparation captured 95 inputs (0.81 MB), verified the 50-task dataset and pinned Prime checkout, and made zero remote dispatches. The cloud mounted-input gate remains untested live.",
+      "change": "Record both repository commits, dataset/config/source hashes, small snapshots, lifecycle events, and checkpoint parents. Validate mounted inputs before the trainer starts.",
+      "conclusion": "Offline tests passed. A clean-repository preparation captured 95 inputs (0.81 MB), verified the 50-task dataset and pinned Prime checkout, and made no remote dispatches. The cloud mounted-input gate remains untested live.",
       "evidence_file": "notes/results/20261017-factory-preflight.json",
       "decision": "Validate locally now; use the provenance gate on the next explicitly authorized bounded training run.",
-      "limitations": ["Older runs have no retrospective input attestation.", "Dataset upstream revision and immutable container image digest remain unknown.", "Initial automatic capture covers the GRPO launcher, not every historical probe."],
+      "limitations": [
+        "Older runs have no retrospective input attestation.",
+        "The dataset upstream revision and immutable container image digest remain unknown.",
+        "Initial automatic capture covers the GRPO launcher, not every historical probe."
+      ],
       "runs": [],
       "provenance": {
-        "dataset_ids": ["ops6k-l1-seed42"],
-        "code_paths": ["rlm/training/environments/kernel_rlm/kernel_factory/__init__.py", "rlm/training/environments/kernel_rlm/modal_app/grpo_live_smoke.py"],
-        "notes": ["rlm/training/environments/kernel_rlm/kernel_factory/README.md", "notes/datasets.md", "scripts/curriculum_from_ops6k.py"],
+        "dataset_ids": [
+          "ops6k-l1-seed42"
+        ],
+        "code_paths": [
+          "rlm/training/environments/kernel_rlm/kernel_factory/__init__.py",
+          "rlm/training/environments/kernel_rlm/modal_app/grpo_live_smoke.py"
+        ],
+        "notes": [
+          "rlm/training/environments/kernel_rlm/kernel_factory/README.md",
+          "notes/datasets.md",
+          "scripts/curriculum_from_ops6k.py"
+        ],
         "historical_attestation": "New infrastructure; local prepared records do not imply GPU execution"
-      }
+      },
+      "category": "Tooling preparation",
+      "campaign": "L1 post-training",
+      "scope_note": "Supporting provenance setup for future authorized campaign runs; cloud mounted-input validation remains untested."
     },
     {
       "id": "checkpoint-resume",
-      "follows_experiments": ["first-grpo-update"],
+      "follows_experiments": [
+        "first-grpo-update"
+      ],
       "provenance": {
-        "dataset_ids": ["ops6k-l1-seed42"],
-        "code_paths": ["rlm/training/environments/kernel_rlm/modal_app/compact_checkpoint.py", "rlm/training/environments/kernel_rlm/modal_app/grpo_live_smoke.py"],
-        "notes": ["notes/results/20261016-resumed-grpo.json", "notes/datasets.md", "scripts/curriculum_from_ops6k.py"],
-        "documented_change_commits": ["c111df1", "10195f2"],
+        "dataset_ids": [
+          "ops6k-l1-seed42"
+        ],
+        "code_paths": [
+          "rlm/training/environments/kernel_rlm/modal_app/compact_checkpoint.py",
+          "rlm/training/environments/kernel_rlm/modal_app/grpo_live_smoke.py"
+        ],
+        "notes": [
+          "notes/results/20261016-resumed-grpo.json",
+          "notes/datasets.md",
+          "scripts/curriculum_from_ops6k.py"
+        ],
+        "documented_change_commits": [
+          "c111df1",
+          "10195f2"
+        ],
         "historical_attestation": "Change references only; exact launch commit and input hashes were not captured for these old runs"
       },
       "title": "Resume GRPO and save compact state",
       "status": "validated",
       "intent": "Restore step 1, complete one additional Muon update, and save only adapter and training state without losing resumability.",
-      "change": "Preload the pinned base before LoRA restore; exclude frozen base weights from new checkpoints. Keep the old checkpoint unchanged.",
-      "conclusion": "Distributed restore from the original full checkpoint and optimizer step 2 passed. The new 68 MB checkpoint passed CPU read-back. This does not establish better kernel generation.",
+      "change": "Preload the pinned base before restoring LoRA and exclude frozen base weights from new checkpoints. Keep the old checkpoint unchanged.",
+      "conclusion": "Distributed restore from the original full checkpoint and optimizer step 2 passed. The new 68 MB checkpoint passed CPU readback. This does not establish better kernel generation.",
       "decision": "Validate a distributed restart from the compact checkpoint before a longer run. Keep rank 8 and current hardware limits.",
-      "limitations": ["No distributed restart from the newly compact checkpoint yet.", "One admitted cummax group is not a held-out quality comparison.", "Recovery turns and child delegation were not exercised."],
-      "runs": ["20261016T160356Z-ae58574d", "20261016T161811Z-a40752ff"],
+      "limitations": [
+        "A distributed restart from the new compact checkpoint has not been tested.",
+        "One admitted cummax group is not a held-out quality comparison.",
+        "Recovery turns and child delegation were not exercised."
+      ],
+      "runs": [
+        "20261016T160356Z-ae58574d",
+        "20261016T161811Z-a40752ff"
+      ],
       "evidence_file": "notes/results/20261016-resumed-grpo.json",
-      "relationships": [{"from": "20261016T160356Z-ae58574d", "to": "20261016T161811Z-a40752ff", "kind": "retry", "label": "Retry after checkpoint key fix; not a trained-checkpoint dependency"}]
+      "relationships": [
+        {
+          "from": "20261016T160356Z-ae58574d",
+          "to": "20261016T161811Z-a40752ff",
+          "kind": "retry",
+          "label": "Retry after checkpoint key fix; not a trained-checkpoint dependency"
+        }
+      ],
+      "category": "Fix validation",
+      "campaign": "L1 post-training",
+      "scope_note": "Supporting checkpoint-resume validation for campaign training; it confirms resumability mechanics, not improved kernel quality."
     },
     {
       "id": "first-grpo-update",
       "provenance": {
-        "dataset_ids": ["ops6k-l1-seed42"],
-        "code_paths": ["rlm/training/environments/kernel_rlm/kernel_rlm_v1/program.py", "rlm/training/environments/kernel_rlm/kernel_rlm_v1/taskset.py"],
-        "notes": ["notes/results/20261016-grpo-pilot.json", "notes/datasets.md", "scripts/curriculum_from_ops6k.py"],
+        "dataset_ids": [
+          "ops6k-l1-seed42"
+        ],
+        "code_paths": [
+          "rlm/training/environments/kernel_rlm/kernel_rlm_v1/program.py",
+          "rlm/training/environments/kernel_rlm/kernel_rlm_v1/taskset.py"
+        ],
+        "notes": [
+          "notes/results/20261016-grpo-pilot.json",
+          "notes/datasets.md",
+          "scripts/curriculum_from_ops6k.py"
+        ],
         "historical_attestation": "Exact launch commit and input hashes were not captured; current files must not be presented as historical snapshots"
       },
       "title": "First saved GRPO update",
       "status": "validated",
-      "intent": "Verify the real model can produce rollouts, supply a nonzero GRPO signal, update attention LoRA, and save training state.",
-      "change": "Three A100s: one for inference/verifier access and two for expert-parallel training. Rank-8 attention LoRA with Muon.",
-      "conclusion": "Step 1 and checkpoint read-back passed. Rewards [0, 0.1, 0, 0.1] supplied submission signal only; no admitted final kernel was correct.",
+      "intent": "Verify that the real model can produce rollouts, provide a nonzero GRPO signal, update attention LoRA, and save training state.",
+      "change": "Used three A100s: one for inference/verifier access and two for expert-parallel training. Used rank-8 attention LoRA with Muon.",
+      "conclusion": "Step 1 and checkpoint readback passed. Rewards [0, 0.1, 0, 0.1] provided submission signal only; no admitted final kernel was correct.",
       "decision": "Use the saved state to validate resume and improve submission reliability before scaling training.",
-      "limitations": ["Three of five saved episodes reached the turn limit.", "The original full checkpoint is about 134 GB; preserve it until compact resume is validated."],
-      "runs": ["20261016T110144Z-74f7d8b6"],
-      "evidence_file": "notes/results/20261016-grpo-pilot.json"
+      "limitations": [
+        "Three of five saved episodes reached the turn limit.",
+        "The original full checkpoint is about 134 GB; preserve it until compact resume is validated."
+      ],
+      "runs": [
+        "20261016T110144Z-74f7d8b6"
+      ],
+      "evidence_file": "notes/results/20261016-grpo-pilot.json",
+      "category": "Setup validation",
+      "campaign": "L1 post-training",
+      "scope_note": "Early Prime/Modal GRPO setup milestone supporting the L1 campaign. The registry associates it with ops6k-l1-seed42. Its checkpoint lineage is separate from the later native TRL route."
     },
     {
       "id": "reply-budget",
-      "follows_experiments": ["checkpoint-resume"],
+      "follows_experiments": [
+        "checkpoint-resume"
+      ],
       "provenance": {
-        "dataset_ids": ["ops6k-l1-seed42"],
-        "code_paths": ["rlm/training/environments/kernel_rlm/configs/grpo_pilot.toml", "rlm/training/environments/kernel_rlm/configs/grpo_level1.toml"],
-        "notes": ["PROJECT_TRACKER.html", "notes/datasets.md", "scripts/curriculum_from_ops6k.py"],
-        "documented_change_commits": ["090e1d0"],
+        "dataset_ids": [
+          "ops6k-l1-seed42"
+        ],
+        "code_paths": [
+          "rlm/training/environments/kernel_rlm/configs/grpo_pilot.toml",
+          "rlm/training/environments/kernel_rlm/configs/grpo_level1.toml"
+        ],
+        "notes": [
+          "PROJECT_TRACKER.html",
+          "notes/datasets.md",
+          "scripts/curriculum_from_ops6k.py"
+        ],
+        "documented_change_commits": [
+          "090e1d0"
+        ],
         "historical_attestation": "Prepared change; no live run exists"
       },
       "title": "Give complete CUDA replies more room",
       "status": "prepared",
       "intent": "Reduce per-call truncations without expanding the context window or recovery budget.",
-      "change": "Normal training reply cap: 2,048 → 4,096. Context remains 12,288; recovery 512; child output 2,048; four rollouts in flight.",
-      "conclusion": "40 focused CPU checks passed. No live model run has tested the larger reply cap.",
-      "decision": "Use a bounded validation before a longer training launch; inspect output lengths, context pressure and GPU memory.",
-      "limitations": ["Longer replies may increase latency and context consumption.", "No GPU memory or quality result at the new limit."],
+      "change": "Raised the normal training reply cap from 2,048 to 4,096 tokens. Context remains 12,288; recovery 512; child output 2,048; four rollouts in flight.",
+      "conclusion": "Forty focused CPU checks passed. No live model run has tested the larger reply cap.",
+      "decision": "Use a bounded validation before a longer training launch; inspect output lengths, context pressure, and GPU memory.",
+      "limitations": [
+        "Longer replies may increase latency and context use.",
+        "There is no GPU memory or quality result at the new limit."
+      ],
       "code_commit": "090e1d0",
-      "runs": []
+      "runs": [],
+      "category": "Tooling preparation",
+      "campaign": "L1 post-training",
+      "scope_note": "Supporting tooling preparation for campaign rollouts; the larger cap has CPU checks only and no live model validation."
     },
     {
       "id": "subcall-guidance",
-      "follows_experiments": ["checkpoint-resume"],
+      "follows_experiments": [
+        "checkpoint-resume"
+      ],
       "provenance": {
-        "dataset_ids": ["ops6k-l1-seed42"],
-        "code_paths": ["rlm/training/environments/kernel_rlm/kernel_rlm/subcalls.py", "rlm/training/environments/kernel_rlm/kernel_rlm_v1/program.py"],
-        "notes": ["PROJECT_TRACKER.html", "notes/datasets.md", "scripts/curriculum_from_ops6k.py"],
-        "documented_change_commits": ["1ce55e4"],
+        "dataset_ids": [
+          "ops6k-l1-seed42"
+        ],
+        "code_paths": [
+          "rlm/training/environments/kernel_rlm/kernel_rlm/subcalls.py",
+          "rlm/training/environments/kernel_rlm/kernel_rlm_v1/program.py"
+        ],
+        "notes": [
+          "PROJECT_TRACKER.html",
+          "notes/datasets.md",
+          "scripts/curriculum_from_ops6k.py"
+        ],
+        "documented_change_commits": [
+          "1ce55e4"
+        ],
         "historical_attestation": "Prepared change; no live run exists"
       },
       "title": "Make focused delegation easier",
       "status": "prepared",
-      "intent": "Help the root delegate difficult kernel subproblems without requiring or rewarding unnecessary child calls.",
-      "change": "Optional semantics, indexing, algorithm and compiler reviews; a small executable llm_query example stores advice and prints a short slice.",
-      "conclusion": "11 CPU checks passed, including the example through the real worker/proxy with a mocked child. No live delegation benefit is measured.",
-      "decision": "Inspect optional child use on harder kernels. Judge correctness, tokens and time, not the number of child calls.",
-      "limitations": ["Children return untested text/code advice; they have no REPL or verifier.", "No live comparison for this prompt yet."],
+      "intent": "Help the root delegate difficult kernel subproblems without requiring child calls or rewarding unnecessary delegation.",
+      "change": "Added optional semantics, indexing, algorithm, and compiler reviews. A small executable llm_query example stores advice and prints a short excerpt.",
+      "conclusion": "Eleven CPU checks passed, including the example through the real worker/proxy with a mocked child. No live delegation benefit was measured.",
+      "decision": "Inspect optional child use on harder kernels. Judge correctness, tokens, and time, not the number of child calls.",
+      "limitations": [
+        "Children return untested text/code advice; they have no REPL or verifier.",
+        "There is no live comparison for this prompt yet."
+      ],
       "code_commit": "1ce55e4",
-      "runs": []
+      "runs": [],
+      "category": "Tooling preparation",
+      "campaign": "L1 post-training",
+      "scope_note": "Supporting tooling preparation for campaign rollouts; CPU tests validate the mocked workflow, not a live delegation benefit."
     }
   ]
 }
