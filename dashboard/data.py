@@ -515,6 +515,37 @@ def trajectory_metrics(trace: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def trajectory_model(run: dict[str, Any], trace: dict[str, Any]) -> dict[str, Any]:
+    """Prefer recorded model identity; declarations identify only a base model."""
+    info = trace.get("info") or {}
+    report = run.get("report") or run.get("_reader", {}).get("report") or {}
+    for source, record in (("trace.info", info), ("trace", trace), ("report", report)):
+        for field in ("model", "model_id"):
+            if record.get(field):
+                return {
+                    "model": record[field],
+                    "model_scope": "recorded",
+                    "model_source": f"{source}.{field}",
+                }
+    declarations = [
+        (experiment["id"], experiment["provenance"]["base_model"])
+        for experiment in experiments()
+        if run["id"] in (experiment.get("runs") or [])
+        and (experiment.get("provenance") or {}).get("base_model")
+    ]
+    if len(declarations) == 1:
+        experiment_id, base = declarations[0]
+        return {
+            "model": base["id"],
+            "model_scope": "base",
+            "model_revision": base.get("revision"),
+            "model_source": "training/environments/kernel_rlm/dashboard/experiments.json"
+            f"#experiments/{experiment_id}/provenance/base_model",
+            "model_evidence": base.get("evidence"),
+        }
+    return {"model": None, "model_scope": None, "model_source": None}
+
+
 def trajectory_metadata(
     run: dict[str, Any], trace: dict[str, Any], index: int, *, task_catalog_path: Path | None = None
 ) -> dict[str, Any]:
@@ -574,9 +605,7 @@ def trajectory_metadata(
         if catalog_item.get("ops")
         else "task.data.name",
         "benchmark": task_data.get("benchmark") or (" · ".join(datasets) if datasets else None),
-        "model": info.get("model")
-        or run.get("report", {}).get("model_id")
-        or run.get("_reader", {}).get("report", {}).get("model_id"),
+        **trajectory_model(run, trace),
         "started_at": started_at,
         "completion": completion,
         "outcome": outcome,

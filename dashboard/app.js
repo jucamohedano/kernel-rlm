@@ -235,6 +235,9 @@ async function experimentsPage(id, signal, ticket) {
   }
   if (!selected.runs.length) linked.append(el("p", "muted", "No execution was recorded for this preparation."));
 }
+function modelLabel(t) {
+  return t.model ? `${t.model}${t.model_scope === "base" ? " · base model" : ""}` : "Model unavailable";
+}
 function trajectoryCard(t, fallbackRun) {
   const runId = t.run?.id || fallbackRun;
   const card = el("article", "trajectory-card");
@@ -243,7 +246,7 @@ function trajectoryCard(t, fallbackRun) {
   const meta = el("p", "trajectory-meta", `${t.task || "Task unavailable"} · Attempt ${t.attempt ?? "—"}`);
   card.append(meta);raw(card,t.id,"Episode ID");
   const tags = el("div", "detail-actions"); experimentTags(tags, t.experiments); card.append(tags);
-  card.append(el("p", "muted", `${t.benchmark || "Benchmark unavailable"} · ${t.model || "Model unavailable"}`));
+  card.append(el("p", "muted", `${t.benchmark || "Benchmark unavailable"} · ${modelLabel(t)}`));
   const outcomes = el("div", "detail-actions");
   outcomes.append(badge(t.completion), badge(t.outcome.correct === true ? "Correct" : t.outcome.correct === false ? "Incorrect" : "Verification unavailable"), el("span", "muted", `Reward ${metric(t.outcome.reward)}`));
   card.append(outcomes, el("p", "trajectory-meta", `Workload: ${runId}`));
@@ -464,8 +467,14 @@ async function runPage(id, traceId, tab, signal, ticket) {
   heading.textContent = t.title || t.task || t.id;
   const tags = el("div", "detail-actions"); experimentTags(tags,t.experiments); tags.append(badge(t.completion)); content.append(tags);
   const metadata=el("dl","trajectory-header-meta");
-  const metadataRow=(label,value)=>{const row=el("div","metadata-row");row.append(el("dt","",label),el("dd","",text(value)));metadata.append(row);};
-  metadataRow("Benchmark",t.benchmark);metadataRow("Model",t.model || run.model);
+  const metadataRow=(label,value)=>{const row=el("div","metadata-row");row.append(el("dt","",label),el("dd","",text(value)));metadata.append(row);return row;};
+  metadataRow("Benchmark",t.benchmark);
+  const modelRow=metadataRow(t.model_scope === "base" ? "Base model" : "Model",t.model);
+  if (t.model_source) {
+    const source=el("details","muted");source.append(el("summary","",t.model_scope === "base" ? "Base model evidence" : "Model source"),el("p","",t.model_source));
+    if (t.model_scope === "base" && t.model_evidence) source.append(el("p","",`${t.model_evidence.path}#${t.model_evidence.model_field}`),el("p","",`Base revision: ${t.model_revision}. Base only; not sampled policy checkpoint identity.`));
+    modelRow.lastElementChild.append(source);
+  }
   const runRow=el("div","metadata-row"),runStats=el("dd","trajectory-run-stats");
   runStats.append(el("span","",`${t.metrics?.steps ?? "—"} steps`),el("span","",`${t.metrics?.tool_calls ?? "—"} tool calls`),el("span","muted",`Started ${t.started_at || "not recorded"}`));
   runRow.append(el("dt","","Run"),runStats);metadata.append(runRow);content.append(metadata);

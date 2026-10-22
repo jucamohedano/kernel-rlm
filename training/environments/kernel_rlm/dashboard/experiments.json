@@ -47,6 +47,18 @@
         "20261020T230200Z-final-l1-pass"
       ],
       "provenance": {
+        "base_model": {
+          "id": "poolside/Laguna-XS.2",
+          "revision": "a397bde04501591d0ac3d74a5d9d0a4ec298ffb8",
+          "scope": "base model only; not a sampled policy checkpoint identity",
+          "evidence": {
+            "path": "notes/results/20261021-final-pass-completion.json",
+            "model_field": "retirement.pinned_base_repo",
+            "revision_field": "retirement.pinned_base_revision",
+            "receipt_sha256_field": "retirement.pinned_base_receipt_sha256",
+            "receipt_sha256": "45aaea83c9e526275b25161d1d1ea8d928280fb1d9d541b0640bdc21b6b87b88"
+          }
+        },
         "dataset_ids": [
           "ops6k-l1-seed42"
         ],
