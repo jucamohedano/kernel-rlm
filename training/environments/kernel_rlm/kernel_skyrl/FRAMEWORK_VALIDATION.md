@@ -99,7 +99,7 @@ after the tiny gate succeeds:
 ```bash
 timeout --signal=TERM --kill-after=5s 600s python -m torch.distributed.run \
   --standalone --nnodes=1 --nproc_per_node=2 --max_restarts=0 \
-  -m kernel_skyrl.framework_probe trl --output-dir /fresh/trl-tiny
+  -m kernel_trl.framework_probe trl --output-dir /fresh/trl-tiny
 timeout --signal=TERM --kill-after=5s 600s python -m torch.distributed.run \
   --standalone --nnodes=1 --nproc_per_node=2 --max_restarts=0 \
   -m kernel_skyrl.framework_probe skyrl --checkpoint /cached/pinned/checkpoint \

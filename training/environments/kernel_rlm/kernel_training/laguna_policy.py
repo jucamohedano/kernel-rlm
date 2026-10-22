@@ -1,4 +1,4 @@
-"""Shared BF16 Laguna loading and Moonlight Muon wiring for the optional backend."""
+"""Trainer-neutral BF16 Laguna loading and Moonlight Muon optimizer wiring."""
 
 import copy
 import json

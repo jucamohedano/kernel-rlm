@@ -12,6 +12,7 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 from kernel_rlm.verifier import verify_cuda
+from kernel_rollout.spending import phase_deadline, spending_snapshot
 
 from kernel_trl.collect import InferenceClient, inference_admin_app
 from kernel_trl.live_curriculum import (
@@ -22,7 +23,6 @@ from kernel_trl.live_curriculum import (
     wait_for_server,
 )
 from kernel_trl.live_driver import stop_group
-from kernel_trl.spending import phase_deadline, spending_snapshot
 
 
 def gpu_memory() -> list[int]:

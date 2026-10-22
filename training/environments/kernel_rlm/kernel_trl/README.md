@@ -2,7 +2,7 @@
 
 ## Optional PRIME-RL component comparison
 
-`python -m kernel_trl.prime_probe --model <cached-model> --budget <rtx-budget.json>
+`python -m kernel_prime.probe --model <cached-model> --budget <rtx-budget.json>
 --output <new-directory>/report.json` checks PRIME-RL in a separate optional
 environment, with exactly one sm120 GPU visible. Run it under a 600-second process
 timeout. It reserves the full phase and $2 cleanup against the original, separate

@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import aiohttp
+from kernel_training.source import source_hashes
 
 
 def event(directory: Path, phase: str, **details):
@@ -56,11 +57,7 @@ async def run(arguments):
         raise ValueError("Expected the explicitly supplied existing server's process group")
     event(directory, "driver_started", run_id=arguments.run_id, deadline=arguments.deadline)
     source_root = Path(__file__).resolve().parents[1]
-    input_hashes = {
-        str(path.relative_to(source_root)): hashlib.sha256(path.read_bytes()).hexdigest()
-        for package in ("kernel_trl", "kernel_skyrl", "kernel_rlm", "kernel_rlm_v1")
-        for path in sorted((source_root / package).rglob("*.py"))
-    }
+    input_hashes = source_hashes(source_root)
     (directory / "inputs.json").write_text(
         json.dumps(
             {

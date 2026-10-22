@@ -30,7 +30,7 @@ def test_changed_protocol_refuses_cached_scores_without_resetting_them(saved):
 @pytest.mark.parametrize("source", ["", "invalid candidate"])
 def test_terminal_static_results_identify_verifier_protocol(source):
     from kernel_rlm.verification_state import VERIFICATION_PROTOCOL
-    from kernel_skyrl.generator import score_submission
+    from kernel_rollout.scoring import score_submission
 
     reward, verification = asyncio.run(score_submission({}, {"submission": source}))
     assert reward == 0

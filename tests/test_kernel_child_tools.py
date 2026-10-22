@@ -300,7 +300,7 @@ def test_stopping_worker_unwinds_its_separate_runner_group(module, tmp_path):
 
 
 def test_iterative_requests_are_excluded_from_root_loss(module, tmp_path):
-    from kernel_skyrl.bridge import CompletionBridge
+    from kernel_rollout.bridge import CompletionBridge
     from openai import AsyncOpenAI
 
     payload = {
@@ -381,7 +381,7 @@ def test_generator_rejects_tool_children_without_dedicated_budget(module, tmp_pa
             "child_prompt_tokens": 4096,
         },
     )
-    assert generator.limits["max_subcalls"] == 2
+    assert generator.runner.limits["max_subcalls"] == 2
 
 
 def test_worker_lifetime_follows_its_actual_parent(module, monkeypatch):

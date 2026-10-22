@@ -1,4 +1,4 @@
-from kernel_skyrl.contract import RootSample
+from kernel_rollout.contract import RootSample
 from kernel_trl.turn_credit import training_rows
 
 

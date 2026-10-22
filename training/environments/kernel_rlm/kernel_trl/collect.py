@@ -12,8 +12,8 @@ import aiohttp
 from aiohttp import web
 from kernel_rlm.capacity import ContextExhaustedError
 from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_request_slot
-from kernel_skyrl.contract import exact_sample, has_signal
-from kernel_skyrl.preflight import load_tasks
+from kernel_rollout.contract import exact_sample, has_signal
+from kernel_rollout.tasks import load_tasks
 
 from kernel_trl.child_stream import read_child_stream
 from kernel_trl.context import (
@@ -25,7 +25,7 @@ from kernel_trl.scoring import capture_generation
 from kernel_trl.turn_credit import training_rows
 
 DEFAULT_MODEL_TIMEOUT_SECONDS = 150
-KernelGenerator = None
+RolloutCollector = None
 
 
 def configure_inference_route(dedicated: bool, environment) -> None:
@@ -132,9 +132,9 @@ def inference_admin_app(session, endpoint):
 
 
 async def collect(arguments):
-    generator_class = KernelGenerator
+    generator_class = RolloutCollector
     if generator_class is None:
-        from kernel_skyrl.generator import KernelGenerator as generator_class
+        from kernel_trl.rollout import RolloutCollector as generator_class
 
     directory = arguments.output_dir
     directory.mkdir(parents=True, exist_ok=False)
@@ -208,7 +208,6 @@ async def collect(arguments):
             client,
             arguments.adapter_name,
             str(arguments.checkpoint),
-            directory,
             episode_timeout_s=getattr(arguments, "episode_timeout_s", 700),
             limits={
                 "max_context_tokens": context_tokens,

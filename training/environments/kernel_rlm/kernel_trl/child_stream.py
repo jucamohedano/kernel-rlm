@@ -3,7 +3,7 @@
 import json
 import time
 
-from kernel_skyrl.contract import exact_sample
+from kernel_rollout.contract import exact_sample
 
 
 async def read_child_stream(response, prompt_ids, max_tokens, context_tokens, progress):

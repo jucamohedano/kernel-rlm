@@ -10,7 +10,8 @@ SOURCE = Path(__file__).parents[1] / "training/environments/kernel_rlm"
 sys.path.insert(0, str(SOURCE))
 hooks = importlib.import_module("kernel_skyrl.framework_hooks")
 enable_lazy_padding_import = hooks.enable_lazy_padding_import
-trl_muon_trainer = hooks.trl_muon_trainer
+trl_hooks = importlib.import_module("kernel_trl.framework_hooks")
+trl_muon_trainer = trl_hooks.trl_muon_trainer
 
 
 def test_lazy_padding_is_guarded_and_does_not_fake_flash_attention(tmp_path):
@@ -30,7 +31,7 @@ def test_lazy_padding_is_guarded_and_does_not_fake_flash_attention(tmp_path):
 
 
 def test_trl_public_optimizer_hook_never_uses_default_optimizer(monkeypatch):
-    from kernel_skyrl import framework_hooks
+    from kernel_trl import framework_hooks
 
     module = ModuleType("trl")
     module.GRPOTrainer = object
@@ -121,7 +122,7 @@ def test_meta_buffer_fix_preserves_only_nonpersistent_metadata(monkeypatch, rank
     monkeypatch.setitem(sys.modules, "torch", torch)
     monkeypatch.setitem(sys.modules, "torch.distributed", distributed)
     model = SimpleNamespace(named_modules=lambda: [("model.rotary_emb", owner)])
-    assert hooks.materialize_nonpersistent_buffers(model) == ["model.rotary_emb.rope"]
+    assert trl_hooks.materialize_nonpersistent_buffers(model) == ["model.rotary_emb.rope"]
     assert len(calls) == 1 and calls[0][1] == 0
     assert not registered["rope"][0].is_meta
     assert registered["rope"][1] is False
@@ -143,5 +144,27 @@ def test_only_meta_adapters_receive_small_cpu_placeholder_storage(monkeypatch):
     torch.empty = lambda shape, dtype, device: (shape, dtype, device)
     torch.nn = SimpleNamespace(Parameter=lambda value: value)
     monkeypatch.setitem(sys.modules, "torch", torch)
-    assert hooks.materialize_meta_adapters(SimpleNamespace(modules=lambda: [owner])) == 1
+    assert trl_hooks.materialize_meta_adapters(SimpleNamespace(modules=lambda: [owner])) == 1
     assert registered == {"adapter": ((8, 16), "fp32", "cpu")}
+
+
+@pytest.mark.parametrize("backend", ["skyrl", "trl"])
+def test_framework_probe_runs_only_its_native_backend(monkeypatch, tmp_path, backend):
+    probe = importlib.import_module(f"kernel_{backend}.framework_probe")
+    calls = []
+    monkeypatch.setattr(
+        probe,
+        "run_framework_probe",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or {"status": "passed"},
+    )
+    arguments = SimpleNamespace(checkpoint=None)
+    assert probe.run(arguments, tmp_path) == {"status": "passed"}
+    assert calls[0][0] == (arguments, tmp_path)
+    assert calls[0][1]["backend"] == backend
+    assert callable(calls[0][1]["update"])
+    assert (calls[0][1].get("prepare") is not None) == (backend == "trl")
+    other = "trl" if backend == "skyrl" else "skyrl"
+    monkeypatch.setattr(sys, "argv", ["framework_probe", other, "--output-dir", str(tmp_path)])
+    with pytest.raises(SystemExit) as error:
+        probe.main()
+    assert error.value.code == 2

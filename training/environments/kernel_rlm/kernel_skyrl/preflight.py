@@ -6,6 +6,8 @@ import json
 import subprocess
 from pathlib import Path
 
+from kernel_rollout.tasks import load_tasks
+
 SKYRL_REVISION = "8adc1e53465e2766ac8e8f5ec652e633d17e2279"
 MODEL_REVISION = "a397bde04501591d0ac3d74a5d9d0a4ec298ffb8"
 DION_REVISION = "d891eebbd950a6ff11d9b5f806282e33df83df9d"
@@ -40,25 +42,6 @@ def git_value(directory: Path, *arguments: str) -> str:
     return subprocess.check_output(["git", "-C", str(directory), *arguments], text=True).strip()
 
 
-def load_tasks(manifest: Path) -> list[dict]:
-    from kernel_rlm.submission_contract import KERNEL_TASK_INSTRUCTION
-
-    rows = [json.loads(line) for line in manifest.read_text().splitlines() if line.strip()]
-    if not rows or len({row["_task_id"] for row in rows}) != len(rows):
-        raise ValueError("The curriculum must contain tasks with unique IDs")
-    if any(not isinstance(row["code"], str) or not row["code"].strip() for row in rows):
-        raise ValueError("Every task needs reference source")
-    return [
-        {
-            "name": str(row["_task_id"]),
-            "context": row["code"],
-            "prompt": KERNEL_TASK_INSTRUCTION,
-            "speed_reward_weight": 0.1,
-        }
-        for row in rows
-    ]
-
-
 def prepare(source: Path, manifest: Path) -> dict:
     if git_value(source, "rev-parse", "HEAD") != SKYRL_REVISION:
         raise ValueError("SkyRL checkout does not match pinned skyrl-v0.4.0")
@@ -71,6 +54,8 @@ def prepare(source: Path, manifest: Path) -> dict:
     captured = {}
     for directory in (
         environment_root / "kernel_skyrl",
+        environment_root / "kernel_rollout",
+        environment_root / "kernel_training",
         environment_root / "kernel_rlm",
         environment_root / "kernel_rlm_v1",
         rlm_root / "training/src/rlm_train",
@@ -97,7 +82,7 @@ def prepare(source: Path, manifest: Path) -> dict:
             "lr": 1e-5,
             "weight_decay": 0.01,
             "implemented": False,
-            "component_factory": "kernel_skyrl.laguna_policy.build_muon",
+            "component_factory": "kernel_training.laguna_policy.build_muon",
             "scope": "Component validated; implemented=false refers to native SkyRL worker integration",
         },
         "dataset": {"sha256": digest(manifest), "examples": task_count},

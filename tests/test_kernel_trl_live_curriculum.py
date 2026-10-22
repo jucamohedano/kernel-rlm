@@ -520,6 +520,9 @@ def test_python_path_and_source_hashes_include_rlm_core(curriculum, tmp_path):
     source_root = tmp_path / "repo/training/environments/kernel_rlm"
     (source_root / "kernel_trl").mkdir(parents=True)
     (source_root / "kernel_trl/__init__.py").write_text("")
+    for package in ("kernel_rollout", "kernel_training"):
+        (source_root / package).mkdir()
+        (source_root / package / "__init__.py").write_text("shared")
     core = tmp_path / "repo/rlm"
     core.mkdir(parents=True)
     (core / "__init__.py").write_text("core")
@@ -536,6 +539,8 @@ def test_python_path_and_source_hashes_include_rlm_core(curriculum, tmp_path):
         "/existing/path",
     ]
     assert hashes["kernel_trl/__init__.py"]
+    assert hashes["kernel_rollout/__init__.py"]
+    assert hashes["kernel_training/__init__.py"]
     assert hashes["rlm/__init__.py"]
     assert hashes["training/src/rlm_train/__init__.py"]
 

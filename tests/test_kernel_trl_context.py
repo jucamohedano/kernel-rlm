@@ -39,7 +39,7 @@ def test_server_and_credit_share_the_selected_context(modules, tmp_path):
     )
     command = modules.curriculum.server_command(arguments, 0, None)
     assert command[command.index("--max-model-len") + 1] == "16384"
-    from kernel_skyrl.contract import RootSample
+    from kernel_rollout.contract import RootSample
 
     episodes = [
         {"reward": reward, "samples": [RootSample([2] * 13000, [3], [-1.0], "stop")]}

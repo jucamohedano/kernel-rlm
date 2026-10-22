@@ -7,8 +7,7 @@ import time
 from pathlib import Path
 
 import aiohttp
-
-from kernel_trl.spending import phase_deadline
+from kernel_rollout.spending import phase_deadline
 
 
 async def wait_for_gpu_release(timeout_seconds: float = 30, poll_seconds: float = 0.5):

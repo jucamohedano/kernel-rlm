@@ -37,7 +37,7 @@ def test_disconnect_cancels_backend_and_releases_bridge_owned_admission(
     import aiohttp
     from kernel_rlm import verifier_slot
     from kernel_rlm.subcalls import CHILD_SYSTEM
-    from kernel_skyrl.bridge import CompletionBridge
+    from kernel_rollout.bridge import CompletionBridge
 
     gate = tmp_path / "gate"
     monkeypatch.setattr(verifier_slot, "LOCK_PATH", gate)
@@ -320,7 +320,7 @@ def test_generator_marks_bridge_admission_ownership_in_worker_environment(tmp_pa
 
 
 def test_contract_rejection_does_not_add_a_new_reward_penalty():
-    from kernel_skyrl.contract import terminal_reward
+    from kernel_rollout.contract import terminal_reward
 
     assert terminal_reward({"compiled": False, "extension_used": None, "correct": None}) == 0.1
     assert terminal_reward({"compiled": True, "extension_used": False, "correct": False}) == 0.1

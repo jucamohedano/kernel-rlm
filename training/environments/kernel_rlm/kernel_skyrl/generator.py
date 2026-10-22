@@ -1,47 +1,17 @@
-"""SkyRL GeneratorInterface-compatible adapter around the unchanged V1 REPL program."""
+"""SkyRL batch handling around the shared kernel episode runner."""
 
 import asyncio
 import dataclasses
 import json
-import os
-import signal
-import sys
 import uuid
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from kernel_skyrl.bridge import CompletionBridge
-from kernel_skyrl.contract import has_signal, stepwise_output, terminal_reward
+from kernel_rollout.contract import has_signal
+from kernel_rollout.episode import EpisodeRequest, EpisodeRunner
+from kernel_rollout.scoring import score_submission
 
-DEFAULT_LIMITS = {
-    "max_turns": 8,
-    "max_tokens": 4096,
-    "max_context_tokens": 12288,
-    "model_timeout_s": 150,
-    "enable_thinking": True,
-    "enable_subcall": True,
-    "max_subcalls": 2,
-    "subcall_probe": False,
-}
-
-
-async def score_submission(task: dict, record: dict) -> tuple[float, dict]:
-    from kernel_rlm.submission_contract import validate_submission_source
-    from kernel_rlm.verification_state import VERIFICATION_PROTOCOL
-    from kernel_rlm.verifier import verify_cuda
-
-    source = record["submission"]
-    if not source.strip():
-        return 0.0, {"error": "No final submission", "verification_protocol": VERIFICATION_PROTOCOL}
-    valid, error = validate_submission_source(source)
-    if not valid:
-        return 0.0, {
-            "error": f"static validation: {error}",
-            "verification_protocol": VERIFICATION_PROTOCOL,
-        }
-    result = await asyncio.to_thread(verify_cuda, task["context"], source)
-    return terminal_reward(result, task.get("speed_reward_weight", 0.1)), result
+from kernel_skyrl.contract import stepwise_output
 
 
 class KernelGenerator:
@@ -64,136 +34,25 @@ class KernelGenerator:
     ):
         if not 1 <= max_sample_batches <= 3 or episode_timeout_s <= 0:
             raise ValueError("Use a positive timeout and at most three sampled groups")
-        self.client = client
-        self.adapter_name = adapter_name
-        self.tokenizer_path = tokenizer_path
         self.output_dir = Path(output_dir)
         self.replacement_tasks = replacement_tasks or []
-        self.limits = {**DEFAULT_LIMITS, **(limits or {})}
-        if not 1 <= self.limits["max_tokens"] <= 4096:
-            raise ValueError("Root output cap must be between 1 and 4096 tokens")
-        if not 1 <= self.limits["max_turns"] <= 10:
-            raise ValueError("At most ten root turns are supported")
-        if not 12288 <= self.limits["max_context_tokens"] <= 16384:
-            raise ValueError("The L40S adapter supports 12288 to 16384 context tokens")
-        if not 0 <= self.limits["max_subcalls"] <= 2:
-            raise ValueError("At most two child calls are supported")
-        if self.limits.get("child_tools") and (
-            not self.limits.get("dedicated_inference")
-            or not self.limits.get("enable_thinking")
-            or self.limits.get("child_prompt_tokens") != 4096
-            or episode_timeout_s < 2400
-        ):
-            raise ValueError(
-                "Iterative children require dedicated inference, thinking and explicit budgets"
-            )
         self.max_sample_batches = max_sample_batches
-        self.episode_timeout_s = episode_timeout_s
-        self.scorer = scorer
-        self.defer_scoring = defer_scoring
-        self.execution_run_id = execution_run_id
-        self.group_id = group_id
-        self.attempt_id = attempt_id
-        self.program_command = program_command or [
-            sys.executable,
-            "-m",
-            "kernel_rlm_v1.program",
-            "task.json",
-        ]
+        self.runner = EpisodeRunner(
+            client,
+            adapter_name,
+            tokenizer_path,
+            limits=limits,
+            episode_timeout_s=episode_timeout_s,
+            scorer=scorer,
+            program_command=program_command,
+            defer_scoring=defer_scoring,
+            execution_run_id=execution_run_id,
+            group_id=group_id,
+            attempt_id=attempt_id,
+        )
 
     async def run_episode(self, task: dict, directory: Path, policy_version: int) -> dict:
-        directory.mkdir(parents=True, exist_ok=False)
-        (directory / "task.json").write_text(json.dumps(task))
-        episode_provenance = {
-            "execution_run_id": self.execution_run_id,
-            "group_id": f"{self.group_id}:{task['name']}" if self.group_id is not None else None,
-            "attempt_id": self.attempt_id,
-            "episode_id": directory.name,
-        }
-        bridge = CompletionBridge(
-            self.client,
-            self.adapter_name,
-            self.limits["max_context_tokens"],
-            self.limits["max_tokens"],
-            policy_version,
-            directory / "calls.jsonl",
-            self.limits["model_timeout_s"],
-            provenance=episode_provenance,
-        )
-        process = None
-        try:
-            await bridge.start()
-            environment = dict(os.environ)
-            for key in list(environment):
-                if key.endswith(("_API_KEY", "_TOKEN")) or key.startswith("PRIME_"):
-                    environment.pop(key)
-            environment.update(
-                KERNEL_ENDPOINT=bridge.endpoint,
-                KERNEL_API_KEY=bridge.api_key,
-                KERNEL_MODEL=self.tokenizer_path,
-                KERNEL_LIMITS=json.dumps({**self.limits, "bridge_owns_admission": True}),
-                KERNEL_FEEDBACK_LOG_DIR=str(directory.resolve()),
-                KERNEL_PROVENANCE=json.dumps(
-                    {**episode_provenance, "policy_version": policy_version}
-                ),
-            )
-            with (directory / "program.log").open("wb") as log:
-                process = await asyncio.create_subprocess_exec(
-                    *self.program_command,
-                    cwd=directory,
-                    env=environment,
-                    stdout=log,
-                    stderr=asyncio.subprocess.STDOUT,
-                    start_new_session=True,
-                )
-                await asyncio.wait_for(process.wait(), self.episode_timeout_s)
-            if process.returncode or bridge.failures:
-                raise RuntimeError(f"REPL transport/program failed; see {directory}")
-            record = json.loads((directory / "submission.json").read_text())
-            provenance = {**episode_provenance, "policy_version": policy_version}
-            record.update(provenance)
-            (directory / "submission.json").write_text(json.dumps(record))
-            if self.defer_scoring:
-                return {**provenance, "samples": bridge.samples, "reward": None, "record": record}
-            reward, verification = await self.scorer(task, record)
-            (directory / "score.json").write_text(
-                json.dumps(
-                    {
-                        "reward": reward,
-                        "verification": verification,
-                        "root_calls": len(bridge.samples),
-                        "child_calls": bridge.child_calls,
-                        "policy_version": policy_version,
-                    },
-                    indent=2,
-                )
-            )
-            return {
-                **provenance,
-                "samples": bridge.samples,
-                "reward": reward,
-                "record": record,
-                "verification": verification,
-            }
-        except BaseException as error:
-            (directory / "failure.json").write_text(
-                json.dumps(
-                    {
-                        "error_type": type(error).__name__,
-                        "error": str(error),
-                        "policy_version": policy_version,
-                        "optimizer_update_allowed": False,
-                    },
-                    indent=2,
-                )
-            )
-            raise
-        finally:
-            if process is not None:
-                with suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGKILL)
-                await process.wait()
-            await bridge.stop()
+        return await self.runner.run(EpisodeRequest(task, directory, policy_version))
 
     async def generate(self, input_batch: dict[str, Any]) -> dict[str, Any]:
         trajectory_ids = input_batch.get("trajectory_ids")

@@ -1,4 +1,4 @@
-"""Loopback OpenAI relay into SkyRL's adapter-aware inference client."""
+"""Loopback OpenAI relay into an injected adapter-aware inference client."""
 
 import asyncio
 import copy
@@ -15,7 +15,7 @@ from kernel_rlm.child_tools import TOOL_CHILD_SYSTEM
 from kernel_rlm.subcalls import CHILD_SYSTEM, SUBCALL_REPLY_TOKENS
 from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_request_slot
 
-from kernel_skyrl.contract import exact_sample
+from kernel_rollout.contract import exact_sample
 
 
 class CompletionBridge:

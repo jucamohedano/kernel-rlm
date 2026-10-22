@@ -8,8 +8,8 @@ import os
 import shutil
 from pathlib import Path
 
-from kernel_skyrl.contract import exact_sample, has_signal
-from kernel_skyrl.generator import score_submission
+from kernel_rollout.contract import exact_sample, has_signal
+from kernel_rollout.scoring import score_submission
 
 from kernel_trl.context import LEGACY_CONTEXT_TOKENS, validate_context_tokens
 from kernel_trl.turn_credit import training_rows

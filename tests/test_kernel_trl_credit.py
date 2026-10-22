@@ -12,7 +12,7 @@ def credit(monkeypatch):
 
 
 def episodes():
-    from kernel_skyrl.contract import RootSample
+    from kernel_rollout.contract import RootSample
 
     return [
         {
@@ -43,7 +43,7 @@ def test_advantage_is_per_trajectory_not_per_turn(credit):
 
 
 def test_context_is_not_reconstructed_by_concatenating_turns(credit):
-    from kernel_skyrl.contract import RootSample
+    from kernel_rollout.contract import RootSample
 
     values = episodes()
     values[1]["samples"][1] = RootSample([2, 50, 7], [60, 2], [-3.0, -2.0], "stop")
@@ -69,7 +69,7 @@ def test_speed_only_variance_is_retained(credit):
 
 
 def test_bad_logprobs_fail_closed(credit):
-    from kernel_skyrl.contract import RootSample
+    from kernel_rollout.contract import RootSample
 
     values = episodes()
     values[0]["samples"][0] = RootSample([2], [4], [math.nan], "stop")

@@ -54,7 +54,7 @@ def restore_training_state(trainer, directory: Path, step: int) -> dict:
     import numpy as np
     import torch
     import torch.distributed as dist
-    from kernel_skyrl.framework_probe import local_tensor
+    from kernel_training.diagnostics import local_tensor
     from torch.distributed.tensor import DTensor
 
     metadata = checkpoint_metadata(directory, step, dist.get_world_size())
@@ -117,7 +117,7 @@ def save_training_state(trainer, directory: Path, step: int) -> Path:
     import numpy as np
     import torch
     import torch.distributed as dist
-    from kernel_skyrl.framework_probe import local_tensor
+    from kernel_training.diagnostics import local_tensor
     from safetensors.torch import save_file
 
     rank = dist.get_rank()

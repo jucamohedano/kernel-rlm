@@ -157,7 +157,7 @@ def run(arguments) -> dict:
     selected = capture_positions(len(row["prompt_ids"]), len(row["completion_ids"]))
     started = time.monotonic()
     if arguments.backend == "native":
-        from kernel_skyrl.laguna_policy import load_config
+        from kernel_training.laguna_policy import load_config
         from transformers import AutoModelForCausalLM
 
         model = AutoModelForCausalLM.from_pretrained(

@@ -10,17 +10,16 @@ import time
 from datetime import timedelta
 from pathlib import Path
 
-from kernel_skyrl import framework_hooks, framework_probe, laguna_policy, laguna_probe
-from kernel_skyrl.framework_hooks import (
+from kernel_training import diagnostics, laguna_policy
+from kernel_training.diagnostics import event, observe_updates, tiny_model
+from kernel_training.laguna_policy import attach_adapters, audit_storage, load_base, load_config
+
+from kernel_trl import framework_hooks, phase_state
+from kernel_trl.framework_hooks import (
     materialize_meta_adapters,
     materialize_nonpersistent_buffers,
     trl_muon_trainer,
 )
-from kernel_skyrl.framework_probe import observe_updates
-from kernel_skyrl.laguna_policy import attach_adapters, audit_storage, load_base, load_config
-from kernel_skyrl.laguna_probe import event, tiny_model
-
-from kernel_trl import phase_state
 from kernel_trl.phase_state import phase_roundtrip
 
 
@@ -250,7 +249,7 @@ def main():
     snapshot = directory / "source" / f"rank-{rank}"
     snapshot.mkdir(parents=True, exist_ok=False)
     hashes = {}
-    for module in (framework_hooks, framework_probe, laguna_policy, laguna_probe, phase_state):
+    for module in (framework_hooks, diagnostics, laguna_policy, phase_state):
         path = Path(module.__file__)
         shutil.copy2(path, snapshot / path.name)
         hashes[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()

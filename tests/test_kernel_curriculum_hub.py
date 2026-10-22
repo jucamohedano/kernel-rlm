@@ -63,7 +63,7 @@ def test_export_preserves_original_bytes_and_parquet_rows(source, release):
 
 
 def test_hub_download_keeps_legacy_loader_contract(release, monkeypatch, tmp_path):
-    from kernel_skyrl.preflight import load_tasks
+    from kernel_rollout.tasks import load_tasks
 
     directory, manifest = release
     config = "lvl1_seed42_easy_first"

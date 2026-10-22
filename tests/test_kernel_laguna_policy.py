@@ -8,7 +8,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 SOURCE = (
-    Path(__file__).parents[1] / "training/environments/kernel_rlm/kernel_skyrl/laguna_policy.py"
+    Path(__file__).parents[1] / "training/environments/kernel_rlm/kernel_training/laguna_policy.py"
 )
 
 

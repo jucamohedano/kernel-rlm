@@ -157,8 +157,8 @@ def branch(tmp_path, monkeypatch):
     for root in [source, validated_source]:
         for name in [
             "kernel_rlm/helper.py",
-            "kernel_skyrl/generator.py",
-            "kernel_skyrl/contract.py",
+            "kernel_rollout/scoring.py",
+            "kernel_rollout/contract.py",
         ]:
             path = root / name
             path.parent.mkdir(exist_ok=True, parents=True)

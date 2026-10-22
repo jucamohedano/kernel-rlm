@@ -19,7 +19,7 @@ def move_optimizer_state(optimizer, device) -> int:
 
 def phase_roundtrip(model, optimizer) -> dict:
     import torch
-    from kernel_skyrl.framework_probe import local_tensor
+    from kernel_training.diagnostics import local_tensor
     from torch.distributed.fsdp import FSDPModule
 
     started = time.monotonic()
