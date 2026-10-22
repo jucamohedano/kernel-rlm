@@ -1,0 +1,200 @@
+import json
+import threading
+from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+
+from dashboard import data
+from dashboard.server import make_handler
+
+
+def request(server, path):
+    connection = HTTPConnection(*server.server_address)
+    connection.request("GET", path)
+    response = connection.getresponse()
+    body = response.read()
+    connection.close()
+    return response.status, response.getheader("Content-Type"), body
+
+
+def test_registry_and_missing_receipt_are_explicit():
+    experiments = data.experiments()
+    assert all({"id", "title", "status", "runs"} <= set(item) for item in experiments)
+    assert all(item["campaign"] and item["category"] and item["scope_note"] for item in experiments)
+    campaign, warnings = data.campaign(None)
+    assert campaign["status"] is None
+    assert "not configured" in warnings[0]
+
+
+def test_invalid_receipt_does_not_fallback(tmp_path):
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text("not json")
+    campaign, warnings = data.campaign(receipt)
+    assert campaign["status"] is None
+    assert warnings
+
+
+def test_real_trace_normalization():
+    trace = {
+        "id": "t1",
+        "task": {"data": {"name": "task"}},
+        "nodes": [{"message": {"role": "assistant", "content": "node answer"}}],
+        "info": {
+            "kernel_submission": "x",
+            "kernel_termination": "submitted",
+            "kernel_verify": {"correct": False, "speedup": 2.5},
+            "repl_transcript": [{"role": "assistant", "content": "transcript answer"}],
+            "kernel_subcalls": [{"request": "child"}],
+        },
+    }
+    detail = data.trajectory_detail({"id": "r"}, trace, 0)
+    assert detail["task_source"] is None
+    assert detail["outcome"]["status"] == "submitted"
+    assert detail["outcome"]["speedup"] == 2.5
+    assert detail["events"][0]["content"] == "transcript answer"
+    assert len([event for event in detail["events"] if event.get("source") == "nodes"]) == 0
+    assert detail["events"][-1]["source"] == "kernel_subcalls"
+
+
+def test_http_api_routes_and_writing_safety(tmp_path):
+    run = tmp_path / "r1"
+    run.mkdir()
+    (run / "report.json").write_text(json.dumps({"run_id": "r1", "status": "done"}))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(tmp_path))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, _, body = request(server, "/api/runs")
+        assert status == 200 and json.loads(body)["runs"][0]["id"] == "r1"
+        status, content_type, font = request(server, "/fonts/InterVariable.woff2")
+        assert status == 200 and content_type == "font/woff2" and font[:4] == b"wOF2"
+        status, _, _ = request(server, "/fonts/../../README.md")
+        assert status == 404
+        status, _, body = request(server, "/api/home")
+        assert status == 200 and json.loads(body)["campaign"]["status"] is None
+        status, _, _ = request(server, "/api/writing/../../AGENTS")
+        assert status == 404
+        status, _, _ = request(server, "/api/runs/nope")
+        assert status == 404
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+
+def test_completion_receipt_normalizes_counts_and_avoids_false_hardware(tmp_path):
+    receipt = tmp_path / "completion.json"
+    receipt.write_text(
+        json.dumps(
+            {
+                "training_status": "nondeferred_pass_finished",
+                "trained_tasks": 35,
+                "deferred_untrained": ["a", "b"],
+                "gpu_processes": [],
+                "checkpoint35_backup": {"archive_sha256": "abc"},
+            }
+        )
+    )
+    campaign, warnings = data.campaign(receipt)
+    assert campaign["status"] == "nondeferred_pass_finished"
+    assert campaign["trained"] == 35
+    assert campaign["deferred"] == 2
+    assert campaign["checkpoint"] is None
+    assert campaign["hardware"] is None
+    assert warnings == []
+
+
+def test_broad_discovery_is_lightweight_and_reports_linked_missing_run(tmp_path):
+    root = tmp_path / "live-grpo"
+    root.mkdir()
+    (root / "20260101T000000Z-sample").mkdir()
+    (root / "20260101T000000Z-sample" / "report.json").write_text(
+        json.dumps({"run_id": "20260101T000000Z-sample", "status": "completed"})
+    )
+    records = data.run_records(root)
+    assert any(record["id"] == "20260101T000000Z-sample" for record in records)
+    assert all("metrics" not in record.get("_reader", {}) for record in records)
+    missing = next(record for record in records if record["id"] == "20261019T072942Z-recovery")
+    assert missing["evidence_available"] is False
+    assert "unavailable" in missing["warnings"][0]
+
+
+def test_nested_all_and_effective_exports_are_deduplicated(tmp_path):
+    from dashboard.data import run_records
+
+    run_dir = tmp_path / "20260101T000000Z-sample"
+    (run_dir / "effective").mkdir(parents=True)
+    trace = {"id": "episode-1"}
+    row = json.dumps({"traces": [trace]}) + "\n"
+    (run_dir / "traces.jsonl").write_text(row)
+    (run_dir / "effective" / "traces.jsonl").write_text(row)
+    record = next(r for r in run_records(tmp_path) if r["id"] == run_dir.name)
+    assert record["trajectory_count"] == 1
+
+
+def test_reasoning_metadata_maps_sampled_root_calls_only():
+    trace = {
+        "id": "x",
+        "info": {
+            "repl_transcript": [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"function": {"name": "repl", "arguments": '{"code": "print(1)"}'}}
+                    ],
+                },
+                {"role": "tool", "content": "1"},
+            ],
+            "kernel_model_calls": [
+                {"node": 1, "usage": {"completion_tokens": 9}, "finish_reason": "tool_calls"},
+                {"node": 3, "usage": {"completion_tokens": 100}, "finish_reason": "stop"},
+            ],
+        },
+        "nodes": [
+            {"message": {"role": "system"}},
+            {"message": {"role": "assistant", "reasoning_content": "root rationale"}},
+            {"message": {"role": "system"}},
+            {"message": {"role": "assistant", "reasoning_content": "child rationale"}},
+        ],
+    }
+    detail = data.trajectory_detail({"id": "x", "root": Path(".")}, trace, 0)
+    root_event = detail["events"][0]
+    assert root_event["reasoning"] == "root rationale"
+    assert root_event["usage"]["completion_tokens"] == 9
+    assert root_event["finish_reason"] == "tool_calls"
+    assert "print(1)" in root_event["assistant_response"]
+    assert "child rationale" not in json.dumps(detail["events"])
+
+
+def test_selected_episode_is_the_only_full_payload(tmp_path):
+    run = tmp_path / "20260101T000000Z-preview"
+    run.mkdir()
+    (run / "report.json").write_text(json.dumps({"run_id": run.name}))
+    (run / "traces.jsonl").write_text(
+        json.dumps(
+            {
+                "traces": [
+                    {"id": "a", "info": {"repl_transcript": [{"role": "user", "content": "A"}]}},
+                    {"id": "b", "info": {"repl_transcript": [{"role": "user", "content": "B"}]}},
+                ]
+            }
+        )
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(tmp_path))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, _, body = request(server, f"/api/runs/{run.name}")
+        assert status == 200
+        assert all("raw" not in item for item in json.loads(body)["trajectories"])
+        status, _, body = request(server, f"/api/runs/{run.name}?trajectory=b")
+        records = json.loads(body)["trajectories"]
+        assert [item["id"] for item in records if "raw" in item] == ["b"]
+        status, _, body = request(server, "/api/runs/20261019T072942Z-recovery")
+        assert status == 200
+        assert json.loads(body)["run"]["evidence_available"] is False
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
