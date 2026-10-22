@@ -143,14 +143,21 @@ def make_handler(root: Path, receipt_path: Path | None = None, task_catalog: Pat
                 "/app.js": "app.js",
                 "/styles.css": "styles.css",
                 "/layout.js": "layout.js",
+                "/fonts/InterVariable.woff2": "fonts/InterVariable.woff2",
+                "/fonts/JetBrainsMono-Regular.woff2": "fonts/JetBrainsMono-Regular.woff2",
+                "/fonts/JetBrainsMono-Medium.woff2": "fonts/JetBrainsMono-Medium.woff2",
+                "/fonts/JetBrainsMono-Bold.woff2": "fonts/JetBrainsMono-Bold.woff2",
             }
             if path in files:
-                file = Path(__file__).with_name(files[path])
+                file = Path(__file__).parent / files[path]
                 if not file.is_file():
                     return self.send_error(404)
-                return self.send_data(
-                    file.read_bytes(), mimetypes.guess_type(file.name)[0] + "; charset=utf-8"
+                content_type = (
+                    "font/woff2"
+                    if file.suffix == ".woff2"
+                    else mimetypes.guess_type(file.name)[0] + "; charset=utf-8"
                 )
+                return self.send_data(file.read_bytes(), content_type)
             return self.send_error(404)
 
         def do_POST(self):
