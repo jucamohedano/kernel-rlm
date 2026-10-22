@@ -1,4 +1,4 @@
-# First campaign: building and completing an L1 pass
+# L1 simple kernels · Stage 1
 
 ## Why this project exists
 
