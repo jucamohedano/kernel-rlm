@@ -7,7 +7,6 @@ This repository combines the Recursive Language Models (RLM) framework with a CU
 - [First campaign](first-campaign.md): what was built, how the campaign changed, and what its results do—and do not—show.
 - [Evidence reading and reporting](protocol.md): how to describe observed outcomes without overstating them.
 - [Dashboard guide](../../dashboard/README.md): browse explicitly selected local evidence without launching compute.
-- [Trackio organization and evaluation metrics](tracking-organization.md): execution identities, inherited history, and KernelBench-derived metric definitions.
 - [Kernel environment](../../training/environments/kernel_rlm/README.md): task, verifier, and training code orientation.
 - [Training implementation notes](../../training/environments/kernel_rlm/kernel_trl/RLM_TRAINING.md) and [stateful task contract](../../training/environments/kernel_rlm/kernel_rlm/STATEFUL_TASKS.md): details for code-level investigation.
 - [Dated legacy guide](../../training/environments/kernel_rlm/dashboard/guide.html): preserved historical record, not current instructions by default.
