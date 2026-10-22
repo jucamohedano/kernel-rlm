@@ -12,11 +12,13 @@ The repository root is the RLM project itself:
 
 Compute was supported by a **[CloudRift](https://www.cloudrift.ai/) compute grant**. See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md), [CITATION.cff](CITATION.cff), and [references.bib](references.bib).
 
-## First L1 training campaign: weights
+## Artifacts
 
-The completed campaign's final accepted adapter checkpoint is [checkpoint35 in the version-pinned checkpoint archive](https://huggingface.co/jucamohedano/laguna-xs2-kernel-rlm-checkpoints/tree/833f460dfbd71918a0ad7403e1245233113d4b71/checkpoints/20261020T230200Z-final-l1-pass/checkpoint-step-35). **The archive is private; access is required. A separate reviewed public adapter release is planned, not yet published.**
+- [Hugging Face collection](https://huggingface.co/collections/jucamohedano/kernel-rlm)
+- [CUDA training curriculum](https://huggingface.co/datasets/jucamohedano/kernel-rlm-curriculum) · [Loading guide](training/environments/kernel_rlm/DATASETS.md)
+- [Training checkpoints and adapter weights](https://huggingface.co/jucamohedano/laguna-xs2-kernel-rlm-checkpoints)
 
-These are LoRA adapter weights, not a standalone full model. They require `poolside/Laguna-XS.2` at revision `a397bde04501591d0ac3d74a5d9d0a4ec298ffb8`. The accepted lineage contains 35 task updates; 15 tasks remained deferred. There is no claim of held-out quality improvement. See the [artifact publication checklist](docs/research/artifact-publication.md) before exposing model or tracking artifacts.
+The model weights are LoRA adapters for `poolside/Laguna-XS.2`, not a standalone full model.
 
 ## Research status and migration
 

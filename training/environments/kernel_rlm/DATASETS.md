@@ -1,6 +1,6 @@
 # Versioned Hugging Face curricula without breaking JSONL training
 
-The dataset preview is [jucamohedano/kernel-rlm-curriculum](https://huggingface.co/datasets/jucamohedano/kernel-rlm-curriculum), immutable revision `c5bfb92c4f4dfb5aa865fca035e2b3113a6824f3`. It is currently private and requires authorized access. Publication is a separate reviewed visibility decision.
+The public dataset is [jucamohedano/kernel-rlm-curriculum](https://huggingface.co/datasets/jucamohedano/kernel-rlm-curriculum). Use immutable revision `c5bfb92c4f4dfb5aa865fca035e2b3113a6824f3` to reproduce the preserved curricula. Anonymous reads are supported; no Hugging Face login is required to download this public release.
 
 The source is [CUDA-Agent-Ops-6K](https://huggingface.co/datasets/BytedTsinghua-SIA/CUDA-Agent-Ops-6K). The uploaded dataset card includes attribution, the source's declared CC-BY-4.0 license, and our selection/order/format-conversion changes. The historical upstream download revision was not recorded; it is not fabricated. Exact preserved materializations are authoritative for reproducing previous runs.
 
@@ -15,7 +15,7 @@ Each configuration has one `train` split. Configurations are not independent tra
 
 ## Native Datasets access
 
-Install this environment's existing `datasets` dependency and authenticate locally with `hf auth login` if access is required. Do not put tokens into commands, code, or the dataset card.
+Install this environment's existing `datasets` dependency. Authentication is not required for public downloads; publishing changes still requires an authorized account. Do not put tokens into commands, code, or the dataset card.
 
 ```python
 from datasets import load_dataset
@@ -59,4 +59,4 @@ python -m kernel_rlm.curriculum export \
 
 The input directory must contain all four original JSONL files. Export refuses an existing destination, validates the task contract, checks the two L1 configurations contain identical records, writes Parquet/config metadata, and verifies local roundtrips. It does not sample the upstream dataset or upload anything. Publication uses an explicit separate `hf upload --repo-type dataset` operation after review.
 
-The staged private release was tested with `datasets==4.0.0`; unit tests cover unchanged-byte download, legacy-loader compatibility, mutable revision rejection, tampering, and refusal to overwrite another curriculum. Other legacy scripts that assume the old parent workspace's location still require a separate portability pass; this PR does not silently rewrite all their paths.
+The release was tested with `datasets==4.0.0`; unit tests cover unchanged-byte download, legacy-loader compatibility, mutable revision rejection, tampering, and refusal to overwrite another curriculum. Other legacy scripts that assume the old parent workspace's location still require a separate portability pass; this distribution path does not silently rewrite all their paths.

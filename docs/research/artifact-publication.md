@@ -2,6 +2,8 @@
 
 This checklist separates a public source repository, a model release, a dataset release, and a metrics dashboard. Changing GitHub visibility does not publish a private Hugging Face model, and a link to private weights is not a public release.
 
+The user has published the [project collection](https://huggingface.co/collections/jucamohedano/kernel-rlm) and [curriculum dataset](https://huggingface.co/datasets/jucamohedano/kernel-rlm-curriculum). The checkpoint archive is also anonymously accessible. This changes artifact availability, not the historical verification claims below; it does not imply that a separate curated adapter-only package or sanitized metrics dashboard has been released.
+
 ## Checkpoint35 adapter release
 
 The first completed L1 campaign ended with 35 accepted task updates and 15 deferred tasks. Its final accepted checkpoint is preserved at immutable archive commit `833f460dfbd71918a0ad7403e1245233113d4b71`, directory `checkpoints/20261020T230200Z-final-l1-pass/checkpoint-step-35`. This is the corrected reward lineage, not the historical shortcut-reward checkpoint28 on a different branch.
