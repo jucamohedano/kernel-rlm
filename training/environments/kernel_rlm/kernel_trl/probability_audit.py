@@ -5,6 +5,8 @@ import json
 import math
 import statistics
 
+from kernel_trl.group_contract import validate_training_group
+
 
 class AuditComplete(Exception):
     pass
@@ -17,6 +19,7 @@ def group_digest(group: dict) -> str:
 
 
 def require_probability_agreement(path, group: dict) -> dict:
+    validate_training_group(group)
     if path is None:
         raise ValueError("A passing probability audit is required before training")
     summary = json.loads(path.read_text())["probability_audit"]

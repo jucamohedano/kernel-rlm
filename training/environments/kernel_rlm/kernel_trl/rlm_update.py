@@ -1,12 +1,13 @@
 """One phase-shared TRL/Muon update with compact policy continuation, or audit only."""
 
 import argparse
-import hashlib
 import json
 import os
 import time
 from datetime import timedelta
 from pathlib import Path
+
+from kernel_trl.group_contract import load_training_group
 
 
 def tracking_configuration(arguments, version: int, run_name: str | None = None) -> dict:
@@ -23,6 +24,15 @@ def tracking_configuration(arguments, version: int, run_name: str | None = None)
 
 
 def run(arguments) -> dict:
+    group, input_metadata = (
+        load_training_group(arguments.group)
+        if arguments.group
+        else (
+            None,
+            {"group_input_path": None, "group_input_sha256": None, "generation_sha256": None},
+        )
+    )
+
     import torch
     import torch.distributed as dist
     from datasets import Dataset
@@ -51,7 +61,6 @@ def run(arguments) -> dict:
     from kernel_trl.replay_trainer import rlm_grpo_trainer
     from kernel_trl.tracking import trainer_tracking_identity
 
-    group = json.loads(arguments.group.read_text()) if arguments.group else None
     memory_tokens = getattr(arguments, "memory_probe_tokens", None)
     if memory_tokens:
         from kernel_trl.memory_probe import probe_group
@@ -246,11 +255,7 @@ def run(arguments) -> dict:
             "execution_run_id": group.get("execution_run_id"),
             "group_id": group.get("group_id"),
             "attempt_id": group.get("attempt_id"),
-            "group_input_path": str(arguments.group) if arguments.group else None,
-            "group_input_sha256": hashlib.sha256(arguments.group.read_bytes()).hexdigest()
-            if arguments.group
-            else None,
-            "generation_sha256": group.get("generation_sha256"),
+            **input_metadata,
             "optimizer_step": version + 1,
             "trackio_run_name": identity["name"] if identity else None,
             "trackio_config": identity["config"] if identity else None,

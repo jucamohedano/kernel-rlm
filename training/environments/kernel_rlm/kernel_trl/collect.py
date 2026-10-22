@@ -2,7 +2,6 @@
 
 import argparse
 import asyncio
-import hashlib
 import json
 import os
 import time
@@ -21,6 +20,7 @@ from kernel_trl.context import (
     LEGACY_CONTEXT_TOKENS,
     validate_context_tokens,
 )
+from kernel_trl.group_contract import finalize_training_group, validate_episode_samples
 from kernel_trl.scoring import capture_generation
 from kernel_trl.turn_credit import training_rows
 
@@ -360,6 +360,7 @@ async def collect(arguments):
                         "No reward above 0.1; inspect saved trajectories before continuing"
                     )
                 if admitted:
+                    validate_episode_samples(episodes, arguments.policy_version)
                     group = training_rows(episodes, arguments.policy_version, context_tokens)
                     group.update(
                         producer="kernel_trl_collect",
@@ -368,9 +369,7 @@ async def collect(arguments):
                         attempt_id=arguments.attempt_id,
                         task=task_id,
                     )
-                    group["artifact_sha256"] = hashlib.sha256(
-                        json.dumps(group, sort_keys=True, separators=(",", ":")).encode()
-                    ).hexdigest()
+                    finalize_training_group(group)
                     (directory / "training-group.json").write_text(json.dumps(group, indent=2))
                     print(
                         json.dumps(

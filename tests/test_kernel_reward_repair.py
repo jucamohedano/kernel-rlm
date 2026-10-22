@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 from kernel_trl import reward_repair as module
-from kernel_trl.scoring import capture_generation
 
 
 @pytest.fixture
@@ -96,7 +95,27 @@ def branch(tmp_path, monkeypatch):
                 "attempts": 1,
                 "sha256": module.digest(episode / "score.json"),
             }
-        capture_generation(directory, task["name"], policy, 8, 16384)
+        directory.joinpath("generation-manifest.json").write_text(
+            json.dumps(
+                {
+                    "task": task["name"],
+                    "policy_version": policy,
+                    "context_tokens": 16384,
+                    "episodes": [
+                        {
+                            "directory": f"group-0-trajectory-{index}",
+                            "sha256": {
+                                name: hashlib.sha256(
+                                    (directory / f"group-0-trajectory-{index}" / name).read_bytes()
+                                ).hexdigest()
+                                for name in ("task.json", "submission.json", "calls.jsonl")
+                            },
+                        }
+                        for index in range(8)
+                    ],
+                }
+            )
+        )
         ledger["generation_sha256"] = module.digest(directory / "generation-manifest.json")
         module.write_json(directory / "scoring-state.json", ledger)
         module.write_json(directory / "training-group.json", {"old_reward": 1})
