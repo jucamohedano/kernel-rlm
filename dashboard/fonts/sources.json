@@ -21,6 +21,7 @@
   },
   "JetBrainsMono-OFL.txt": {
     "source": "https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/OFL.txt",
-    "sha256": "a76abf002c49097d146e86740a3105a5d00450b1592e820a1109a8c5680cd697"
+    "sha256": "c1ab7c666206842a02b35b30770dac0d7a10156ed401c9defc3f02a754d89e90",
+    "normalization": "Trailing whitespace removed; license wording unchanged."
   }
 }
