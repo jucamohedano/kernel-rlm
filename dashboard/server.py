@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import mimetypes
 import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -154,11 +153,13 @@ def make_handler(root: Path, receipt_path: Path | None = None, task_catalog: Pat
                 file = Path(__file__).parent / files[path]
                 if not file.is_file():
                     return self.send_error(404)
-                content_type = (
-                    "font/woff2"
-                    if file.suffix == ".woff2"
-                    else mimetypes.guess_type(file.name)[0] + "; charset=utf-8"
-                )
+                content_types = {
+                    ".html": "text/html; charset=utf-8",
+                    ".js": "text/javascript; charset=utf-8",
+                    ".css": "text/css; charset=utf-8",
+                    ".woff2": "font/woff2",
+                }
+                content_type = content_types[file.suffix]
                 return self.send_data(file.read_bytes(), content_type)
             return self.send_error(404)
 
@@ -199,7 +200,7 @@ def make_handler(root: Path, receipt_path: Path | None = None, task_catalog: Pat
                 return self.send_error(500, "Could not save local document")
             return self.send_data(result)
 
-        def log_message(self, fmt, *args):
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     return Handler
