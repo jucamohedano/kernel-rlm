@@ -64,9 +64,30 @@ def collector(monkeypatch):
                     await asyncio.sleep(0)
             finally:
                 observed["active"] -= 1
+            identity = {
+                "execution_run_id": "run-test",
+                "group_id": "group-test:task-a",
+                "attempt_id": "attempt-0",
+                "episode_id": directory.name,
+            }
             return {
+                **identity,
                 "reward": observed["rewards"][index],
-                "samples": [RootSample([2], [index + 3], [-1.0], "stop")],
+                "samples": [
+                    RootSample(
+                        [2],
+                        [index + 3],
+                        [-1.0],
+                        "stop",
+                        {
+                            **identity,
+                            "policy_version": version,
+                            "root_turn_id": f"turn-{index}",
+                            "call_id": f"call-{index}",
+                            "model_call_id": f"call-{index}",
+                        },
+                    )
+                ],
                 "verification": observed.get("verification", {}).get(index, {}),
             }
 
@@ -120,6 +141,10 @@ def test_eight_rollouts_use_four_slots_and_one_policy(collector, tmp_path):
     assert observed["versions"] == [7] * 8
     assert observed["adapters"] == ["kernel-step-7"]
     result = json.loads((args.output_dir / "training-group.json").read_text())
+    from kernel_trl.group_contract import validate_training_group
+
+    validate_training_group(result)
+    assert result["schema_version"] == 1
     assert len(result["rewards"]) == 8
     assert result["policy_version"] == 7
     assert result["group_id"] == "group-test:task-a"
@@ -242,8 +267,39 @@ def test_deferred_generation_saves_all_trajectories_without_final_scoring(
         async def run_episode(self, task, directory, version):
             directory.mkdir(parents=True)
             (directory / "task.json").write_text(json.dumps(task))
-            (directory / "submission.json").write_text(json.dumps({"submission": "source"}))
-            (directory / "calls.jsonl").write_text("saved exact calls")
+            identity = {
+                "execution_run_id": "run-test",
+                "group_id": "group-test:task-a",
+                "attempt_id": "attempt-0",
+                "episode_id": directory.name,
+                "policy_version": version,
+            }
+            (directory / "submission.json").write_text(
+                json.dumps({"submission": "source", **identity})
+            )
+            (directory / "calls.jsonl").write_text(
+                json.dumps(
+                    {
+                        **identity,
+                        "branch": "root",
+                        "root_turn_id": f"turn-{directory.name}",
+                        "call_id": f"call-{directory.name}",
+                        "model_call_id": f"call-{directory.name}",
+                        "response": {
+                            "prompt_token_ids": [2],
+                            "choices": [
+                                {
+                                    "token_ids": [3],
+                                    "logprobs": {
+                                        "content": [{"token": "token_id:3", "logprob": -1.0}]
+                                    },
+                                    "finish_reason": "stop",
+                                }
+                            ],
+                        },
+                    }
+                )
+            )
             return {"reward": None, "samples": [object()]}
 
     monkeypatch.setattr(module, "RolloutCollector", Generator)

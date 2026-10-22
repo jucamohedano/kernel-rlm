@@ -134,8 +134,6 @@ def test_generated_repair_preserves_exact_group_and_scoring_attempts(
 ):
     import copy
 
-    from kernel_trl.scoring import capture_generation
-
     arguments, original, order = continuation_parent
     directory = tmp_path / "failed-generated"
     pending = directory / "groups/step-005"
@@ -160,7 +158,27 @@ def test_generated_repair_preserves_exact_group_and_scoring_attempts(
         (episode / "calls.jsonl").write_text(
             json.dumps({"policy_version": 4, "branch": "root", "response": response}) + "\n"
         )
-    capture_generation(output, task["name"], 4, 8, 14336)
+    output.joinpath("generation-manifest.json").write_text(
+        json.dumps(
+            {
+                "task": task["name"],
+                "policy_version": 4,
+                "context_tokens": 14336,
+                "episodes": [
+                    {
+                        "directory": f"group-0-trajectory-{index}",
+                        "sha256": {
+                            name: hashlib.sha256(
+                                (output / f"group-0-trajectory-{index}" / name).read_bytes()
+                            ).hexdigest()
+                            for name in ("task.json", "submission.json", "calls.jsonl")
+                        },
+                    }
+                    for index in range(8)
+                ],
+            }
+        )
+    )
     scoring_state = {"scores": {"0": {"attempts": 2, "sha256": "preserved"}}}
     curriculum.write_json(output / "scoring-state.json", scoring_state)
     manifest = curriculum.read_json(arguments.parent_run_dir / "inputs.json")

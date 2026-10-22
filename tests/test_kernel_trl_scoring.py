@@ -59,6 +59,20 @@ def test_wrong_fresh_protocol_preserves_attempt_before_failing_closed(saved):
     assert score["verification"]["verification_protocol"] == "wrong-version"
 
 
+def refresh_legacy_manifest(module, directory, context_tokens=None):
+    path = directory / "generation-manifest.json"
+    manifest = json.loads(path.read_text())
+    for entry in manifest["episodes"]:
+        entry["sha256"] = {
+            name: module.digest(directory / entry["directory"] / name)
+            for name in ("task.json", "submission.json", "calls.jsonl")
+        }
+    if context_tokens is not None:
+        manifest["context_tokens"] = context_tokens
+    module.write_json(path, manifest)
+    return manifest
+
+
 @pytest.fixture
 def saved(monkeypatch, tmp_path):
     monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "training/environments/kernel_rlm"))
@@ -101,7 +115,20 @@ def saved(monkeypatch, tmp_path):
     (directory / "groups.json").write_text(
         json.dumps([{"task": "task-a", "policy_version": 1, "admitted": False}])
     )
-    module.capture_generation(directory, "task-a", 1, 4)
+    entries = [
+        {
+            "directory": f"group-0-trajectory-{index}",
+            "sha256": {
+                name: module.digest(directory / f"group-0-trajectory-{index}" / name)
+                for name in ("task.json", "submission.json", "calls.jsonl")
+            },
+        }
+        for index in range(4)
+    ]
+    module.write_json(
+        directory / "generation-manifest.json",
+        {"task": "task-a", "policy_version": 1, "episodes": entries},
+    )
     return module, directory, task
 
 
@@ -127,8 +154,7 @@ def test_terminal_capacity_outcome_is_not_a_fabricated_token_sample(saved, match
         }
     )
     path.write_text("\n".join(json.dumps(call) for call in calls))
-    (directory / "generation-manifest.json").unlink()
-    manifest = module.capture_generation(directory, "task-a", 1, 4)
+    manifest = refresh_legacy_manifest(module, directory)
     if matching:
         episodes = module.load_episodes(directory, manifest)
         assert len(episodes) == 4
@@ -145,8 +171,7 @@ def test_long_context_survives_durable_scoring(saved):
     calls = [json.loads(line) for line in path.read_text().splitlines()]
     calls[0]["response"]["prompt_token_ids"] = [2] * 13000
     path.write_text("\n".join(json.dumps(call) for call in calls))
-    (directory / "generation-manifest.json").unlink()
-    module.capture_generation(directory, "task-a", 1, 4, context_tokens=16384)
+    refresh_legacy_manifest(module, directory, context_tokens=16384)
     scorer = AsyncMock(return_value=(0.85, {"verification_status": "completed", "correct": True}))
     result = asyncio.run(module.score_generated(directory, 1, "task-a", scorer))
     assert result["admitted"] is True
@@ -266,7 +291,7 @@ def test_capture_load_score_training_preserves_provenance(saved):
     for index in range(4):
         episode = directory / f"group-0-trajectory-{index}"
         submission = json.loads((episode / "submission.json").read_text())
-        submission.update(**identity, episode_id=f"episode-{index}")
+        submission.update(**identity, episode_id=f"episode-{index}", policy_version=1)
         (episode / "submission.json").write_text(json.dumps(submission))
         calls = [json.loads(line) for line in (episode / "calls.jsonl").read_text().splitlines()]
         calls[0].update(
@@ -275,6 +300,12 @@ def test_capture_load_score_training_preserves_provenance(saved):
             root_turn_id=f"turn-{index}",
             call_id=f"call-{index}",
             model_call_id=f"call-{index}",
+        )
+        calls[1].update(
+            **identity,
+            episode_id=f"episode-{index}",
+            call_id=f"child-{index}",
+            model_call_id=f"child-{index}",
         )
         (episode / "calls.jsonl").write_text("\n".join(json.dumps(call) for call in calls))
     (directory / "generation-manifest.json").unlink()
@@ -291,3 +322,15 @@ def test_capture_load_score_training_preserves_provenance(saved):
     assert group["rows"][0]["call_id"] == "call-0"
     assert group["artifact_sha256"]
     assert group["rows"][0]["episode_id"] == "episode-0"
+
+
+def test_historical_recovery_without_manifest_captures_legacy_not_v1(saved, tmp_path):
+    module, source, task = saved
+    (source / "generation-manifest.json").unlink()
+    before = {path: path.read_bytes() for path in source.rglob("*") if path.is_file()}
+    destination = tmp_path / "recovered-without-capture"
+    module.import_saved_group(source, destination, task, 1, 4)
+    manifest = json.loads((destination / "generation-manifest.json").read_text())
+    assert "schema_version" not in manifest
+    assert len(module.load_episodes(destination, manifest)) == 4
+    assert before == {path: path.read_bytes() for path in source.rglob("*") if path.is_file()}

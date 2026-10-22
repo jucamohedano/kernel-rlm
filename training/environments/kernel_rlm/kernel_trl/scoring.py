@@ -8,10 +8,12 @@ import os
 import shutil
 from pathlib import Path
 
+from kernel_rollout.artifacts import artifact_version, validate_generation_identity
 from kernel_rollout.contract import exact_sample, has_signal
 from kernel_rollout.scoring import score_submission
 
 from kernel_trl.context import LEGACY_CONTEXT_TOKENS, validate_context_tokens
+from kernel_trl.group_contract import finalize_training_group
 from kernel_trl.turn_credit import training_rows
 
 INFRASTRUCTURE_STATUSES = {
@@ -45,6 +47,8 @@ def capture_generation(
     version: int,
     rollouts: int,
     context_tokens: int = LEGACY_CONTEXT_TOKENS,
+    *,
+    legacy: bool = False,
 ) -> dict:
     validate_context_tokens(context_tokens)
     if rollouts not in {4, 8}:
@@ -70,19 +74,39 @@ def capture_generation(
     if context_tokens != LEGACY_CONTEXT_TOKENS:
         manifest["context_tokens"] = context_tokens
     destination = directory / "generation-manifest.json"
-    if destination.exists() and read_json(destination) != manifest:
-        raise ValueError("Generated trajectories changed since capture")
+    if destination.exists():
+        saved = read_json(destination)
+        artifact_version(saved)
+        if "schema_version" in saved:
+            manifest["schema_version"] = 1
+        if saved != manifest:
+            raise ValueError("Generated trajectories changed since capture")
+        if artifact_version(saved) == 1:
+            load_episodes(directory, saved)
+        return saved
+    if not legacy:
+        manifest["schema_version"] = 1
+        load_episodes(directory, manifest)
     write_json(destination, manifest)
     return manifest
 
 
 def load_episodes(directory: Path, manifest: dict) -> list[dict]:
+    artifact_version(manifest)
     episodes = []
+    episode_ids = set()
+    call_ids = set()
     context_tokens = validate_context_tokens(manifest.get("context_tokens", LEGACY_CONTEXT_TOKENS))
     if len(manifest["episodes"]) not in {4, 8}:
         raise ValueError("Incomplete generated group")
     for entry in manifest["episodes"]:
         episode = directory / entry["directory"]
+        if artifact_version(manifest) == 1 and set(entry["sha256"]) != {
+            "task.json",
+            "submission.json",
+            "calls.jsonl",
+        }:
+            raise ValueError("Versioned generation requires all captured artifact checksums")
         for name, expected in entry["sha256"].items():
             if digest(episode / name) != expected:
                 raise ValueError(f"Generated artifact checksum mismatch: {episode / name}")
@@ -91,6 +115,15 @@ def load_episodes(directory: Path, manifest: dict) -> list[dict]:
             raise ValueError("Saved task differs from generated group")
         calls = [json.loads(line) for line in (episode / "calls.jsonl").read_text().splitlines()]
         record = read_json(episode / "submission.json")
+        validate_generation_identity(manifest, record, calls)
+        if artifact_version(manifest) == 1:
+            if record["episode_id"] in episode_ids:
+                raise ValueError("Episode identity is repeated within generation")
+            episode_ids.add(record["episode_id"])
+            for call in calls:
+                if call["call_id"] in call_ids:
+                    raise ValueError("Call identity is repeated within generation")
+                call_ids.add(call["call_id"])
         if any(call.get("policy_version") != manifest["policy_version"] for call in calls):
             raise ValueError("Saved calls have a different sampled policy version")
         roots = [call for call in calls if call.get("branch") == "root"]
@@ -259,9 +292,7 @@ async def score_generated(
             task=task_id,
             generation_sha256=digest(manifest_path),
         )
-        group["artifact_sha256"] = hashlib.sha256(
-            json.dumps(group, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        finalize_training_group(group, legacy=artifact_version(manifest) is None)
         write_json(directory / "training-group.json", group)
     return record
 
@@ -326,7 +357,14 @@ def import_saved_group(
         if saved_manifest.exists()
         else LEGACY_CONTEXT_TOKENS
     )
-    capture_generation(destination, task["name"], version, rollouts, context_tokens)
+    capture_generation(
+        destination,
+        task["name"],
+        version,
+        rollouts,
+        context_tokens,
+        legacy=not saved_manifest.exists() or artifact_version(read_json(saved_manifest)) is None,
+    )
 
 
 def main():

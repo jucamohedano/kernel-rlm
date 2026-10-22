@@ -38,6 +38,29 @@ result keeps exact samples, provenance, reward, submission record, and optional
 verification. Both TRL and SkyRL call this runner by composition. The runner does
 not load a trainer. Limits, rewards, masks, and artifact formats are unchanged.
 
+## Exact-token artifact contract
+
+New TRL generation manifests and admitted training groups use `schema_version: 1`.
+They require complete execution, group, attempt, episode and root-call identities.
+The generation reader checks captured file hashes and submission/call identities.
+The training reader checks exact rows, positions, advantages, real-token counts
+and padding before importing the trainer. Child outputs are not trained root outputs.
+Serialized masks describe the existing row semantics; tensor masks and losses do not change.
+
+The hashes have different scopes:
+
+- `artifact_sha256`: canonical group JSON, excluding that field.
+- Probability-audit `group_sha256`: canonical JSON of the whole group, including that field.
+- Report `group_input_sha256`: exact input file bytes read before training.
+- Deferred `generation_sha256`: exact generation-manifest file bytes.
+
+Unversioned historical artifacts stay unversioned. Reading or recapturing an
+existing legacy manifest does not rewrite it or invent IDs. Deferred scoring of
+that evidence writes an unversioned training group. New capture requires complete
+IDs. Historical group recovery can capture a missing manifest explicitly as
+legacy; it does not claim schema v1. Unsupported explicit versions are rejected. These checks do not attest tokenizer revisions or live optimizer
+consumption.
+
 The native framework probes now use separate entry points:
 
 ```bash
