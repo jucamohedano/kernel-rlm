@@ -127,12 +127,12 @@ class MyClient(BaseLM):
     def __init__(self, api_key: str, model_name: str, **kwargs):
         super().__init__(model_name=model_name, **kwargs)
         # Initialize your client
-        
+
     def completion(self, prompt: str | list[dict[str, Any]], model: str | None = None) -> str:
         # Handle both str and message list formats
         # Track usage with _track_cost()
         # Return response string
-        
+
     def get_usage_summary(self) -> UsageSummary:
         # Return aggregated usage across all calls
 ```
@@ -183,23 +183,23 @@ from rlm.environments.base_env import NonIsolatedEnv
 from rlm.core.types import REPLResult
 
 class MyEnvironment(NonIsolatedEnv):
-    def __init__(self, lm_handler_address: tuple[str, int] | None = None, 
+    def __init__(self, lm_handler_address: tuple[str, int] | None = None,
                  context_payload: dict | list | str | None = None, **kwargs):
         super().__init__(**kwargs)
         self.lm_handler_address = lm_handler_address
         self.setup()
         if context_payload:
             self.load_context(context_payload)
-            
+
     def setup(self):
         # Initialize execution namespace
-        
+
     def load_context(self, context_payload: dict | list | str):
         # Make context available to executed code
-        
+
     def execute_code(self, code: str) -> REPLResult:
         # Execute code and return REPLResult
-        
+
     def cleanup(self):
         # Clean up resources
 ```
@@ -322,4 +322,3 @@ When building a new isolated environment (e.g., for a new cloud provider):
 5. **Handle state** - Serialize/deserialize execution state between code blocks
 
 See `rlm/environments/modal_repl.py` as the canonical reference implementation.
-

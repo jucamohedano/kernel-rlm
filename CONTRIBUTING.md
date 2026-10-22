@@ -2,7 +2,7 @@ I'm too lazy to write up a stricter set of rules for PRs, but generally I just a
 
 Generally though, I'll outline the things we 1) need to implement; 2) want to implement; 3) can dream about implementing. The state of this repo is that it should be fully functional for most use cases, but it isn't super fast or anything.
 
-There are likely more things we'll want to do, but here are some things I've been meaning to tackle. 
+There are likely more things we'll want to do, but here are some things I've been meaning to tackle.
 
 ## Urgent TODOs
 - [ ] **Additional Sandboxes**. Any more interesting, commonly used sandboxes (e.g. Prime Sandboxes are WIP atm).
