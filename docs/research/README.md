@@ -4,6 +4,7 @@ This repository combines the Recursive Language Models (RLM) framework with a CU
 
 ## Find your way around
 
+- [Literature review](literature-review.md): reviewed sources, project connections, and limits. Open Literature in the dashboard to read or edit it.
 - [First campaign](first-campaign.md): what was built, how the campaign changed, and what its results do—and do not—show.
 - [Evidence reading and reporting](protocol.md): how to describe observed outcomes without overstating them.
 - [Dashboard guide](../../dashboard/README.md): browse explicitly selected local evidence without launching compute.

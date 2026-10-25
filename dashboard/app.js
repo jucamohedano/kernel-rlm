@@ -81,9 +81,10 @@ function inline(parent, source) {
     else if (token.startsWith("**")) parent.append(el("strong", "", token.slice(2, -2)));
     else {
       const [, label, target] = /^\[([^\]]+)\]\(([^)]*)\)$/.exec(token);
-      const docs = {"README.md":"README", "first-campaign.md":"first-campaign", "protocol.md":"protocol", "artifact-publication.md":"artifact-publication", "experiment-tracking.md":"experiment-tracking"};
+      const docs = {"README.md":"README", "first-campaign.md":"first-campaign", "protocol.md":"protocol", "literature-review.md":"literature-review", "artifact-publication.md":"artifact-publication", "experiment-tracking.md":"experiment-tracking"};
       const anchor = el("a", "", label);
-      if (docs[target]) anchor.href = "#writing/" + docs[target];
+      if (target === "literature-review.md") anchor.href = "#literature";
+      else if (docs[target]) anchor.href = "#writing/" + docs[target];
       else if (target.endsWith("/dashboard/guide.html")) anchor.href = "/archive/guide";
       else if (/^https?:\/\//i.test(target)) { anchor.href = target; anchor.rel = "noreferrer"; }
       else anchor.append(document.createTextNode(" (" + target + ")"));
@@ -528,10 +529,10 @@ async function runPage(id, traceId, tab, signal, ticket) {
 let writingDraft = null;
 function hasUnsavedWriting() { return writingDraft && writingDraft.editor.value !== writingDraft.original; }
 window.addEventListener("beforeunload",event=>{if(hasUnsavedWriting()){event.preventDefault();event.returnValue="";}});
-async function writingPage(id,signal,ticket) {
+async function writingPage(id,signal,ticket,workspace="Writing") {
   const index=await api("writing",signal);if(ticket!==renderId)return;
   document.body.classList.add("has-collection");collection.hidden=false;
-  collection.replaceChildren(el("div","collection-heading","Writing"));
+  collection.replaceChildren(el("div","collection-heading",workspace));
   const selected=id||index.documents[0]?.id;if(!selected)return;
   const tree=el("div","file-tree");tree.append(el("div","muted","docs / research /"));
   for(const doc of index.documents){const a=link(doc.path?.split("/").pop()||doc.title,"#writing/"+encodeURIComponent(doc.id),"writing-link"+(selected===doc.id?" selected":""));tree.append(a);}
@@ -573,7 +574,7 @@ async function render() {
   pendingRequest?.abort();pendingRequest=new AbortController();const signal=pendingRequest.signal;
   let [view,...parts]=location.hash.slice(1).split("/");view=view||"home";
   content.dataset.ready="false";content.replaceChildren();collection.replaceChildren();collection.hidden=true;document.body.classList.remove("has-collection");
-  heading.textContent={home:"Home",experiments:"Experiments",trajectories:"Trajectories",lineage:"Lineage",writing:"Writing"}[view]||"Workspace";
+  heading.textContent={home:"Home",experiments:"Experiments",trajectories:"Trajectories",lineage:"Lineage",writing:"Writing",literature:"Literature"}[view]||"Workspace";
   document.querySelectorAll("#nav a").forEach(a=>{a.classList.toggle("active",a.dataset.view===view);});
   try {
     parts=parts.map(decodeURIComponent);
@@ -582,10 +583,12 @@ async function render() {
     else if(view==="trajectories") await trajectoriesPage(signal,ticket);
     else if(view==="lineage") await lineagePage(parts[0],signal,ticket);
     else if(view==="writing") await writingPage(parts[0],signal,ticket);
+    else if(view==="literature") await writingPage("literature-review",signal,ticket,"Literature");
     else {
       const d=await api("home",signal);if(ticket!==renderId)return;
       const summary=panel("L1 simple kernels · Stage 1");pair(summary,"Status",statusLabel(d.campaign.status));pair(summary,"Trained",d.campaign.trained);pair(summary,"Deferred",d.campaign.deferred);content.append(summary);
       content.append(el("h2","section-title","Research workspace"),el("p","muted","Explore experiments, inspect the evidence, and develop your own research direction."));
+      content.append(link("Literature review →", "#literature", "writing-link"));
       for(const ex of d.experiments.slice(0,3))content.append(link(ex.title,"#experiments/"+ex.id,"writing-link"));
     }
     document.title=heading.textContent+" · Kernel RLM";content.dataset.ready="true";

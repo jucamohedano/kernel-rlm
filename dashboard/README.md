@@ -32,11 +32,14 @@ The dashboard reads filesystem exports. It does not query Trackio directly.
 
 ## Edit research documents
 
+Open **Literature** for the maintained, project-linked review. Use **Source / Edit** to update it with the same backup and conflict checks as Writing.
+
 Writing can save only these files in `docs/research/`:
 
 - `README.md`
 - `first-campaign.md`
 - `protocol.md`
+- `literature-review.md`
 - `artifact-publication.md`
 - `experiment-tracking.md`
 
