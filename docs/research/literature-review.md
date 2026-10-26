@@ -1,26 +1,78 @@
 # Literature review for Kernel RLM
 
-This is the maintained reading record for our kernel-generation and RL project. It connects sources to the implementation and the first campaign. It is not evidence that we reproduced a paper or adopted all of its methods.
+A kernel can pass a test without doing the right computation. A training curve can rise without showing a better policy. And an agent can call children without learning useful delegation. This review follows those distinctions through our kernel-generation pipeline.
+
+Start with the thematic sections for the story. Open a source record for its finding, project connection and limits. These are research connections, not claims that we reproduced each method or obtained its results.
+
+![Research map connecting recursive agents, kernel verification, root-policy training and held-out evaluation](/literature/research-map.svg)
+
+Original project schematic: how the research questions connect, not a comparison of paper results.
 
 Last reviewed: **25 October 2026**. The year below is the first preprint/report year unless a conference year is stated. A preprint label means no independent venue was verified for this review, not that the work is necessarily unpublished. Review depth is explicit; a reading lead is not a methods review.
 
-## How to use this review
+## A root agent, a REPL, and the choice to delegate
 
-- Use the primary source and the stated section before reusing a claim. Use browser search to find a title or topic.
-- Read **Project connection** and **Limits** together. Keep source results separate from our measured results.
-- Update the review date, version, review depth, and caveats when revisiting a source. Do not silently replace an inspected version with the newest version.
-- Keep implementation proposals and acceptance criteria in [issue #8](https://github.com/jucamohedano/kernel-rlm/issues/8) or a focused issue. This page records literature, not a task plan.
-- Preserve the [historical guide](../../training/environments/kernel_rlm/dashboard/guide.html). This page is the current literature record; the guide remains a dated campaign account.
+Imagine the root agent inspecting an operator, writing a CUDA candidate, and revising it after execution feedback. Recursive Language Models supplies the persistent-REPL foundation; Recursive Agent Optimization asks how root and child trajectories receive training credit. Our current loss targets exact root outputs, not child outputs, although shared weights can still change child behavior indirectly. The agent-scaling studies add a necessary control: useful delegation must be weighed against actual root-plus-child tokens, tool calls and elapsed time.
 
-## Connection to the project
+![RLM paper Figure 2: the prompt lives in a REPL variable; the model inspects it and makes recursive calls](/literature/rlm-figure-2.png)
 
-- **Architecture and delegation:** RLM supplies the persistent REPL and recursive-call foundation. RAO and matched-budget agent studies help distinguish access to children from useful, trainable delegation. Our current loss targets exact root outputs, not child outputs.
-- **Training objective:** GRPO/PPO, DAPO, and Dr. GRPO describe related but different objectives. The native TRL/Muon pipeline is not a reproduction of all of them. Exact prompts, sampled IDs, behavior log probabilities, padding, and selected-group denominators matter.
-- **Verification:** KernelBench and verification studies separate correctness, timing, state coverage, and benchmark populations. Our BatchNorm repair closed one shortcut; it did not prove all computation was custom CUDA or eliminate every reward exploit.
-- **Evaluation:** The Stage 1 campaign changed tasks, hardware, and verification. Its accepted-group curve is not a controlled base-versus-checkpoint result. No held-out gain is established; see [First campaign](first-campaign.md).
-- **Sparse rewards:** Pedagogical RL studies useful successful trajectories, not only correct final answers. Its teacher/student procedure is not implemented here.
+Figure from **Recursive Language Models**, arXiv:2512.24601v3, Figure 2. Alex L. Zhang, Tim Kraska, and Omar Khattab. [Original figure and caption](https://arxiv.org/html/2512.24601v3#S1.F2) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Image unchanged; scaled for display. This architecture does not imply that our child outputs receive direct policy loss.
 
-## Kernel generation and verification
+### Recursive Language Models
+
+[Primary source](https://arxiv.org/html/2512.24601v3) · 2025. **Status:** arXiv preprint; v3 inspected (11 May 2026); no venue asserted
+
+**Review:** Prior primary review + current abstract metadata and targeted §2/§3.2/Appendix A reinspection **Location:** §2; §3.2 fine-tuning; Appendix A Additional Training Details
+
+**Source finding:** Treats long input as external environment data accessed through a persistent REPL and recursive LM calls. Its 1,000-filtered-trajectory experiment distills teacher root turns with their full histories as SFT samples. Appendix A separately describes an MRCRv2 RL experiment.
+
+**Project connection:** Architectural and upstream-code foundation for persistent REPL, external context and recursive delegation; motivates focus on root behavior without claiming identical training.
+
+**Limits:** The 1,000-teacher-trajectory result is supervised distillation, not this project’s direct GRPO baseline. Do not imply the entire paper contains no RL. Its root-training motivation is not evidence that child policy loss is used here.
+
+### Recursive Agent Optimization
+
+[Primary source](https://arxiv.org/html/2605.06639v2) · 2026. **Status:** arXiv preprint; v2 (2 October 2026); no venue asserted
+
+**Review:** Prior primary full-text section review retained; current primary abstract metadata rechecked **Location:** §2.2.1–2.2.2; §4; §5.0.1/Fig.8; §5.0.2/Fig.9
+
+**Source finding:** Jointly optimizes root and child trajectories using node-local success signals and depth-level weighting. Examines child-success-rate delegation reward; a success-count bonus encouraged unnecessary easy delegation.
+
+**Project connection:** Direct methodological contrast with the supplied root-token-only project objective. Low child use alone cannot separate low utility, limited exploration and lack of direct child credit.
+
+**Limits:** “Only Root Rewards” still trains child tokens with propagated root reward; it is NOT a root-token-only-loss ablation. Shared weights can change child behavior indirectly even without direct child loss. Evidence is not CUDA; implementation or new ablation plans belong in issues, not claimed as completed.
+
+### Towards a Science of Scaling Agent Systems
+
+[Primary source](https://arxiv.org/html/2512.08296v3) · 2025. **Status:** arXiv preprint; v3 (8 April 2026); no venue asserted
+
+**Review:** Prior primary review + current primary metadata and targeted setup/results/controls inspection **Location:** §3; §4.1–4.4; §5; Appendix E.4
+
+**Source finding:** Controlled comparisons vary agent architecture while maintaining task/tool controls and computational budgets; coordination benefit depends on domain and task structure, and coordination can add substantial overhead.
+
+**Project connection:** Supports budget-aware comparison of sequential root work and delegation, with actual tokens, tool calls and elapsed time reported rather than assuming more agents imply better decomposition.
+
+**Limits:** Tool-using benchmark evidence is not CUDA-kernel evidence. Equal budget controls do not imply equal actual consumed compute; reported thresholds/effect sizes are not universal laws. Latest v3 has expanded benchmarks/results, so avoid copying unversioned older headline statistics.
+
+### Single-Agent LLMs Outperform Multi-Agent Systems on Multi-Hop Reasoning Under Equal Thinking Token Budgets
+
+[Primary source](https://arxiv.org/html/2604.02460v2) · 2026. **Status:** arXiv preprint; v2 (11 April 2026); no venue asserted
+
+**Review:** Prior primary section review retained; current primary abstract metadata rechecked **Location:** §4–5; Appendix C
+
+**Source finding:** Compares single-agent and multi-agent reasoning systems under thinking-token upper caps and discusses accounting limitations.
+
+**Project connection:** Extra child tokens must not be mistaken for architectural benefit; literature supports distinguishing budget caps from actual root-plus-child usage.
+
+**Limits:** Text-only multi-hop reasoning; tools and vision outside scope. Caps are not enforced equal consumed tokens; Gemini accounting is approximate. The title must not be repeated as a universal claim about CUDA agents.
+
+## What does a passing kernel actually prove?
+
+Suppose a candidate passes because a module’s default state makes an operation look like an identity. Our BatchNorm repair closed one such shortcut, but did not prove that every required operation ran in custom CUDA. KernelBench connects correctness and speed; the verification studies then examine what finite tests miss, including state coverage, numerical contracts and semantic hacks. Their stronger checks are research references, not suites we can assume this project has implemented.
+
+![KernelBench paper Figure 1: generate a kernel from a PyTorch task, check correctness, and measure performance](/literature/kernelbench-figure-1.png)
+
+Figure from **KernelBench: Can LLMs Write Efficient GPU Kernels?**, arXiv:2502.10517v1, Figure 1. Anne Ouyang, Simon Guo, Simran Arora, Alex L. Zhang, William Hu, Christopher Ré, and Azalia Mirhoseini. [Original figure and caption](https://arxiv.org/html/2502.10517v1#S1.F1) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Image unchanged; scaled for display. A benchmark diagram is not evidence that our campaign reproduced its evaluation.
 
 ### KernelBench: Can LLMs Write Efficient GPU Kernels?
 
@@ -35,6 +87,52 @@ Last reviewed: **25 October 2026**. The year below is the first preprint/report 
 **Project connection:** Provides the task-level correctness-and-speed metric for interpreting this project; its changing-task, accepted-group training outcomes are not this benchmark score.
 
 **Limits:** fast_1 is a speed threshold, not pass@1. Original finite correctness checks are not a certificate of general semantics, and current project results are not held-out policy evaluation.
+
+### Towards Robust Agentic CUDA Kernel Benchmarking, Verification, and Optimization
+
+[Primary source](https://arxiv.org/html/2509.14279v1) · 2025. **Status:** arXiv preprint; no independent conference venue verified in this review.
+
+**Review:** Targeted full-primary-text review of the named sections; not a reproduction or exhaustive paper review. **Location:** §3 robust-kbench; §4 soft verification; §§5–6 agentic search; Appendix A.1 compromised-task filtering.
+
+**Source finding:** Adds varied initialization states and input configurations, forward/backward workloads and multiple timing/profiling checks. LLM verification is a screening stage before hardware verification; its own reported aggregate speedup decreases from 3.13× to 1.49× after compromised tasks are excluded.
+
+**Project connection:** An earlier verifier-loophole reference in the guide, directly relevant to default-state identity shortcuts and weak baselines. Passing the project’s current tests does not mean a candidate has passed robust-kbench.
+
+**Limits:** The 3.13×→1.49× change is its experiment, not a correction factor for this project. Its LLM screening is fallible, and benchmark heuristics are not universal correctness thresholds.
+
+### KernelBench-Verified: Do LLM-Generated Kernels Actually Beat PyTorch?
+
+[Primary source](https://arxiv.org/html/2607.16241v1) · 2026. **Status:** arXiv preprint; no independent conference venue verified in this review.
+
+**Review:** Targeted full-primary-text review of the named sections; not a reproduction or exhaustive paper review. **Location:** §§2.2–2.5 TF32, hidden tests, memory and metrics; §3.4 audit; §4 limitations; Appendix L.4 residual hacks.
+
+**Source finding:** Uses a TF32-enabled reference, four value distributions and peak-memory metrics while retaining fixed task shapes. Four genuine semantic hacks survive the expanded finite tests; two other audit flags are legitimate shape specializations.
+
+**Project connection:** The guide already cites it as a verifier-audit reference, not proof that its complete suite is implemented. The project’s BatchNorm state checks and CUDA execution guard address narrower failure modes.
+
+**Limits:** Four deterministic transforms do not prove semantics or vary module lifecycle/state, and feedback can leak hidden cases in a multi-turn loop. TF32 must respect the task numerical contract; the arXiv page unusually lists 26 June 2026 for a 2607 identifier, so no month is inferred from the ID.
+
+### The Correctness Illusion in LLM-Generated GPU Kernels
+
+[Primary source](https://arxiv.org/html/2606.20128v2) · 2026. **Status:** arXiv preprint; v2 reviewed, with no independent conference venue verified.
+
+**Review:** Targeted full-primary-text review of the named sections; not a reproduction or exhaustive paper review. **Location:** §§3.1–3.5 schemas, oracle, corpus and assumptions; §4 evaluation including cross-GPU sweep; §6 limitations.
+
+**Source finding:** Seeded, schema-aware tests expose author-planted transcription bugs that fixed-shape small-sample checks accept, while keeping positive controls clean in the studied corpus. Tests preserve shared symbolic dimensions and record numerical-error distributions against an fp64 mathematical reference rounded to the target dtype.
+
+**Project connection:** Supports distinguishing kernel semantics from the project’s separate sampler/learner probability audit. The guide labels it verification reading, not a reproduced fuzzer or a measured bug rate in this model.
+
+**Limits:** Author-seeded bugs and CPU stand-ins do not estimate deployed-model failure prevalence. Shape expansion is valid only under the declared task contract, and fp64 mathematical semantics need not match the project’s PyTorch implementation contract.
+
+## Iterative kernel search is not held-out evaluation
+
+A multi-turn agent gets several chances to improve a kernel: its final submission, best candidate in one history and best of several trajectories can yield different scores. Kevin and Dr. Kernel make those reporting choices concrete; CUDA Agent and DRTriton connect training data, curriculum and search. TimeRLM adds a persistent-REPL transfer example, but its depth-0 setting cannot demonstrate useful child delegation.
+
+![Separate paths for collecting verified rollouts, training on replayed root outputs and evaluating checkpoints on held-out tasks](/literature/train-evaluate.svg)
+
+Original project schematic: training feedback and held-out evaluation answer different questions.
+
+Our Stage 1 campaign changed tasks, hardware and verification. Its accepted-group curve describes selected training experience, not a controlled base-versus-checkpoint result. No held-out gain is established; [First campaign](first-campaign.md) records that boundary.
 
 ### Kevin: Multi-Turn RL for Generating CUDA Kernels
 
@@ -88,43 +186,45 @@ Last reviewed: **25 October 2026**. The year below is the first preprint/report 
 
 **Limits:** Results use Triton, synthetic programs and eight H100s, not this project’s direct CUDA/RTX setup. A NeurIPS checklist in the manuscript is not verification of conference acceptance.
 
-### Towards Robust Agentic CUDA Kernel Benchmarking, Verification, and Optimization
+### TimeRLM: Recursive Language Models Enable Precise Anomaly Localization in Long-Context Time-Series
 
-[Primary source](https://arxiv.org/html/2509.14279v1) · 2025. **Status:** arXiv preprint; no independent conference venue verified in this review.
+[Primary source](https://arxiv.org/html/2608.03391v2) · 2026. **Status:** arXiv preprint; v2 (6 September 2026); no venue asserted
 
-**Review:** Targeted full-primary-text review of the named sections; not a reproduction or exhaustive paper review. **Location:** §3 robust-kbench; §4 soft verification; §§5–6 agentic search; Appendix A.1 compromised-task filtering.
+**Review:** Prior primary review + current primary metadata, §4.1 and Appendix A targeted inspection **Location:** §3.1; §4.1–4.4; Appendix A; Appendix D
 
-**Source finding:** Adds varied initialization states and input configurations, forward/backward workloads and multiple timing/profiling checks. LLM verification is a screening stage before hardware verification; its own reported aggregate speedup decreases from 3.13× to 1.49× after compromised tasks are excluded.
+**Source finding:** Uses external Python access to long time-series and group-relative RL, reports final-checkpoint results on AnomalyXL plus ARFBench and unseen clinical recordings. Uses mean-centered Dr.GRPO advantages without reward-standard-deviation normalization. Appendix A states recursive sub_rlm calls are disabled (depth 0) throughout.
 
-**Project connection:** An earlier verifier-loophole reference in the guide, directly relevant to default-state identity shortcuts and weak baselines. Passing the project’s current tests does not mean a candidate has passed robust-kbench.
+**Project connection:** Related work for RL-trained persistent-REPL agents and held-out/transfer evaluation, not evidence of trained child delegation. Newly reviewed related work should not be relabeled as original implementation provenance.
 
-**Limits:** The 3.13×→1.49× change is its experiment, not a correction factor for this project. Its LLM screening is fallible, and benchmark heuristics are not universal correctness thresholds.
+**Limits:** Time-series anomaly tasks are not CUDA. Its token-cost and forced-final penalties and Dr.GRPO normalization are not claimed implemented here; depth-0 evaluation cannot demonstrate benefits of recursive child agents.
 
-### KernelBench-Verified: Do LLM-Generated Kernels Actually Beat PyTorch?
+## Which outputs receive learning credit?
 
-[Primary source](https://arxiv.org/html/2607.16241v1) · 2026. **Status:** arXiv preprint; no independent conference venue verified in this review.
+A short successful root trajectory and a long debugging trajectory need not receive the same weight under every objective. DeepSeekMath and PPO explain the algorithmic lineage; DAPO and Dr. GRPO distinguish response averaging, realized-token averaging, constant denominators and reward scaling. Those distinctions matter when the training targets are exact root outputs, while child responses and execution feedback remain context. ProRL adds evidence about entropy and reference-policy resets, not a validated reset recipe for our native TRL/Muon pipeline.
 
-**Review:** Targeted full-primary-text review of the named sections; not a reproduction or exhaustive paper review. **Location:** §§2.2–2.5 TF32, hidden tests, memory and metrics; §3.4 audit; §4 limitations; Appendix L.4 residual hacks.
+### DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models
 
-**Source finding:** Uses a TF32-enabled reference, four value distributions and peak-memory metrics while retaining fixed task shapes. Four genuine semantic hacks survive the expanded finite tests; two other audit flags are legitimate shape specializations.
+[Primary source](https://arxiv.org/html/2402.03300v3) · 2024. **Status:** arXiv preprint; v3 (27 April 2024); no venue asserted
 
-**Project connection:** The guide already cites it as a verifier-audit reference, not proof that its complete suite is implemented. The project’s BatchNorm state checks and CUDA execution guard address narrower failure modes.
+**Review:** Prior foundational citation + current primary metadata and §4.1 locator verification **Location:** §4.1.1–4.1.4; Appendix A.1.6
 
-**Limits:** Four deterministic transforms do not prove semantics or vary module lifecycle/state, and feedback can leak hidden cases in a multi-turn loop. TF32 must respect the task numerical contract; the arXiv page unusually lists 26 June 2026 for a 2607 identifier, so no month is inferred from the ID.
+**Source finding:** Introduces Group Relative Policy Optimization, estimating relative advantage from sampled response groups rather than a separately trained critic; distinguishes outcome and process supervision.
 
-### The Correctness Illusion in LLM-Generated GPU Kernels
+**Project connection:** Algorithmic origin of the project’s GRPO lineage.
 
-[Primary source](https://arxiv.org/html/2606.20128v2) · 2026. **Status:** arXiv preprint; v2 reviewed, with no independent conference venue verified.
+**Limits:** The citation does not mean every original reward, KL regularization, normalization or training-data choice is reproduced; mathematical-reasoning results do not validate the kernel verifier.
 
-**Review:** Targeted full-primary-text review of the named sections; not a reproduction or exhaustive paper review. **Location:** §§3.1–3.5 schemas, oracle, corpus and assumptions; §4 evaluation including cross-GPU sweep; §6 limitations.
+### Proximal Policy Optimization Algorithms
 
-**Source finding:** Seeded, schema-aware tests expose author-planted transcription bugs that fixed-shape small-sample checks accept, while keeping positive controls clean in the studied corpus. Tests preserve shared symbolic dimensions and record numerical-error distributions against an fp64 mathematical reference rounded to the target dtype.
+[Primary source](https://arxiv.org/abs/1707.06347) · 2017. **Status:** arXiv preprint; v2 (28 August 2017); no venue asserted
 
-**Project connection:** Supports distinguishing kernel semantics from the project’s separate sampler/learner probability audit. The guide labels it verification reading, not a reproduced fuzzer or a measured bug rate in this model.
+**Review:** Prior foundational citation + current primary abstract metadata/abstract; HTML body unavailable (failed conversion) **Location:** Abstract; clipped-surrogate foundation (not freshly full-text reviewed)
 
-**Limits:** Author-seeded bugs and CPU stand-ins do not estimate deployed-model failure prevalence. Shape expansion is valid only under the declared task contract, and fp64 mathematical semantics need not match the project’s PyTorch implementation contract.
+**Source finding:** Proposes policy-gradient surrogate objectives with repeated minibatch optimization after interaction-based sampling.
 
-## RL objectives and training systems
+**Project connection:** Clipped-surrogate ancestry for group-relative policy optimization, not a claim that this project runs actor-critic PPO.
+
+**Limits:** Do not label GRPO as the paper’s complete PPO implementation. Current HTML only exposes a conversion-failure placeholder, so no new equation-level or implementation verification is claimed.
 
 ### DAPO: An Open-Source LLM Reinforcement Learning System at Scale
 
@@ -152,6 +252,46 @@ Last reviewed: **25 October 2026**. The year below is the first preprint/report 
 
 **Limits:** Main evidence is mathematical reasoning with Qwen2.5-1.5B, not multi-turn CUDA, the project optimizer, or evidence that a normalization change would help. Increased length alone is not demonstrated reasoning improvement.
 
+### ProRL: Prolonged Reinforcement Learning Expands Reasoning Boundaries in Large Language Models
+
+[Primary source](https://arxiv.org/html/2505.24864v1) · 2025. **Status:** arXiv preprint; no conference venue asserted
+
+**Review:** Targeted primary-body review, narrower than a full-paper review; prior record and §2.3.1 rechecked 2026-10-25. **Location:** §2.3.1 KL Regularization and Reference Policy Reset, Eq. 4
+
+**Source finding:** Adds reference-policy KL for its distilled starting model and periodically resets the reference to a recent online policy while reinitializing optimizer state, to address entropy loss and KL-dominated updates during prolonged training.
+
+**Project connection:** A qualified comparison for entropy/KL discussions; rising selected-group rewards alone do not establish the paper’s claim of expanded reasoning boundaries in this CUDA project.
+
+**Limits:** The source starts from DeepSeek-R1-Distill-Qwen-1.5B; its KL/reset recipe is neither claimed implemented nor validated for the project optimizer. Weak groups in a short run are not evidence that reference or optimizer resets are needed.
+
+## Replay the conversation that was actually sampled
+
+A root turn written after compiler feedback must not be trained as though it came from a different history. Exact prefixes, sampled token IDs, behavior log probabilities and loss masks define that replay; they do not guarantee equal probabilities across inference and training stacks. The nondeterminism studies and Beyond Precision examine numerical mismatch, AReaL addresses stale policy versions, and TMax and the tool-calling study show why harness details matter. Serial sampling and learning remove overlap, not necessarily mismatch; our probability audit is also separate from kernel verification.
+
+### Defeating Nondeterminism in LLM Inference
+
+[Primary source](https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/) · 2025. **Status:** Primary technical research report/blog, Thinking Machines Lab, 10 September 2025; not an arXiv paper
+
+**Review:** Targeted primary-report review; prior 2026-10-20 record and named sections rechecked 2026-10-25. **Location:** Batch invariance and “determinism”; How do we make kernels batch-invariant? (RMSNorm, matrix multiplication, attention); Experiments: Performance; Experiments: True on-policy RL
+
+**Source finding:** Explains why deterministic operations can still be batch-size dependent. In its Bigmath RLVR experiment, unmatched numerics without importance weighting collapse, whereas matched sampler/trainer numerics or importance weighting train smoothly.
+
+**Project connection:** Direct motivation for exact sampled IDs, behavior logprobs, root prefixes and probability checks. Serial inference/learning removes overlap but does not itself remove backend numerical mismatch.
+
+**Limits:** Report-specific evidence, not a theorem that every small mismatch collapses training. Bitwise matching can cost throughput. The project is not claimed to implement these batch-invariant kernels or the report’s complete training stack.
+
+### Understanding and Mitigating Numerical Sources of Nondeterminism in LLM Inference
+
+[Primary source](https://arxiv.org/html/2506.09501v2) · 2025. **Status:** arXiv preprint; no conference venue asserted
+
+**Review:** Primary-body targeted review performed 2026-10-25; no earlier deep-review evidence found in supplied prior records. **Location:** §3.1 experiment setup and reproducibility metrics; §3.2 Greedy Decoding ≠ Deterministic Output; §3.3 Random Sampling Has Reproducibility Issue, Too; §3.4 runtime-configuration ablation; §4 Near-Perfect Deterministic Reproduction: LayerCast
+
+**Source finding:** Across its tested GPU types/counts, batching and precision settings, greedy outputs and sampled aggregate accuracy can vary. Higher precision reduces but does not universally eliminate divergence; LayerCast stores linear weights in BF16 and upcasts them for FP32 computation.
+
+**Project connection:** Supports reporting actual inference backend, batching, hardware and precision alongside seeds. A greedy transcript is not enough to establish sampler/learner probability equality, and kernel-program correctness remains a separate question.
+
+**Limits:** An inference reproducibility study, not a project RL stability experiment or a guarantee of determinism. LayerCast is not claimed implemented. Configuration-dependent token flips differ from stale-policy data, and this study does not by itself establish cross-stack probability parity.
+
 ### Beyond Precision: Training-Inference Mismatch is an Optimization Problem and Simple LR Scheduling Fixes It
 
 [Primary source](https://arxiv.org/html/2602.01826v1) · 2026. **Status:** arXiv preprint; no conference venue asserted
@@ -175,42 +315,6 @@ Last reviewed: **25 October 2026**. The year below is the first preprint/report 
 **Project connection:** Distinguishes stale rollout provenance from same-checkpoint numerical mismatch. If old deferred groups are reused after updates, their behavior logprobs are not automatically the current proximal probabilities.
 
 **Limits:** The project is not claimed to implement full asynchronous AReaL or decoupled PPO. Multi-version generation assumes the actual sampled states; it does not justify rewriting prefixes or reusing rewards after verifier changes. Throughput gains are system-specific.
-
-### ProRL: Prolonged Reinforcement Learning Expands Reasoning Boundaries in Large Language Models
-
-[Primary source](https://arxiv.org/html/2505.24864v1) · 2025. **Status:** arXiv preprint; no conference venue asserted
-
-**Review:** Targeted primary-body review, narrower than a full-paper review; prior record and §2.3.1 rechecked 2026-10-25. **Location:** §2.3.1 KL Regularization and Reference Policy Reset, Eq. 4
-
-**Source finding:** Adds reference-policy KL for its distilled starting model and periodically resets the reference to a recent online policy while reinitializing optimizer state, to address entropy loss and KL-dominated updates during prolonged training.
-
-**Project connection:** A qualified comparison for entropy/KL discussions; rising selected-group rewards alone do not establish the paper’s claim of expanded reasoning boundaries in this CUDA project.
-
-**Limits:** The source starts from DeepSeek-R1-Distill-Qwen-1.5B; its KL/reset recipe is neither claimed implemented nor validated for the project optimizer. Weak groups in a short run are not evidence that reference or optimizer resets are needed.
-
-### Understanding and Mitigating Numerical Sources of Nondeterminism in LLM Inference
-
-[Primary source](https://arxiv.org/html/2506.09501v2) · 2025. **Status:** arXiv preprint; no conference venue asserted
-
-**Review:** Primary-body targeted review performed 2026-10-25; no earlier deep-review evidence found in supplied prior records. **Location:** §3.1 experiment setup and reproducibility metrics; §3.2 Greedy Decoding ≠ Deterministic Output; §3.3 Random Sampling Has Reproducibility Issue, Too; §3.4 runtime-configuration ablation; §4 Near-Perfect Deterministic Reproduction: LayerCast
-
-**Source finding:** Across its tested GPU types/counts, batching and precision settings, greedy outputs and sampled aggregate accuracy can vary. Higher precision reduces but does not universally eliminate divergence; LayerCast stores linear weights in BF16 and upcasts them for FP32 computation.
-
-**Project connection:** Supports reporting actual inference backend, batching, hardware and precision alongside seeds. A greedy transcript is not enough to establish sampler/learner probability equality, and kernel-program correctness remains a separate question.
-
-**Limits:** An inference reproducibility study, not a project RL stability experiment or a guarantee of determinism. LayerCast is not claimed implemented. Configuration-dependent token flips differ from stale-policy data, and this study does not by itself establish cross-stack probability parity.
-
-### Defeating Nondeterminism in LLM Inference
-
-[Primary source](https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/) · 2025. **Status:** Primary technical research report/blog, Thinking Machines Lab, 10 September 2025; not an arXiv paper
-
-**Review:** Targeted primary-report review; prior 2026-10-20 record and named sections rechecked 2026-10-25. **Location:** Batch invariance and “determinism”; How do we make kernels batch-invariant? (RMSNorm, matrix multiplication, attention); Experiments: Performance; Experiments: True on-policy RL
-
-**Source finding:** Explains why deterministic operations can still be batch-size dependent. In its Bigmath RLVR experiment, unmatched numerics without importance weighting collapse, whereas matched sampler/trainer numerics or importance weighting train smoothly.
-
-**Project connection:** Direct motivation for exact sampled IDs, behavior logprobs, root prefixes and probability checks. Serial inference/learning removes overlap but does not itself remove backend numerical mismatch.
-
-**Limits:** Report-specific evidence, not a theorem that every small mismatch collapses training. Bitwise matching can cost throughput. The project is not claimed to implement these batch-invariant kernels or the report’s complete training stack.
 
 ### TMax: A simple recipe for terminal agents
 
@@ -238,127 +342,11 @@ Last reviewed: **25 October 2026**. The year below is the first preprint/report 
 
 **Limits:** Tool-calling benchmark evidence is not a measured CUDA throughput benefit. Filtering and rollout down-sampling remain literature methods, not implementation claims; changing retained examples also changes the sampled training distribution.
 
-### Rewarding How Models Think Pedagogically: Integrating Pedagogical Reasoning and Thinking Rewards for LLMs in Education
+## The backbone we use, and ideas not yet adopted
 
-[Primary source](https://arxiv.org/html/2601.14560v1) · 2026. **Status:** arXiv preprint; no conference venue asserted
+Laguna and LoRA explain the model and adaptation foundations, not a validated recipe for our attention-only rank-8 kernel adapters. For sparse rewards, the Pedagogical RL post asks how to obtain successful trajectories a student can learn from; its teacher/student design is not our sampler/learner probability audit. The education paper is a different work, while DSL-Monkeys and CudaPerf remain lighter reading leads rather than adopted methods.
 
-**Review:** Historical guide documents a targeted method review; named prompt/reward/experiment sections rechecked 2026-10-25. **Location:** §2.3 Pedagogical Reasoning Prompting; §2.4 Reward Design, Eq. 1; §3.1 Experimental Setup
-
-**Source finding:** Combines domain-specific Polya-style tutor prompts, student outcome improvement and GPT-4o-mini judges for answer leakage, helpfulness and pedagogical thinking quality. The outcome component averages eight student attempts.
-
-**Project connection:** An indirect example of separating domain-specific instructions from reward design. It is not evidence to replace executable CUDA verification with a thought judge or to add pedagogical thinking rewards to this project.
-
-**Limits:** Education/student-simulation evidence, not kernel generation. It is a separate work from the May 2026 Pedagogical RL research post, Teaching Models to Teach Themselves from Privileged Information; do not merge their identity or evidence.
-
-## Recursive agents, delegation, and foundations
-
-### Recursive Language Models
-
-[Primary source](https://arxiv.org/html/2512.24601v3) · 2025. **Status:** arXiv preprint; v3 inspected (11 May 2026); no venue asserted
-
-**Review:** Prior primary review + current abstract metadata and targeted §2/§3.2/Appendix A reinspection **Location:** §2; §3.2 fine-tuning; Appendix A Additional Training Details
-
-**Source finding:** Treats long input as external environment data accessed through a persistent REPL and recursive LM calls. Its 1,000-filtered-trajectory experiment distills teacher root turns with their full histories as SFT samples. Appendix A separately describes an MRCRv2 RL experiment.
-
-**Project connection:** Architectural and upstream-code foundation for persistent REPL, external context and recursive delegation; motivates focus on root behavior without claiming identical training.
-
-**Limits:** The 1,000-teacher-trajectory result is supervised distillation, not this project’s direct GRPO baseline. Do not imply the entire paper contains no RL. Its root-training motivation is not evidence that child policy loss is used here.
-
-### Recursive Agent Optimization
-
-[Primary source](https://arxiv.org/html/2605.06639v2) · 2026. **Status:** arXiv preprint; v2 (2 October 2026); no venue asserted
-
-**Review:** Prior primary full-text section review retained; current primary abstract metadata rechecked **Location:** §2.2.1–2.2.2; §4; §5.0.1/Fig.8; §5.0.2/Fig.9
-
-**Source finding:** Jointly optimizes root and child trajectories using node-local success signals and depth-level weighting. Examines child-success-rate delegation reward; a success-count bonus encouraged unnecessary easy delegation.
-
-**Project connection:** Direct methodological contrast with the supplied root-token-only project objective. Low child use alone cannot separate low utility, limited exploration and lack of direct child credit.
-
-**Limits:** “Only Root Rewards” still trains child tokens with propagated root reward; it is NOT a root-token-only-loss ablation. Shared weights can change child behavior indirectly even without direct child loss. Evidence is not CUDA; implementation or new ablation plans belong in issues, not claimed as completed.
-
-### Towards a Science of Scaling Agent Systems
-
-[Primary source](https://arxiv.org/html/2512.08296v3) · 2025. **Status:** arXiv preprint; v3 (8 April 2026); no venue asserted
-
-**Review:** Prior primary review + current primary metadata and targeted setup/results/controls inspection **Location:** §3; §4.1–4.4; §5; Appendix E.4
-
-**Source finding:** Controlled comparisons vary agent architecture while maintaining task/tool controls and computational budgets; coordination benefit depends on domain and task structure, and coordination can add substantial overhead.
-
-**Project connection:** Supports budget-aware comparison of sequential root work and delegation, with actual tokens, tool calls and elapsed time reported rather than assuming more agents imply better decomposition.
-
-**Limits:** Tool-using benchmark evidence is not CUDA-kernel evidence. Equal budget controls do not imply equal actual consumed compute; reported thresholds/effect sizes are not universal laws. Latest v3 has expanded benchmarks/results, so avoid copying unversioned older headline statistics.
-
-### Single-Agent LLMs Outperform Multi-Agent Systems on Multi-Hop Reasoning Under Equal Thinking Token Budgets
-
-[Primary source](https://arxiv.org/html/2604.02460v2) · 2026. **Status:** arXiv preprint; v2 (11 April 2026); no venue asserted
-
-**Review:** Prior primary section review retained; current primary abstract metadata rechecked **Location:** §4–5; Appendix C
-
-**Source finding:** Compares single-agent and multi-agent reasoning systems under thinking-token upper caps and discusses accounting limitations.
-
-**Project connection:** Extra child tokens must not be mistaken for architectural benefit; literature supports distinguishing budget caps from actual root-plus-child usage.
-
-**Limits:** Text-only multi-hop reasoning; tools and vision outside scope. Caps are not enforced equal consumed tokens; Gemini accounting is approximate. The title must not be repeated as a universal claim about CUDA agents.
-
-### TimeRLM: Recursive Language Models Enable Precise Anomaly Localization in Long-Context Time-Series
-
-[Primary source](https://arxiv.org/html/2608.03391v2) · 2026. **Status:** arXiv preprint; v2 (6 September 2026); no venue asserted
-
-**Review:** Prior primary review + current primary metadata, §4.1 and Appendix A targeted inspection **Location:** §3.1; §4.1–4.4; Appendix A; Appendix D
-
-**Source finding:** Uses external Python access to long time-series and group-relative RL, reports final-checkpoint results on AnomalyXL plus ARFBench and unseen clinical recordings. Uses mean-centered Dr.GRPO advantages without reward-standard-deviation normalization. Appendix A states recursive sub_rlm calls are disabled (depth 0) throughout.
-
-**Project connection:** Related work for RL-trained persistent-REPL agents and held-out/transfer evaluation, not evidence of trained child delegation. Newly reviewed related work should not be relabeled as original implementation provenance.
-
-**Limits:** Time-series anomaly tasks are not CUDA. Its token-cost and forced-final penalties and Dr.GRPO normalization are not claimed implemented here; depth-0 evaluation cannot demonstrate benefits of recursive child agents.
-
-### DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models
-
-[Primary source](https://arxiv.org/html/2402.03300v3) · 2024. **Status:** arXiv preprint; v3 (27 April 2024); no venue asserted
-
-**Review:** Prior foundational citation + current primary metadata and §4.1 locator verification **Location:** §4.1.1–4.1.4; Appendix A.1.6
-
-**Source finding:** Introduces Group Relative Policy Optimization, estimating relative advantage from sampled response groups rather than a separately trained critic; distinguishes outcome and process supervision.
-
-**Project connection:** Algorithmic origin of the project’s GRPO lineage.
-
-**Limits:** The citation does not mean every original reward, KL regularization, normalization or training-data choice is reproduced; mathematical-reasoning results do not validate the kernel verifier.
-
-### Proximal Policy Optimization Algorithms
-
-[Primary source](https://arxiv.org/abs/1707.06347) · 2017. **Status:** arXiv preprint; v2 (28 August 2017); no venue asserted
-
-**Review:** Prior foundational citation + current primary abstract metadata/abstract; HTML body unavailable (failed conversion) **Location:** Abstract; clipped-surrogate foundation (not freshly full-text reviewed)
-
-**Source finding:** Proposes policy-gradient surrogate objectives with repeated minibatch optimization after interaction-based sampling.
-
-**Project connection:** Clipped-surrogate ancestry for group-relative policy optimization, not a claim that this project runs actor-critic PPO.
-
-**Limits:** Do not label GRPO as the paper’s complete PPO implementation. Current HTML only exposes a conversion-failure placeholder, so no new equation-level or implementation verification is claimed.
-
-### LoRA: Low-Rank Adaptation of Large Language Models
-
-[Primary source](https://arxiv.org/html/2106.09685v2) · 2021. **Status:** arXiv preprint; v2 (16 October 2021); no venue asserted
-
-**Review:** Prior foundational citation + current primary metadata and method-section locator inspection **Location:** §4.1–4.2; §7.1–7.2
-
-**Source finding:** Adapts frozen pretrained weights with trainable low-rank update matrices; studies placement and rank of updates.
-
-**Project connection:** Low-rank-adaptation foundation for project adapters.
-
-**Limits:** Attention-only rank-8 adapters and the project optimizer/kernel task are project configuration, not a validated recipe inherited from this paper. Year is first arXiv submission; no venue inferred.
-
-### Laguna M.1/XS.2 Technical Report
-
-[Primary source](https://arxiv.org/html/2605.27605v1) · 2026. **Status:** Primary technical report on arXiv; v1 (26 May 2026); no conference venue asserted
-
-**Review:** Prior foundational citation + current primary metadata and targeted §3.1.1/§4.1.3/§4.4.1 inspection **Location:** §3.1.1–3.1.2; §4.1.3; §4.4.1–4.4.5
-
-**Source finding:** Describes Laguna model/training recipe, Muon-family optimization, token-in/token-out chat-template alignment, and agentic RL. Its RL objective uses CISPO ratio clipping with length-weighted leave-one-out group-relative advantages.
-
-**Project connection:** Backbone and optimizer/model-recipe foundation; exact token and template alignment is relevant context for the project’s multi-turn sampling audit.
-
-**Limits:** Not evidence that the report validated this attention-only rank-8 kernel LoRA configuration or the project’s direct GRPO objective. Report uses a different RL objective; Moonlight scaling also differs between M.1 and XS.2. No transfer gains are inferred.
+Read **Project connection** with **Limits**, then consult the linked primary section before reusing a claim. Revisiting a source should update its review date, inspected version, depth and caveats explicitly. Implementation proposals belong in [issue #8](https://github.com/jucamohedano/kernel-rlm/issues/8) or a focused issue; the [historical guide](../../training/environments/kernel_rlm/dashboard/guide.html) remains a dated campaign account.
 
 ### DSL-Monkeys: Self-Generated In-Context Examples for Low-Resource GPU DSL Kernels
 
@@ -372,7 +360,17 @@ Last reviewed: **25 October 2026**. The year below is the first preprint/report 
 
 **Limits:** Prior direct PDF endpoint was blocked by browser verification. No detailed reproduction settings, numerical results, author expansion or main-conference status asserted.
 
-## Pedagogical RL: new primary research post
+### LoRA: Low-Rank Adaptation of Large Language Models
+
+[Primary source](https://arxiv.org/html/2106.09685v2) · 2021. **Status:** arXiv preprint; v2 (16 October 2021); no venue asserted
+
+**Review:** Prior foundational citation + current primary metadata and method-section locator inspection **Location:** §4.1–4.2; §7.1–7.2
+
+**Source finding:** Adapts frozen pretrained weights with trainable low-rank update matrices; studies placement and rank of updates.
+
+**Project connection:** Low-rank-adaptation foundation for project adapters.
+
+**Limits:** Attention-only rank-8 adapters and the project optimizer/kernel task are project configuration, not a validated recipe inherited from this paper. Year is first arXiv submission; no venue inferred.
 
 ### Pedagogical RL: Teaching Models to Teach Themselves from Privileged Information
 
@@ -388,7 +386,29 @@ Authors: Souradip Chakraborty, Noah Ziems, Furong Huang, Meng Jiang, Amrit Singh
 
 **Limits:** Early results on two reasoning tasks, not CUDA kernels or recursive child training. This requires a separate teacher/student sampling and training design; our sampler/learner probability audit is not its learnability score. Do not infer effectiveness for Laguna from the reported gains.
 
-## Lighter reading leads
+### Rewarding How Models Think Pedagogically: Integrating Pedagogical Reasoning and Thinking Rewards for LLMs in Education
+
+[Primary source](https://arxiv.org/html/2601.14560v1) · 2026. **Status:** arXiv preprint; no conference venue asserted
+
+**Review:** Historical guide documents a targeted method review; named prompt/reward/experiment sections rechecked 2026-10-25. **Location:** §2.3 Pedagogical Reasoning Prompting; §2.4 Reward Design, Eq. 1; §3.1 Experimental Setup
+
+**Source finding:** Combines domain-specific Polya-style tutor prompts, student outcome improvement and GPT-4o-mini judges for answer leakage, helpfulness and pedagogical thinking quality. The outcome component averages eight student attempts.
+
+**Project connection:** An indirect example of separating domain-specific instructions from reward design. It is not evidence to replace executable CUDA verification with a thought judge or to add pedagogical thinking rewards to this project.
+
+**Limits:** Education/student-simulation evidence, not kernel generation. It is a separate work from the May 2026 Pedagogical RL research post, Teaching Models to Teach Themselves from Privileged Information; do not merge their identity or evidence.
+
+### Laguna M.1/XS.2 Technical Report
+
+[Primary source](https://arxiv.org/html/2605.27605v1) · 2026. **Status:** Primary technical report on arXiv; v1 (26 May 2026); no conference venue asserted
+
+**Review:** Prior foundational citation + current primary metadata and targeted §3.1.1/§4.1.3/§4.4.1 inspection **Location:** §3.1.1–3.1.2; §4.1.3; §4.4.1–4.4.5
+
+**Source finding:** Describes Laguna model/training recipe, Muon-family optimization, token-in/token-out chat-template alignment, and agentic RL. Its RL objective uses CISPO ratio clipping with length-weighted leave-one-out group-relative advantages.
+
+**Project connection:** Backbone and optimizer/model-recipe foundation; exact token and template alignment is relevant context for the project’s multi-turn sampling audit.
+
+**Limits:** Not evidence that the report validated this attention-only rank-8 kernel LoRA configuration or the project’s direct GRPO objective. Report uses a different RL objective; Moonlight scaling also differs between M.1 and XS.2. No transfer gains are inferred.
 
 ### Multi-turn RL with Structural and Performance Aware Rewards for CUDA Kernel Generation
 

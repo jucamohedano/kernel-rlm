@@ -94,6 +94,12 @@ function inline(parent, source) {
   }
   parent.append(document.createTextNode(source.slice(end)));
 }
+const literatureImages = new Set([
+  "/literature/research-map.svg",
+  "/literature/train-evaluate.svg",
+  "/literature/rlm-figure-2.png",
+  "/literature/kernelbench-figure-1.png",
+]);
 function markdown(source) {
   const article = el("div", "markdown");
   let code = null, language = "", list = null, paragraph = [];
@@ -109,6 +115,20 @@ function markdown(source) {
     const fence = /^\s*```(.*)$/.exec(line);
     if (fence) { flush(); list = null; code = []; language = fence[1].trim(); continue; }
     if (!line.trim()) { flush(); list = null; continue; }
+    const image = /^!\[([^\]]*)\]\(([^)]*)\)\s*$/.exec(line);
+    if (image) {
+      flush(); list = null;
+      const [, alt, path] = image;
+      if (literatureImages.has(path)) {
+        const figure = el("figure", "literature-figure");
+        const img = el("img"); img.src = path; img.alt = alt; img.loading = "lazy";
+        const fullSize = link("", path, "literature-image-link");
+        fullSize.target = "_blank"; fullSize.rel = "noopener";
+        fullSize.setAttribute("aria-label", "Open full-size figure: " + alt + " (new tab)"); fullSize.append(img);
+        figure.append(fullSize, el("figcaption", "", alt)); article.append(figure);
+      } else article.append(el("p", "", line));
+      continue;
+    }
     const h = /^(#{1,4})\s+(.*)$/.exec(line);
     const item = /^\s*(?:[-*]|\d+\.)\s+(.*)$/.exec(line);
     if (h) { flush(); list = null; const node = el("h" + Math.min(h[1].length + 1, 5)); inline(node, h[2]); article.append(node); }
@@ -117,6 +137,39 @@ function markdown(source) {
   }
   flush();
   if (code !== null) article.append(codeBlock(code.join("\n"), language));
+  return article;
+}
+function literatureMarkdown(source, topics, onNavigate = () => {}) {
+  const article = el("article", "literature-article");
+  topics.replaceChildren();
+  let parent = article, lines = [], fenced = false, topicIndex = 0;
+  const flush = () => {
+    if (lines.length) { parent.append(markdown(lines.join("\n"))); lines = []; }
+  };
+  for (const line of String(source || "").replace(/^#\s+[^\n]+\n?/, "").split(/\r?\n/)) {
+    if (/^\s*```/.test(line)) fenced = !fenced;
+    const heading = !fenced && /^(#{2,3})\s+(.*)$/.exec(line);
+    if (!heading) { lines.push(line); continue; }
+    flush();
+    if (heading[1] === "##") {
+      const section = el("section", "literature-topic");
+      const title = el("h2"); inline(title, heading[2]);
+      title.id = "literature-topic-" + topicIndex++; title.tabIndex = -1;
+      section.append(title); article.append(section); parent = section;
+      const button = el("button", "literature-topic-link", heading[2]); button.type = "button";
+      button.addEventListener("click", () => { const target = onNavigate(title) || title; target.scrollIntoView({block: "start"}); target.focus({preventScroll: true}); });
+      topics.append(button);
+    } else {
+      const details = el("details", "literature-paper");
+      const summary = el("summary"); inline(summary, heading[2]);
+      details.append(summary);
+      const section = article.lastElementChild;
+      if (section?.className === "literature-topic") section.append(details);
+      else article.append(details);
+      parent = details;
+    }
+  }
+  flush();
   return article;
 }
 function notice(message) { content.append(el("div", "warning", message)); }
@@ -530,20 +583,26 @@ let writingDraft = null;
 function hasUnsavedWriting() { return writingDraft && writingDraft.editor.value !== writingDraft.original; }
 window.addEventListener("beforeunload",event=>{if(hasUnsavedWriting()){event.preventDefault();event.returnValue="";}});
 async function writingPage(id,signal,ticket,workspace="Writing") {
-  const index=await api("writing",signal);if(ticket!==renderId)return;
+  const literature = workspace === "Literature";
+  const index=literature ? null : await api("writing",signal);if(ticket!==renderId)return;
   document.body.classList.add("has-collection");collection.hidden=false;
-  collection.replaceChildren(el("div","collection-heading",workspace));
-  const selected=id||index.documents[0]?.id;if(!selected)return;
-  const tree=el("div","file-tree");tree.append(el("div","muted","docs / research /"));
-  for(const doc of index.documents){const a=link(doc.path?.split("/").pop()||doc.title,"#writing/"+encodeURIComponent(doc.id),"writing-link"+(selected===doc.id?" selected":""));tree.append(a);}
-  collection.append(tree);
+  document.body.classList.toggle("literature-view", literature);
+  collection.replaceChildren(el("div","collection-heading",literature ? "On this page" : workspace));
+  const selected=id||index?.documents[0]?.id;if(!selected)return;
+  const topics=el("nav","literature-topics");topics.setAttribute("aria-label","Literature topics");
+  if (literature) collection.append(topics);
+  else {
+    const tree=el("div","file-tree");tree.append(el("div","muted","docs / research /"));
+    for(const doc of index.documents){const a=link(doc.path?.split("/").pop()||doc.title,"#writing/"+encodeURIComponent(doc.id),"writing-link"+(selected===doc.id?" selected":""));tree.append(a);}
+    collection.append(tree);
+  }
   const doc=await api("writing/"+encodeURIComponent(selected),signal);if(ticket!==renderId)return;
   heading.textContent=doc.markdown.match(/^#\s+(.+)$/m)?.[1] || doc.title;
   content.append(el("p","writing-path",doc.path));
   const toolbar=el("div","writing-toolbar");
   const previewButton=el("button","active","Preview"),sourceButton=el("button","","Source / Edit"),save=el("button","","Save file"),revert=el("button","","Discard edits"),status=el("span","muted","Saved local file");
-  const preview=el("article","writing-preview");
-  const previewMarkdown=value=>markdown(value.replace(/^#\s+[^\n]+\n?/, ""));
+  const preview=el("article","writing-preview"+(literature ? " literature-preview" : ""));
+  const previewMarkdown=value=>literature ? literatureMarkdown(value,topics,title=>{if(preview.hidden)previewButton.click();return preview.querySelector("#"+title.id);}) : markdown(value.replace(/^#\s+[^\n]+\n?/, ""));
   preview.append(previewMarkdown(doc.markdown));
   const editor=el("textarea","writing-source");editor.value=doc.markdown;editor.spellcheck=false;editor.setAttribute("aria-label","Markdown source");editor.hidden=true;
   writingDraft={editor,original:doc.markdown,hash:location.hash};
@@ -562,7 +621,12 @@ async function writingPage(id,signal,ticket,workspace="Writing") {
       if(writingDraft?.editor===editor){writingDraft.original=submitted;update();status.textContent=editor.value===submitted?"Saved · previous version backed up":"Saved earlier draft · newer edits unsaved";}
     } catch(error){status.textContent=error.message;save.disabled=false;}
   });
-  toolbar.append(previewButton,sourceButton,save,revert,status);content.append(toolbar,el("p","muted","Edits save to this allowlisted Markdown file only. Each save preserves its previous version locally."),preview,editor);update();
+  toolbar.setAttribute("aria-label","Document editing");status.setAttribute("role","status");
+  toolbar.append(previewButton,sourceButton,save,revert,status);
+  content.append(toolbar);
+  if (!literature) content.append(el("p","muted","Edits save to this allowlisted Markdown file only. Each save preserves its previous version locally."));
+  else save.title="Save this Markdown file; its previous version is backed up locally";
+  content.append(preview,editor);update();
 }
 
 async function render() {
@@ -573,7 +637,7 @@ async function render() {
   const ticket=++renderId;
   pendingRequest?.abort();pendingRequest=new AbortController();const signal=pendingRequest.signal;
   let [view,...parts]=location.hash.slice(1).split("/");view=view||"home";
-  content.dataset.ready="false";content.replaceChildren();collection.replaceChildren();collection.hidden=true;document.body.classList.remove("has-collection");
+  content.dataset.ready="false";content.replaceChildren();collection.replaceChildren();collection.hidden=true;document.body.classList.remove("has-collection","literature-view");
   heading.textContent={home:"Home",experiments:"Experiments",trajectories:"Trajectories",lineage:"Lineage",writing:"Writing",literature:"Literature"}[view]||"Workspace";
   document.querySelectorAll("#nav a").forEach(a=>{a.classList.toggle("active",a.dataset.view===view);});
   try {

@@ -145,6 +145,10 @@ def make_handler(root: Path, receipt_path: Path | None = None, task_catalog: Pat
                 "/styles.css": "styles.css",
                 "/layout.js": "layout.js",
                 "/theme.js": "theme.js",
+                "/literature/research-map.svg": "literature/research-map.svg",
+                "/literature/train-evaluate.svg": "literature/train-evaluate.svg",
+                "/literature/rlm-figure-2.png": "literature/rlm-figure-2.png",
+                "/literature/kernelbench-figure-1.png": "literature/kernelbench-figure-1.png",
                 "/fonts/InterVariable.woff2": "fonts/InterVariable.woff2",
                 "/fonts/JetBrainsMono-Regular.woff2": "fonts/JetBrainsMono-Regular.woff2",
                 "/fonts/JetBrainsMono-Medium.woff2": "fonts/JetBrainsMono-Medium.woff2",
@@ -159,6 +163,8 @@ def make_handler(root: Path, receipt_path: Path | None = None, task_catalog: Pat
                     ".js": "text/javascript; charset=utf-8",
                     ".css": "text/css; charset=utf-8",
                     ".woff2": "font/woff2",
+                    ".svg": "image/svg+xml; charset=utf-8",
+                    ".png": "image/png",
                 }
                 content_type = content_types[file.suffix]
                 return self.send_data(file.read_bytes(), content_type)
