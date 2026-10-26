@@ -74,6 +74,72 @@
       ],
       "recommended_attribution": "Zhang, Alex L.; Kraska, Tim; Khattab, Omar. “Recursive Language Models,” arXiv:2512.24601v3, Figure 2. CC BY 4.0. Image unchanged.",
       "file": "rlm-figure-2.png"
+    },
+    {
+      "file": "rao-reward.svg",
+      "paper_title": "Recursive Agent Optimization",
+      "authors": [
+        "Gandhi, Apurva",
+        "Chakraborty, Satyaki",
+        "Wang, Xiangjun",
+        "Kumar, Aviral",
+        "Neubig, Graham"
+      ],
+      "arxiv_version": "2605.06639v2",
+      "figure_number": 2,
+      "figure_id": "S2.F2",
+      "source_page": "https://arxiv.org/html/2605.06639v2#S2.F2",
+      "image_url": "https://arxiv.org/html/2605.06639v2/rao-reward.svg",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "abstract_license_page": "https://arxiv.org/abs/2605.06639v2",
+      "figure_caption_verbatim_text": "Figure 2: RAO Reward Design. Each node receives a local reward from its own success and a delegation bonus from the success rate of its children. The example uses λ = 0.4 \\lambda=0.4 .",
+      "image_sha256": "167a01c36017136a79379c2db7abb1cbe5da75c47417c9d3b295f77188df52a2",
+      "modification": "Original SVG bytes unchanged; resized for display."
+    },
+    {
+      "file": "rao-credit-ablation.svg",
+      "paper_title": "Recursive Agent Optimization",
+      "authors": [
+        "Gandhi, Apurva",
+        "Chakraborty, Satyaki",
+        "Wang, Xiangjun",
+        "Kumar, Aviral",
+        "Neubig, Graham"
+      ],
+      "arxiv_version": "2605.06639v2",
+      "figure_number": 8,
+      "figure_id": "S5.F8",
+      "source_page": "https://arxiv.org/html/2605.06639v2#S5.F8",
+      "image_url": "https://arxiv.org/html/2605.06639v2/textcraft-ablation.svg",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "abstract_license_page": "https://arxiv.org/abs/2605.06639v2",
+      "figure_caption_verbatim_text": "Figure 8: Ablation of reward density and trajectory weighting on TextCraft-Synth . Training curves above with evaluation SRs below.",
+      "image_sha256": "c9b732f3c8c5bd4ea5bb366886a341cf83a864f2a3500663300698285e70c2b9",
+      "modification": "Original SVG bytes unchanged; Figure 8 image is the training-curve panel only. Its HTML evaluation table is quoted in accompanying text."
+    },
+    {
+      "file": "rao-delegation-ablation.svg",
+      "paper_title": "Recursive Agent Optimization",
+      "authors": [
+        "Gandhi, Apurva",
+        "Chakraborty, Satyaki",
+        "Wang, Xiangjun",
+        "Kumar, Aviral",
+        "Neubig, Graham"
+      ],
+      "arxiv_version": "2605.06639v2",
+      "figure_number": 9,
+      "figure_id": "S5.F9",
+      "source_page": "https://arxiv.org/html/2605.06639v2#S5.F9",
+      "image_url": "https://arxiv.org/html/2605.06639v2/delegation-bonus-ablation.svg",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "abstract_license_page": "https://arxiv.org/abs/2605.06639v2",
+      "figure_caption_verbatim_text": "Figure 9: Ablation comparing success count vs. rate delegation bonus on TextCraft-Synth , plotting the success curves, sub-agent count and time per training step.",
+      "image_sha256": "694b7bb9b9518f5327017806d34a976cc4c97dc97f989b9866231ddf3acce4eb",
+      "modification": "Original SVG bytes unchanged; resized for display."
     }
   ]
 }

@@ -82,6 +82,9 @@ def test_literature_assets_are_allowlisted_and_do_not_expose_manifest(tmp_path):
         for name, content_type, signature in (
             ("research-map.svg", "image/svg+xml; charset=utf-8", b"<svg"),
             ("train-evaluate.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("rao-reward.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("rao-credit-ablation.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("rao-delegation-ablation.svg", "image/svg+xml; charset=utf-8", b"<svg"),
             ("rlm-figure-2.png", "image/png", b"\x89PNG"),
             ("kernelbench-figure-1.png", "image/png", b"\x89PNG"),
         ):

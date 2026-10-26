@@ -99,6 +99,9 @@ const literatureImages = new Set([
   "/literature/train-evaluate.svg",
   "/literature/rlm-figure-2.png",
   "/literature/kernelbench-figure-1.png",
+  "/literature/rao-reward.svg",
+  "/literature/rao-credit-ablation.svg",
+  "/literature/rao-delegation-ablation.svg",
 ]);
 function markdown(source) {
   const article = el("div", "markdown");

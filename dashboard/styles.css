@@ -448,7 +448,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visibl
 .literature-paper > .markdown { padding: 0 4px 18px 20px; font-size: 14px; }
 .literature-paper > .markdown > :first-child { margin-top: 0; }
 .literature-figure { margin: 1.8em 0; }
-.literature-figure img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #fafbf8; }
+.literature-figure img { display: block; width: 100%; height: auto; max-height: 560px; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #fafbf8; }
 .literature-figure figcaption { margin-top: 9px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .literature-view .writing-toolbar { padding: 8px; border-radius: 9px 9px 0 0; }
 .literature-view .writing-path { font-size: 10px; }

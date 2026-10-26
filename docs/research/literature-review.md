@@ -32,15 +32,27 @@ Figure from **Recursive Language Models**, arXiv:2512.24601v3, Figure 2. Alex L.
 
 ### Recursive Agent Optimization
 
-[Primary source](https://arxiv.org/html/2605.06639v2) · 2026. **Status:** arXiv preprint; v2 (2 October 2026); no venue asserted
+RAO asks how a shared policy can learn both to solve a task and to delegate useful subproblems. The three figures below show the reward design and the ablations we cited. These are results on TextCraft-Synth, not measurements from our CUDA campaign.
 
-**Review:** Prior primary full-text section review retained; current primary abstract metadata rechecked **Location:** §2.2.1–2.2.2; §4; §5.0.1/Fig.8; §5.0.2/Fig.9
+**How rewards reach the tree.** Each node receives local success credit and a bonus based on its children’s success rate. This differs from our current root-output-only loss.
 
-**Source finding:** Jointly optimizes root and child trajectories using node-local success signals and depth-level weighting. Examines child-success-rate delegation reward; a success-count bonus encouraged unnecessary easy delegation.
+![RAO Figure 2: local success rewards and child-success-rate delegation bonus](/literature/rao-reward.svg)
 
-**Project connection:** Direct methodological contrast with the supplied root-token-only project objective. Low child use alone cannot separate low utility, limited exploration and lack of direct child credit.
+**Does the credit design matter?** Figure 8 compares reward density and trajectory weighting. Its reported evaluation success rates are 0.89 for dense/weighted, 0.75 for dense/unweighted, 0.79 for sparse/weighted, and 0.61 for sparse/unweighted. The image below is the training-curve panel; these four values are from the evaluation table in the same figure.
 
-**Limits:** “Only Root Rewards” still trains child tokens with propagated root reward; it is NOT a root-token-only-loss ablation. Shared weights can change child behavior indirectly even without direct child loss. Evidence is not CUDA; implementation or new ablation plans belong in issues, not claimed as completed.
+![RAO Figure 8 training-curve panel: reward density and trajectory weighting ablations](/literature/rao-credit-ablation.svg)
+
+**Why not reward the number of children?** Figure 9 compares success-count and success-rate bonuses. A count bonus can encourage extra easy delegations. For our project, the relevant question is useful work per budget—not how often a child is called.
+
+![RAO Figure 9: success, sub-agent count, and training time under count-versus-rate delegation bonuses](/literature/rao-delegation-ablation.svg)
+
+Figures 2, 8 (plot panel), and 9 from Apurva Gandhi, Satyaki Chakraborty, Xiangjun Wang, Aviral Kumar, and Graham Neubig, **Recursive Agent Optimization**, arXiv:2605.06639v2. [Figure 2](https://arxiv.org/html/2605.06639v2#S2.F2) · [Figure 8 and its evaluation table](https://arxiv.org/html/2605.06639v2#S5.F8) · [Figure 9](https://arxiv.org/html/2605.06639v2#S5.F9) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). SVG bytes unchanged; resized for display. Click an image for full size.
+
+**Project connection:** Low child use alone cannot separate low utility, limited exploration and lack of direct child credit. Shared weights can change child behavior indirectly even without direct child loss.
+
+**Important distinction:** The “Only Root Rewards” ablation still trains child tokens with propagated root reward. It is not our root-token-only-loss baseline. No CUDA result, implementation, or completed ablation is claimed here.
+
+**Source and review notes:** [Primary source](https://arxiv.org/html/2605.06639v2), 2026 preprint, v2 (2 October 2026); no venue asserted. Prior primary section review and current metadata check cover §2.2.1–2.2.2, §4, and §5.0.1–5.0.2. Node-local signals and depth-level weighting are jointly studied; the plots do not isolate every design choice or establish transfer to our task.
 
 ### Towards a Science of Scaling Agent Systems
 

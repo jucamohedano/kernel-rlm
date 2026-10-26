@@ -89,7 +89,7 @@ test('heading-like code remains code and does not create paper entries or topics
 });
 
 test('only exact trusted local figures load and preserve accessible captions', () => {
-  for (const path of ['/literature/research-map.svg', '/literature/train-evaluate.svg', '/literature/rlm-figure-2.png', '/literature/kernelbench-figure-1.png']) {
+  for (const path of ['/literature/research-map.svg', '/literature/train-evaluate.svg', '/literature/rlm-figure-2.png', '/literature/kernelbench-figure-1.png', '/literature/rao-reward.svg', '/literature/rao-credit-ablation.svg', '/literature/rao-delegation-ablation.svg']) {
     const article = context.markdown(`![Architecture and attribution](${path})`);
     const [image] = descendants(article, 'img');
     assert.equal(image.src, path);
