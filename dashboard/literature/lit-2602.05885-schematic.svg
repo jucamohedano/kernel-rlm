@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+<title id="title">Dr. Kernel: separate verification from training credit</title><desc id="desc">Original project schematic separating KernelGYM verification, TRLOO and profiling-based training, and evaluation selection. No paper artwork or result curves reproduced.</desc>
+<defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9" fill="#52627a"/></marker></defs>
+<rect width="1200" height="620" rx="20" fill="#f8fafc"/>
+<text x="42" y="46" font-family="sans-serif" font-size="16" font-weight="700" fill="#475569">ORIGINAL PROJECT SCHEMATIC · NOT A PAPER FIGURE OR MEASURED RESULT</text>
+<text x="42" y="92" font-family="sans-serif" font-size="29" font-weight="700" fill="#0f172a">Dr. Kernel: separate verification from training credit</text>
+<text x="42" y="125" font-family="sans-serif" font-size="18" fill="#475569">Related-work concepts only. This project does not claim TRLOO or profiling rewards.</text>
+<rect x="42" y="170" width="350" height="265" rx="14" fill="white" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="42" y="170" width="350" height="58" rx="14" fill="#dbeafe"/>
+<text x="62" y="207" font-family="sans-serif" font-size="22" font-weight="700" fill="#0f172a">Execution environment</text>
+<text x="62" y="267" font-family="sans-serif" font-size="18" fill="#334155">KernelGYM checks candidates</text>
+<text x="62" y="300" font-family="sans-serif" font-size="18" fill="#334155">for reward hacking.</text>
+<text x="62" y="333" font-family="sans-serif" font-size="18" fill="#334155">An extension call alone is</text>
+<text x="62" y="366" font-family="sans-serif" font-size="18" fill="#334155">not semantic verification.</text>
+<text x="62" y="407" font-family="sans-serif" font-size="16" font-weight="700" fill="#1e40af">Verification question</text>
+<path d="M396,302 H422" stroke="#52627a" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="427" y="170" width="350" height="265" rx="14" fill="white" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="427" y="170" width="350" height="58" rx="14" fill="#dcfce7"/>
+<text x="447" y="207" font-family="sans-serif" font-size="22" font-weight="700" fill="#0f172a">Training interventions</text>
+<text x="447" y="267" font-family="sans-serif" font-size="18" fill="#334155">TRLOO: turn-level credit</text>
+<text x="447" y="300" font-family="sans-serif" font-size="18" fill="#334155">Mismatch correction: stability</text>
+<text x="447" y="333" font-family="sans-serif" font-size="18" fill="#334155">Profiling rewards / rejection</text>
+<text x="447" y="366" font-family="sans-serif" font-size="18" fill="#334155">target lazy optimization.</text>
+<text x="447" y="407" font-family="sans-serif" font-size="16" font-weight="700" fill="#1e40af">Distinct training mechanisms</text>
+<path d="M781,302 H807" stroke="#52627a" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="812" y="170" width="350" height="265" rx="14" fill="white" stroke="#cbd5e1" stroke-width="2"/>
+<rect x="812" y="170" width="350" height="58" rx="14" fill="#fef3c7"/>
+<text x="832" y="207" font-family="sans-serif" font-size="22" font-weight="700" fill="#0f172a">Evaluation selection</text>
+<text x="832" y="267" font-family="sans-serif" font-size="18" fill="#334155">Eight outputs per task</text>
+<text x="832" y="300" font-family="sans-serif" font-size="18" fill="#334155">Up to three turns</text>
+<text x="832" y="333" font-family="sans-serif" font-size="18" fill="#334155">Report last-turn and</text>
+<text x="832" y="366" font-family="sans-serif" font-size="18" fill="#334155">best-of-history separately.</text>
+<text x="832" y="407" font-family="sans-serif" font-size="16" font-weight="700" fill="#1e40af">Selection rule matters</text>
+<rect x="42" y="467" width="1120" height="112" rx="12" fill="#e2e8f0"/>
+<text x="62" y="500" font-family="sans-serif" font-size="18" fill="#0f172a">Project boundary: a CUDA execution guard addresses a narrower failure mode.</text>
+<text x="62" y="529" font-family="sans-serif" font-size="18" fill="#0f172a">Cold-start SFT, Triton and H100 results do not establish transfer to CUDA / SM120.</text>
+</svg>

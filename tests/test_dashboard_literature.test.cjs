@@ -118,3 +118,21 @@ test('raw HTML and untrusted links remain text, including in paper titles', () =
   assert.match(textContent(article), /<script>alert\(1\)<\/script>/);
   assert.equal(descendants(article, 'a')[0].href, undefined);
 });
+
+test('every maintained paper record contains an inline local figure', () => {
+  const document = fs.readFileSync('docs/research/literature-review.md', 'utf8');
+  const expectedTitles = [...document.matchAll(/^### (.+)$/gm)].map(match => match[1]);
+  const topics = node('nav');
+  const article = context.literatureMarkdown(document, topics);
+  const records = descendants(article, 'details');
+  assert.equal(records.length, expectedTitles.length);
+  for (const record of records) {
+    const title = textContent(record.children[0]);
+    const images = descendants(record, 'img');
+    assert.ok(images.length > 0, `${title}: inline figure missing`);
+    for (const image of images) {
+      assert.ok(image.alt.trim(), `${title}: figure alt text missing`);
+      assert.ok(fs.existsSync('dashboard' + image.src), `${title}: local figure missing`);
+    }
+  }
+});
