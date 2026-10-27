@@ -151,7 +151,11 @@ def collector_command(
         "--context-tokens",
         "16384",
         "--child-prompt-tokens",
-        "4096",
+        str(arguments.child_prompt_tokens),
+        "--child-reply-tokens",
+        str(arguments.child_reply_tokens),
+        "--child-total-tokens",
+        str(arguments.child_total_tokens),
         "--child-tools",
         "--policy-version",
         str(version),
@@ -389,8 +393,9 @@ async def run(arguments):
             "enable_thinking": True,
             "rollouts_per_task": 8,
             "initial_concurrency": 4,
-            "child_prompt_tokens": 4096,
-            "child_reply_tokens": 4096,
+            "child_prompt_tokens": arguments.child_prompt_tokens,
+            "child_reply_tokens": arguments.child_reply_tokens,
+            "child_total_tokens": arguments.child_total_tokens,
             "child_tools": True,
             "max_child_calls": 2,
             "learner_world_size": 1,
@@ -706,6 +711,9 @@ def main():
     for name in ("source-commit", "run-id", "python", "inference-python", "cuda-docs-sha256"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--experiment-id", default="trl-l1-rtx-continuation")
+    parser.add_argument("--child-prompt-tokens", type=int, default=4096)
+    parser.add_argument("--child-reply-tokens", type=int, default=4096)
+    parser.add_argument("--child-total-tokens", type=int, default=4096)
     parser.add_argument("--resume", action="store_true")
     arguments = parser.parse_args()
     arguments.context_tokens = 16384

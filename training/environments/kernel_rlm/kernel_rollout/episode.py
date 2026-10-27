@@ -46,6 +46,9 @@ DEFAULT_LIMITS = {
     "enable_thinking": True,
     "enable_subcall": True,
     "max_subcalls": 2,
+    "child_reply_tokens": 4096,
+    "child_total_tokens": 4096,
+    "child_prompt_tokens": 2048,
     "subcall_probe": False,
 }
 
@@ -120,6 +123,9 @@ class EpisodeRunner:
             directory / "calls.jsonl",
             self.limits["model_timeout_s"],
             provenance=episode_provenance,
+            child_reply_limit=self.limits["child_reply_tokens"],
+            child_total_limit=self.limits["child_total_tokens"],
+            context_tokens=self.limits["max_context_tokens"],
         )
         process = None
         try:

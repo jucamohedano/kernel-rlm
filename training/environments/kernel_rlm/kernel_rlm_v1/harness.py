@@ -16,6 +16,9 @@ class KernelHarnessConfig(vf.HarnessConfig):
     enable_thinking: bool = False
     enable_subcall: bool = False
     max_subcalls: int = Field(1, ge=0, le=4)
+    child_reply_tokens: int = Field(4096, ge=1)
+    child_total_tokens: int = Field(4096, ge=1)
+    child_prompt_tokens: int = Field(2048, ge=1)
     subcall_probe: bool = False
 
 
@@ -52,6 +55,9 @@ class KernelHarness(vf.Harness[KernelHarnessConfig]):
                         "enable_thinking": self.config.enable_thinking,
                         "enable_subcall": self.config.enable_subcall,
                         "max_subcalls": self.config.max_subcalls,
+                        "child_reply_tokens": self.config.child_reply_tokens,
+                        "child_total_tokens": self.config.child_total_tokens,
+                        "child_prompt_tokens": self.config.child_prompt_tokens,
                         "subcall_probe": self.config.subcall_probe,
                     }
                 ),

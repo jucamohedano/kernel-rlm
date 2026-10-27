@@ -23,8 +23,8 @@ TOOL_CHILD_SYSTEM = (
     "At most two checks, then write FINISH on its own first line, concise findings, "
     "and one fenced python block containing your best complete candidate. "
     "Resource faults/timeouts are infrastructure, not numerical failure. Never invent measurements. "
-    "Final grading is independent. You have 4096 generated tokens TOTAL including reasoning "
-    "across this entire session, not 4096 per reply."
+    "Final grading is independent. You have CHILD_TOTAL_TOKENS generated tokens TOTAL including reasoning "
+    "across this entire session, and CHILD_REPLY_TOKENS per model reply."
 )
 TOOL_CHILD_TIMEOUT_S = 480
 TOOL_SUBCALL_INSTRUCTION = (
@@ -177,7 +177,16 @@ class IterativeSubcalls:
         timeout_s=TOOL_CHILD_TIMEOUT_S,
         checker=check_candidate,
         hardware_context="",
+        child_reply_tokens=4096,
+        child_total_tokens=4096,
+        child_prompt_tokens=4096,
+        context_tokens=8192,
     ):
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 1
+            for value in (child_reply_tokens, child_total_tokens, child_prompt_tokens)
+        ):
+            raise ValueError("Child token caps must be positive integers")
         if max_calls not in {1, 2} or not 0 < timeout_s <= TOOL_CHILD_TIMEOUT_S:
             raise ValueError("Use at most two children with a bounded session deadline")
         self.client, self.model, self.count_tokens = client, model, count_tokens
@@ -185,6 +194,10 @@ class IterativeSubcalls:
         self.max_calls, self.timeout_s, self.checker = max_calls, timeout_s, checker
         self.calls_used = 0
         self.hardware_context = hardware_context
+        self.child_reply_tokens = child_reply_tokens
+        self.child_total_tokens = child_total_tokens
+        self.child_prompt_tokens = child_prompt_tokens
+        self.context_tokens = context_tokens
 
     async def query(self, prompt, state=None):
         if self.calls_used >= self.max_calls:
@@ -194,8 +207,13 @@ class IterativeSubcalls:
         assignment = "Immutable reference source:\n" + self.reference + "\nAssignment:\n" + prompt
         if self.hardware_context:
             assignment = self.hardware_context + "\n" + assignment
-        if len(assignment.encode()) > 65536 or self.count_tokens(assignment) > 4096:
-            raise ValueError("Child reference plus assignment exceeds 4096 input tokens")
+        if (
+            len(assignment.encode()) > 65536
+            or self.count_tokens(assignment) > self.child_prompt_tokens
+        ):
+            raise ValueError(
+                f"Child reference plus assignment exceeds {self.child_prompt_tokens} input tokens"
+            )
         dispatch_context = dict(state or {})
         self.calls_used += 1
         record = {
@@ -204,12 +222,20 @@ class IterativeSubcalls:
             "parent_turn_id": dispatch_context.get("parent_turn_id"),
             "parent_tool_call_id": dispatch_context.get("parent_tool_call_id"),
             "parent_tool_call_id_generated": dispatch_context.get("parent_tool_call_id_generated"),
+            "parent_action_id": dispatch_context.get("parent_action_id"),
             "call_index": self.calls_used,
             "mode": "compile_repair",
             "prompt": prompt,
             "status": "running",
             "checks": [],
+            "child_reply_tokens": self.child_reply_tokens,
+            "child_total_tokens": self.child_total_tokens,
+            "child_prompt_tokens": self.child_prompt_tokens,
+            "model": self.model,
+            "usage_accounting": "unknown",
             "completion_tokens": 0,
+            "requests_dispatched": 0,
+            "turns": [],
             "child_tokens_in_root_loss": 0,
         }
         self.records.append(record)
@@ -217,17 +243,37 @@ class IterativeSubcalls:
         directory.mkdir(parents=True, exist_ok=False)
         started = time.monotonic()
         messages = [
-            {"role": "system", "content": TOOL_CHILD_SYSTEM},
+            {
+                "role": "system",
+                "content": TOOL_CHILD_SYSTEM.replace(
+                    "CHILD_TOTAL_TOKENS", str(self.child_total_tokens)
+                ).replace("CHILD_REPLY_TOKENS", str(self.child_reply_tokens)),
+            },
             {"role": "user", "content": assignment},
         ]
         try:
             async with asyncio.timeout(self.timeout_s):
                 for step in range(4):
-                    remaining = 4096 - record["completion_tokens"]
-                    if remaining < 128 or self.count_tokens(json.dumps(messages)) > 8192:
-                        raise ValueError("Child aggregate token or history budget exhausted")
+                    remaining = self.child_total_tokens - (record["completion_tokens"] or 0)
+                    prompt_tokens = self.count_tokens(json.dumps(messages))
+                    context_allowance = min(8192, self.context_tokens) - prompt_tokens
+                    request_cap = min(self.child_reply_tokens, remaining, context_allowance)
+                    if context_allowance < 128:
+                        record["termination_reason"] = "context_exhausted"
+                        raise ValueError("Child request has insufficient active context headroom")
+                    if remaining < 128:
+                        record["termination_reason"] = "aggregate_token_budget"
+                        raise ValueError("Child aggregate token budget exhausted")
                     request_id = uuid.uuid4().hex
-                    request_record = {"call_id": request_id, "step": step + 1}
+                    request_record = {
+                        "call_id": request_id,
+                        "request_id": request_id,
+                        "model_turn_id": uuid.uuid4().hex,
+                        "step": step + 1,
+                        "requested_max_tokens": request_cap,
+                        "context_output_allowance": context_allowance,
+                    }
+                    request_record["prompt_messages"] = json.loads(json.dumps(messages))
                     request_record.update(
                         parent_turn_id=record["parent_turn_id"],
                         parent_tool_call_id=record["parent_tool_call_id"],
@@ -235,10 +281,17 @@ class IterativeSubcalls:
                         parent_action_id=record.get("parent_action_id"),
                     )
                     record["requests"].append(request_record)
+                    record["requests_dispatched"] += 1
+                    turn_record = {
+                        **request_record,
+                        "status": "pending",
+                        "action_id": uuid.uuid4().hex,
+                    }
+                    record["turns"].append(turn_record)
                     response = await self.client.chat.completions.create(
                         model=self.model,
                         messages=messages,
-                        max_tokens=remaining,
+                        max_tokens=request_cap,
                         extra_headers={
                             "X-Kernel-Call-Id": request_id,
                             "X-Kernel-Parent-Turn-Id": record["parent_turn_id"] or "",
@@ -251,21 +304,68 @@ class IterativeSubcalls:
                         extra_body={"chat_template_kwargs": {"enable_thinking": True}},
                     )
                     choice = response.choices[0]
-                    if choice.finish_reason == "length" or getattr(
-                        choice.message, "tool_calls", None
-                    ):
-                        raise ValueError(
-                            "Incomplete child action or unsupported native tool request"
-                        )
+                    raw_reply = (
+                        choice.message.model_dump(exclude_none=True)
+                        if hasattr(choice.message, "model_dump")
+                        else vars(choice.message)
+                    )
+                    usage_dump = (
+                        response.usage.model_dump()
+                        if hasattr(response.usage, "model_dump")
+                        else vars(response.usage)
+                        if response.usage
+                        else None
+                    )
                     usage = response.usage.completion_tokens if response.usage else None
-                    if type(usage) is not int or not 0 < usage <= remaining:
-                        raise ValueError("Child usage must account for every generated token")
+                    turn_record.update(
+                        status="response_received",
+                        raw_reply=raw_reply,
+                        finish_reason=choice.finish_reason,
+                        usage=usage_dump,
+                    )
+                    if not isinstance(usage, int) or isinstance(usage, bool) or usage <= 0:
+                        record["usage_accounting"] = "incomplete"
+                        record["observed_completion_tokens"] = record["completion_tokens"]
+                        record["completion_tokens"] = None
+                        turn_record["observed_completion_tokens"] = usage
+                        turn_record["outcome"] = "usage_unavailable"
+                        record["termination_reason"] = "usage_unavailable"
+                        raise ValueError(
+                            "Child usage unavailable; aggregate token budget cannot be verified"
+                        )
                     record["completion_tokens"] += usage
+                    record["observed_completion_tokens"] = record["completion_tokens"]
+                    record["usage_accounting"] = "complete"
+                    turn_record["observed_completion_tokens"] = usage
+                    turn_record["status"] = "usage_recorded"
                     content = visible_response(choice.message.content or "")
+                    turn_record["visible_reply"] = content
+                    if choice.finish_reason == "length":
+                        record["termination_reason"] = "length"
+                        raise ValueError("Child reply ended at the per-request length cap")
+                    if getattr(choice.message, "tool_calls", None):
+                        record["termination_reason"] = "unsupported_native_tool_call"
+                        raise ValueError("Child emitted unsupported native tool calls")
+                    if usage > request_cap:
+                        record["usage_accounting"] = "incomplete"
+                        record["observed_completion_tokens"] = record["completion_tokens"]
+                        record["completion_tokens"] = None
+                        turn_record["outcome"] = "request_token_cap_exceeded"
+                        record["termination_reason"] = "request_token_cap_exceeded"
+                        raise ValueError("Provider usage exceeded child per-request token cap")
+                    if record["completion_tokens"] > self.child_total_tokens:
+                        record["usage_accounting"] = "incomplete"
+                        record["observed_completion_tokens"] = record["completion_tokens"]
+                        record["completion_tokens"] = None
+                        turn_record["outcome"] = "aggregate_token_budget"
+                        record["termination_reason"] = "aggregate_token_budget"
+                        raise ValueError("Provider usage exceeded child aggregate token budget")
                     try:
                         action = parse_action(content)
                     except ValueError as error:
                         record.setdefault("format_errors", []).append(str(error))
+                        turn_record["format_error"] = str(error)
+                        turn_record["outcome"] = "malformed_action"
                         if step == 3:
                             raise
                         messages.append({"role": "assistant", "content": content})
@@ -281,6 +381,7 @@ class IterativeSubcalls:
                     source = action.get("source", "")
                     if not isinstance(source, str) or len(source.encode()) > 65536:
                         raise ValueError("Invalid child candidate source")
+                    turn_record["parsed_action"] = action
                     if action.get("action") == "finish":
                         if (
                             not isinstance(action.get("advice"), str)
@@ -296,7 +397,12 @@ class IterativeSubcalls:
                             ),
                             "final_grading_required": True,
                         }
-                        record.update(status="completed", response=json.dumps(result))
+                        turn_record["outcome"] = "completed"
+                        record.update(
+                            status="completed",
+                            response=json.dumps(result),
+                            termination_reason="finish",
+                        )
                         return record["response"]
                     if action.get("action") != "check" or len(record["checks"]) >= 2 or step == 3:
                         raise ValueError("Child has at most two checks followed by a final answer")
@@ -313,7 +419,21 @@ class IterativeSubcalls:
                             "error": error,
                         }
                     )
-                    record["checks"].append({"source": source, "result": result})
+                    action_id = turn_record["action_id"]
+                    observation_id = uuid.uuid4().hex
+                    record["checks"].append(
+                        {
+                            "action_id": action_id,
+                            "observation_id": observation_id,
+                            "source": source,
+                            "result": result,
+                        }
+                    )
+                    turn_record.update(
+                        outcome="check_executed" if valid else "static_rejected",
+                        observation_id=observation_id,
+                        observation=result,
+                    )
                     messages.append({"role": "assistant", "content": content})
                     feedback = {
                         key: result.get(key)
@@ -336,6 +456,19 @@ class IterativeSubcalls:
                     )
                     (directory / "session.json").write_text(json.dumps(record, indent=2))
         except BaseException as error:
+            if "termination_reason" not in record:
+                record["termination_reason"] = (
+                    "cancelled" if isinstance(error, asyncio.CancelledError) else "error"
+                )
+            pending_turn = next(
+                (turn for turn in reversed(record["turns"]) if turn["status"] == "pending"),
+                None,
+            )
+            if pending_turn is not None:
+                record["usage_accounting"] = "incomplete"
+                record["observed_completion_tokens"] = record["completion_tokens"] or 0
+                record["completion_tokens"] = None
+                pending_turn["status"] = "request_failed_or_cancelled"
             record.update(status="failed", error=f"{type(error).__name__}: {error}")
             raise
         finally:

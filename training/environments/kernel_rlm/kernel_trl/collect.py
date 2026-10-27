@@ -214,6 +214,12 @@ async def collect(arguments):
                 "max_turns": getattr(arguments, "max_turns", 8),
                 "enable_thinking": True,
                 "child_prompt_tokens": getattr(arguments, "child_prompt_tokens", 2048),
+                "child_reply_tokens": getattr(arguments, "child_reply_tokens", None)
+                if getattr(arguments, "child_reply_tokens", None) is not None
+                else 4096,
+                "child_total_tokens": getattr(arguments, "child_total_tokens", None)
+                if getattr(arguments, "child_total_tokens", None) is not None
+                else 4096,
                 "child_tools": getattr(arguments, "child_tools", False),
                 "dedicated_inference": getattr(arguments, "dedicated_inference", False),
                 "cuda_docs": str(arguments.cuda_docs)
@@ -399,6 +405,8 @@ def main():
     parser.add_argument("--endpoint", default="http://127.0.0.1:8006")
     parser.add_argument("--context-tokens", type=int, default=DEFAULT_CONTEXT_TOKENS)
     parser.add_argument("--child-prompt-tokens", type=int, choices=(2048, 4096), default=2048)
+    parser.add_argument("--child-reply-tokens", type=int, default=4096)
+    parser.add_argument("--child-total-tokens", type=int, default=4096)
     parser.add_argument("--dedicated-inference", action="store_true")
     parser.add_argument("--child-tools", action="store_true")
     parser.add_argument("--checkpoint", type=Path, required=True)

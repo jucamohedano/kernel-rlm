@@ -19,6 +19,9 @@ def test_commands_keep_measured_split_card_protocol():
         cuda_docs=Path("docs"),
         cuda_docs_sha256="hash",
         run_id="campaign-123",
+        child_prompt_tokens=4999,
+        child_reply_tokens=8193,
+        child_total_tokens=12289,
     )
     command = module.collector_command(arguments, Path("out"), "task-a", 19, "group-a", "attempt-2")
     for name, value in (
@@ -28,7 +31,9 @@ def test_commands_keep_measured_split_card_protocol():
         ("--rollouts", "8"),
         ("--context-tokens", "16384"),
         ("--max-turns", "10"),
-        ("--child-prompt-tokens", "4096"),
+        ("--child-prompt-tokens", "4999"),
+        ("--child-reply-tokens", "8193"),
+        ("--child-total-tokens", "12289"),
         ("--episode-timeout-s", "2400"),
         ("--group-timeout-s", "4800"),
         ("--report-to", "trackio"),

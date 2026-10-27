@@ -691,7 +691,12 @@ def trajectory_detail(
                         "source": "nodes",
                     }
                 )
-    for source in ("kernel_child_progress", "kernel_subcalls"):
+    for source in (
+        "kernel_child_progress",
+        "kernel_subcalls",
+        "kernel_child_sessions",
+        "kernel_root_actions",
+    ):
         children = info.get(source, [])
         if children:
             events.append({"type": "child_activity", "source": source, "records": children})
