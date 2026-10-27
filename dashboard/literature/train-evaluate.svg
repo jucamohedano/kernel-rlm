@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 290" role="img" aria-labelledby="title desc">
+<title id="title">Training history is not an evaluation curve</title><desc id="desc">Accepted-group training outcomes change with the task mix. A fixed held-out protocol separately compares base model and checkpoints.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#597365"/></marker></defs>
+<rect width="1000" height="290" rx="12" fill="#f5f7f4"/>
+<text x="28" y="36" fill="#202a24" font-family="sans-serif" font-size="20" font-weight="600">Training history is not an evaluation curve</text>
+<path d="M308 147 L360 147" fill="none" stroke="#597365" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M610 147 L662 147" fill="none" stroke="#597365" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="28" y="90" width="280" height="115" rx="9" fill="#ffffff" stroke="#b8c9bd"/>
+<text x="44" y="120" font-family="sans-serif" font-size="17" fill="#184c35" font-weight="600">Training groups</text>
+<text x="44" y="145" font-family="sans-serif" font-size="14" fill="#49594e">Changing tasks and outcomes</text>
+<text x="44" y="165" font-family="sans-serif" font-size="14" fill="#49594e">Loss, reward, acceptance</text>
+<rect x="365" y="90" width="245" height="115" rx="9" fill="#ffffff" stroke="#b8c9bd"/>
+<text x="381" y="120" font-family="sans-serif" font-size="17" fill="#184c35" font-weight="600">Saved policies</text>
+<text x="381" y="145" font-family="sans-serif" font-size="14" fill="#49594e">Base + selected checkpoints</text>
+<text x="381" y="165" font-family="sans-serif" font-size="14" fill="#49594e">Record the exact identities</text>
+<rect x="667" y="90" width="305" height="115" rx="9" fill="#ffffff" stroke="#b8c9bd"/>
+<text x="683" y="120" font-family="sans-serif" font-size="17" fill="#184c35" font-weight="600">Held-out evaluation</text>
+<text x="683" y="145" font-family="sans-serif" font-size="14" fill="#49594e">Same task set and budgets</text>
+<text x="683" y="165" font-family="sans-serif" font-size="14" fill="#49594e">Frozen verifier and hardware</text>
+<text x="28" y="268" font-family="sans-serif" font-size="13" fill="#49594e">Our Stage 1 archive records 35 accepted updates. It does not establish a held-out improvement.</text>
+</svg>

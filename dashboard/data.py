@@ -12,6 +12,7 @@ WRITING_DOCS = {
     "README": "README.md",
     "first-campaign": "first-campaign.md",
     "protocol": "protocol.md",
+    "literature-review": "literature-review.md",
     "artifact-publication": "artifact-publication.md",
     "experiment-tracking": "experiment-tracking.md",
 }

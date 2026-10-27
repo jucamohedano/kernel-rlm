@@ -72,3 +72,73 @@ def test_static_assets_have_content_type(tmp_path):
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+def test_literature_assets_are_allowlisted_and_do_not_expose_manifest(tmp_path):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(tmp_path))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        for name, content_type, signature in (
+            ("kernelbench-figure-1.png", "image/png", b"\x89PNG"),
+            ("lit-13-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-14-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-15-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-16-figure-1.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-17-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-18-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-19-figure-4.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-2-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-20-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-21-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-22-figure-3.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-23-figure-3-left.png", "image/png", b"\x89PNG"),
+            ("lit-24-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-25-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-2507.11948-figure-1.png", "image/png", b"\x89PNG"),
+            ("lit-2509.14279-figure-2.png", "image/png", b"\x89PNG"),
+            ("lit-26-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-2602.05885-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-2602.24286-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-2603.21465-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-2606.20128-figure-2.png", "image/png", b"\x89PNG"),
+            ("lit-2607.16241-figure-1.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-2608.03391-figure-1.png", "image/png", b"\x89PNG"),
+            ("lit-27-schematic.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-28-figure-2.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("lit-29-figure-1.png", "image/png", b"\x89PNG"),
+            ("lit-3-figure-1.png", "image/png", b"\x89PNG"),
+            ("rao-credit-ablation.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("rao-delegation-ablation.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("rao-reward.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("research-map.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+            ("rlm-figure-2.png", "image/png", b"\x89PNG"),
+            ("train-evaluate.svg", "image/svg+xml; charset=utf-8", b"<svg"),
+        ):
+            conn = HTTPConnection(*server.server_address)
+            conn.request("GET", f"/literature/{name}")
+            response = conn.getresponse()
+            assert response.status == 200
+            assert response.getheader("Content-Type") == content_type
+            assert signature in response.read()
+            conn.close()
+        for path in (
+            "/literature/sources.json",
+            "/literature/unknown.svg",
+            "/literature/harness-context.svg",
+            "/literature/../server.py",
+            "/literature/%2e%2e/server.py",
+            "/literature/%72esearch-map.svg",
+            "/literature/research-map.svg/extra",
+            "/literature//research-map.svg",
+        ):
+            conn = HTTPConnection(*server.server_address)
+            conn.request("GET", path)
+            response = conn.getresponse()
+            response.read()
+            assert response.status == 404
+            conn.close()
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()

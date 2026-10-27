@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
+<title id="title">GRPO: compare responses within the same task</title>
+<desc id="desc">Original project schematic · conceptual flow, not a paper figure or measured result. Outcome and process supervision differ; project rewards and accounting remain separate choices.</desc>
+<rect width="1200" height="400" rx="18" fill="#0f172a"/>
+<text x="35" y="48" font-family="Arial, sans-serif" font-size="29" font-weight="700" fill="#f8fafc">GRPO: compare responses within the same task</text>
+<text x="35" y="82" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#94a3b8">Original project schematic · conceptual flow, not a paper figure or measured result</text>
+<rect x="35" y="130" width="245" height="140" rx="12" fill="#1e293b" stroke="#38bdf8"/>
+<text x="51" y="165" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#7dd3fc">Same prompt</text>
+<text x="51" y="215" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#cbd5e1">Sample a response group</text>
+<path d="M 289 200 h 30 m -9 -7 l 9 7 -9 7" stroke="#94a3b8" fill="none" stroke-width="3"/>
+<rect x="330" y="130" width="245" height="140" rx="12" fill="#1e293b" stroke="#38bdf8"/>
+<text x="346" y="165" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#7dd3fc">Verifier / reward</text>
+<text x="346" y="215" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#cbd5e1">Score each response</text>
+<path d="M 584 200 h 30 m -9 -7 l 9 7 -9 7" stroke="#94a3b8" fill="none" stroke-width="3"/>
+<rect x="625" y="130" width="245" height="140" rx="12" fill="#1e293b" stroke="#38bdf8"/>
+<text x="641" y="165" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#7dd3fc">Group comparison</text>
+<text x="641" y="215" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#cbd5e1">Estimate relative</text>
+<text x="641" y="238" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#cbd5e1">advantages</text>
+<path d="M 879 200 h 30 m -9 -7 l 9 7 -9 7" stroke="#94a3b8" fill="none" stroke-width="3"/>
+<rect x="920" y="130" width="245" height="140" rx="12" fill="#1e293b" stroke="#38bdf8"/>
+<text x="936" y="165" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#7dd3fc">Policy update</text>
+<text x="936" y="215" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#cbd5e1">No separately trained</text>
+<text x="936" y="238" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#cbd5e1">critic</text>
+<text x="35" y="325" font-family="Arial, sans-serif" font-size="18" font-weight="400" fill="#e2e8f0">Outcome and process supervision differ; project rewards and accounting remain separate choices.</text>
+</svg>

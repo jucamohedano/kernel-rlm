@@ -138,6 +138,19 @@ def test_http_api_routes_and_writing_safety(tmp_path):
         assert status == 404
         status, _, body = request(server, "/api/home")
         assert status == 200 and json.loads(body)["campaign"]["status"] is None
+        status, _, body = request(server, "/api/writing")
+        assert status == 200
+        documents = json.loads(body)["documents"]
+        literature = next(doc for doc in documents if doc["id"] == "literature-review")
+        assert literature["path"] == "docs/research/literature-review.md"
+        status, _, body = request(server, "/api/writing/literature-review")
+        assert status == 200
+        document = json.loads(body)
+        assert (
+            document["markdown"]
+            == (Path(__file__).parents[1] / "docs/research/literature-review.md").read_text()
+        )
+        assert len(document["version"]) == 64
         status, _, _ = request(server, "/api/writing/../../AGENTS")
         assert status == 404
         status, _, _ = request(server, "/api/runs/nope")

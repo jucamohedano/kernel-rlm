@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
+<title id="title">Training–inference mismatch: an optimization hypothesis</title>
+<desc id="desc">Original project schematic · conceptual flow, not a paper figure or measured result. Qwen3 math RL findings do not establish a scheduler for Laguna, Muon, or multi-turn CUDA.</desc>
+<rect width="1200" height="400" rx="18" fill="#0f172a"/>
+<text x="35" y="48" font-family="Arial, sans-serif" font-size="29" font-weight="700" fill="#f8fafc">Training–inference mismatch: an optimization hypothesis</text>
+<text x="35" y="82" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#94a3b8">Original project schematic · conceptual flow, not a paper figure or measured result</text>
+<rect x="35" y="130" width="245" height="140" rx="12" fill="#1e293b" stroke="#38bdf8"/>
+<text x="51" y="165" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#7dd3fc">Probability mismatch</text>
+<text x="51" y="215" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#cbd5e1">Track sampler vs. learner</text>
+<path d="M 289 200 h 30 m -9 -7 l 9 7 -9 7" stroke="#94a3b8" fill="none" stroke-width="3"/>
+<rect x="330" y="130" width="245" height="140" rx="12" fill="#1e293b" stroke="#38bdf8"/>
+<text x="346" y="165" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#7dd3fc">Update magnitude</text>
+<text x="346" y="215" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#cbd5e1">Paper tests smaller</text>
+<text x="346" y="238" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#cbd5e1">updates</text>
+<path d="M 584 200 h 30 m -9 -7 l 9 7 -9 7" stroke="#94a3b8" fill="none" stroke-width="3"/>
+<rect x="625" y="130" width="245" height="140" rx="12" fill="#1e293b" stroke="#38bdf8"/>
+<text x="641" y="165" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#7dd3fc">Response length</text>
+<text x="641" y="215" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#cbd5e1">Signal for LR decay in</text>
+<text x="641" y="238" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#cbd5e1">source</text>
+<path d="M 879 200 h 30 m -9 -7 l 9 7 -9 7" stroke="#94a3b8" fill="none" stroke-width="3"/>
+<rect x="920" y="130" width="245" height="140" rx="12" fill="#1e293b" stroke="#38bdf8"/>
+<text x="936" y="165" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#7dd3fc">Project boundary</text>
+<text x="936" y="215" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#cbd5e1">Audit first; no scheduler</text>
+<text x="936" y="238" font-family="Arial, sans-serif" font-size="17" font-weight="400" fill="#cbd5e1">claim</text>
+<text x="35" y="325" font-family="Arial, sans-serif" font-size="18" font-weight="400" fill="#e2e8f0">Qwen3 math RL findings do not establish a scheduler for Laguna, Muon, or multi-turn CUDA.</text>
+</svg>
