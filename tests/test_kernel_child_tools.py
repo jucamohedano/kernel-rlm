@@ -566,3 +566,12 @@ def test_tool_children_are_reachable_from_the_real_root_repl(module, tmp_path, m
     assert len(request_ids) == 2 and len(set(request_ids)) == 2
     assert all(request["parent_turn_id"] for request in child_record["requests"])
     assert all(request["parent_tool_call_id_generated"] for request in child_record["requests"])
+    assert all(request["parent_action_id"] for request in child_record["requests"])
+    root_action = next(
+        action
+        for action in result["record"]["root_actions"]
+        if action["action_id"] == child_record["parent_action_id"]
+    )
+    assert root_action["tool_call_id"] == child_record["parent_tool_call_id"]
+    assert root_action["tool_call_id_generated"] is True
+    assert root_action["observation_id"]

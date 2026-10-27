@@ -432,12 +432,8 @@ async def run(task: dict) -> None:
                     result = ExecResult(stderr=rejection)
                 else:
                     if proxy is not None:
-                        action_id = uuid.uuid4().hex
-                        tool_call_id = (
-                            repl_calls[code_index]["id"]
-                            if structured_action
-                            else f"generated-{root_turn_id}-{code_index}"
-                        )
+                        action_id = root_action_id
+                        tool_call_id = root_tool_call_id
                         child_provenance.clear()
                         child_provenance.update(
                             parent_turn_id=root_turn_id,
