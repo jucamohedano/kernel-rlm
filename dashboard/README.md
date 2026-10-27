@@ -20,6 +20,29 @@ Open <http://127.0.0.1:7790>. The **Dark mode** toggle overrides your system the
 - Keep the server on localhost. Do not expose private evidence to a network.
 - Do not use your home directory or a checkpoint backup as the evidence root.
 
+## Start Trackio
+
+Trackio shows saved trainer metrics. It does not show the trajectory viewer. Existing histories are unchanged; new logging rules apply to future runs.
+
+Use a review copy. The Trackio viewer can write to its database. Set `TRACKIO_SOURCE` to the saved `laguna-kernel-rlm.db` file. For the final campaign, use `logs/trackio-final-local`, not the older `logs/trackio-viewer` snapshot.
+
+```bash
+export TRACKIO_SOURCE=/path/to/logs/trackio-final-local/laguna-kernel-rlm.db
+export TRACKIO_DIR="$(mktemp -d)"
+python3 -c 'import os, sqlite3; source = sqlite3.connect("file:" + os.environ["TRACKIO_SOURCE"] + "?mode=ro", uri=True); target = sqlite3.connect(os.environ["TRACKIO_DIR"] + "/laguna-kernel-rlm.db"); source.backup(target); target.close(); source.close()'
+uv run --no-project --python 3.12 --with trackio==0.40.0 python -c 'import trackio; trackio.show(project="laguna-kernel-rlm", host="127.0.0.1", server_port=7861, share=False, open_browser=False, block_thread=True)'
+```
+
+Open <http://127.0.0.1:7861/?project=laguna-kernel-rlm>. This command can download Trackio and Python if they are not cached. It does not start training or publish metrics. Do not log training into the review copy.
+
+Use separate terminals for the two dashboards. Press **Ctrl+C** in each terminal to stop its server. Use a different port if one is already in use.
+
+### Review RL training metrics
+
+Open the [accepted-history RL view](http://127.0.0.1:7861/?project=laguna-kernel-rlm&runs=laguna-l1-verifier-v2-learning-curves&metrics=outcomes%2Fmean_reward%2Coutcomes%2Freward_std%2Coutcomes%2Fcorrect_fraction%2Coutcomes%2Ffaster_correct_fraction%2Coutcomes%2Fsubmitted_fraction%2Ctrain%2Fentropy%2Ctrain%2Fclip_ratio%2Fregion_mean%2Ctrain%2Fgrad_norm%2Ctrain%2Floss&x_axis=curves%2Foptimizer_step&smoothing=0&plots_per_row=3). It selects only `laguna-l1-verifier-v2-learning-curves`, uses optimizer step on the x-axis, and shows reward, reward spread, correctness, faster-correct fraction, submission rate, entropy, clipping, gradient norm, and loss.
+
+Do not select all records for this review. Older probes use different metric names and can appear as unrelated summary bars. These curves cover accepted groups on changing tasks, not held-out improvement. Steps 1–19 used L40S; later steps used RTX. The history includes inherited updates and verifier changes.
+
 ## Read the results
 
 - A completed trajectory has a submitted candidate. It has not necessarily passed verification.
