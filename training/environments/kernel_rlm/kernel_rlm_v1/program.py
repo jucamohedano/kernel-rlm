@@ -65,12 +65,27 @@ async def run(task: dict) -> None:
     subcall_timeout = child_timeout * max_child_calls if limits.get("enable_subcall") else 0
     subcall_instruction = SUBCALL_INSTRUCTION.format(max_calls=max_child_calls)
     child_prompt_tokens = limits.get("child_prompt_tokens", 2048)
-    if child_prompt_tokens == 4096:
-        subcall_instruction = subcall_instruction.replace(
-            "prompt limit is 2,048", "prompt limit is 4,096"
-        )
+    child_reply_tokens = limits.get("child_reply_tokens", 4096)
+    child_total_tokens = limits.get("child_total_tokens", child_reply_tokens)
+    subcall_instruction = subcall_instruction.replace(
+        "prompt limit is 2,048", f"prompt limit is {child_prompt_tokens:,}"
+    )
     if limits.get("child_tools"):
         subcall_instruction = TOOL_SUBCALL_INSTRUCTION.format(max_calls=max_child_calls)
+        subcall_instruction = (
+            subcall_instruction.replace(
+                "fit 4096 input tokens",
+                f"fit {limits.get('child_prompt_tokens', 4096)} input tokens",
+            )
+            .replace(
+                "4096 generated tokens TOTAL",
+                f"{limits.get('child_total_tokens', 4096)} generated tokens TOTAL",
+            )
+            .replace(
+                "4096 per reply by default",
+                f"{limits.get('child_reply_tokens', 4096)} per reply",
+            )
+        )
     repl_timeout = REPL_TIMEOUT_S + subcall_timeout
     backend_timeout = BACKEND_TIMEOUT_S + subcall_timeout
     if limits.get("child_tools"):
@@ -152,6 +167,9 @@ async def run(task: dict) -> None:
                 admission_enabled=not limits.get("bridge_owns_admission", False),
                 prompt_tokens=child_prompt_tokens,
                 hardware_context=hardware_context,
+                child_reply_tokens=child_reply_tokens,
+                child_total_tokens=child_total_tokens,
+                context_tokens=limits.get("max_context_tokens", 8192),
             )
             if limits.get("child_tools"):
                 subcalls = IterativeSubcalls(
@@ -163,6 +181,10 @@ async def run(task: dict) -> None:
                     directory=Path(feedback_log_dir) / "child-tools",
                     max_calls=max_child_calls,
                     hardware_context=hardware_context,
+                    child_reply_tokens=limits.get("child_reply_tokens", 4096),
+                    child_total_tokens=limits.get("child_total_tokens", 4096),
+                    child_prompt_tokens=limits.get("child_prompt_tokens", 4096),
+                    context_tokens=limits.get("max_context_tokens", 8192),
                 )
             proxy = SubLLMProxy()
             child_provenance = {}

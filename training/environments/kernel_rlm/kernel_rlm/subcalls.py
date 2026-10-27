@@ -1,6 +1,7 @@
 """One-shot child completions through the same intercepted V1 client."""
 
 import asyncio
+import json
 import os
 import time
 import uuid
@@ -15,7 +16,7 @@ CHILD_SYSTEM = (
 )
 SUBCALL_TIMEOUT_S = 90
 SUBCALL_MAX_CALLS = 2
-SUBCALL_REPLY_TOKENS = 4096
+SUBCALL_REPLY_TOKENS = 4096  # Default per-request cap; configurable at the active harness.
 SUBCALL_INSTRUCTION = (
     "You may call llm_query(prompt) inside the REPL up to {max_calls} times per trajectory. "
     "The child is the same model with a fresh context, no REPL, and no further recursion. "
@@ -141,6 +142,9 @@ class BoundedSubcalls:
         admission_enabled=True,
         prompt_tokens=2048,
         hardware_context="",
+        child_reply_tokens=SUBCALL_REPLY_TOKENS,
+        child_total_tokens=None,
+        context_tokens=8192,
     ):
         if prompt_tokens not in {2048, 4096}:
             raise ValueError("Child prompt allowance must be 2048 or 4096 tokens")
@@ -154,6 +158,16 @@ class BoundedSubcalls:
         self.admission_enabled = admission_enabled
         self.prompt_tokens = prompt_tokens
         self.hardware_context = hardware_context
+        self.child_reply_tokens = child_reply_tokens
+        self.child_total_tokens = (
+            child_total_tokens if child_total_tokens is not None else child_reply_tokens
+        )
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 1
+            for value in (child_reply_tokens, self.child_total_tokens)
+        ):
+            raise ValueError("Child token caps must be positive integers")
+        self.context_tokens = context_tokens
         self.calls_used = 0
 
     async def query(self, prompt, state=None):
@@ -182,6 +196,12 @@ class BoundedSubcalls:
             "parent_tool_call_id": dispatch_context.get("parent_tool_call_id"),
             "parent_tool_call_id_generated": dispatch_context.get("parent_tool_call_id_generated"),
             "parent_action_id": dispatch_context.get("parent_action_id"),
+            "child_reply_tokens": self.child_reply_tokens,
+            "child_total_tokens": self.child_total_tokens,
+            "usage_accounting": "unknown",
+            "request_id": child_call_id,
+            "model_turn_id": uuid.uuid4().hex,
+            "turns": [],
         }
         entry["call_index"] = self.calls_used
         self.records.append(entry)
@@ -194,14 +214,34 @@ class BoundedSubcalls:
             ) as admission_wait:
                 entry["admission_wait_seconds"] = admission_wait
                 async with asyncio.timeout(self.timeout_s):
+                    prompt_tokens = self.count_tokens(
+                        json.dumps(
+                            [
+                                {"role": "system", "content": CHILD_SYSTEM},
+                                {"role": "user", "content": prompt},
+                            ]
+                        )
+                    )
+                    context_output_allowance = self.context_tokens - prompt_tokens
+                    if context_output_allowance < 1:
+                        entry["termination_reason"] = "context_exhausted"
+                        raise ValueError("Child request has no output allowance in active context")
+                    child_messages = [
+                        {"role": "system", "content": CHILD_SYSTEM},
+                        {"role": "user", "content": prompt},
+                    ]
+                    entry["prompt_messages"] = child_messages
                     request_args = {
                         "model": self.model,
-                        "messages": [
-                            {"role": "system", "content": CHILD_SYSTEM},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "max_tokens": SUBCALL_REPLY_TOKENS,
+                        "messages": child_messages,
+                        "max_tokens": min(
+                            self.child_reply_tokens,
+                            self.child_total_tokens,
+                            context_output_allowance,
+                        ),
                     }
+                    entry["context_output_allowance"] = context_output_allowance
+                    entry["requested_max_tokens"] = request_args["max_tokens"]
                     request_args["extra_headers"] = {
                         "X-Kernel-Call-Id": child_call_id,
                         "X-Kernel-Parent-Turn-Id": dispatch_context.get("parent_turn_id", ""),
@@ -224,6 +264,50 @@ class BoundedSubcalls:
                         }
                     response = await self.client.chat.completions.create(**request_args)
             choice = response.choices[0]
+            usage_dump = (
+                response.usage.model_dump()
+                if hasattr(response.usage, "model_dump")
+                else vars(response.usage)
+                if response.usage
+                else None
+            )
+            usage_tokens = (
+                response.usage.completion_tokens
+                if hasattr(response.usage, "completion_tokens")
+                else usage_dump.get("completion_tokens")
+                if usage_dump
+                else None
+            )
+            raw_reply = (
+                choice.message.model_dump(exclude_none=True)
+                if hasattr(choice.message, "model_dump")
+                else vars(choice.message)
+            )
+            entry["turns"].append(
+                {
+                    "request_id": child_call_id,
+                    "model_turn_id": entry["model_turn_id"],
+                    "raw_reply": raw_reply,
+                    "usage": usage_dump,
+                    "finish_reason": choice.finish_reason,
+                }
+            )
+            if (
+                not isinstance(usage_tokens, int)
+                or isinstance(usage_tokens, bool)
+                or usage_tokens <= 0
+            ):
+                entry["usage_accounting"] = "incomplete"
+                entry["termination_reason"] = "usage_unavailable"
+                raise ValueError(
+                    "Child usage unavailable or invalid; aggregate token budget cannot be verified"
+                )
+            if usage_tokens > entry["requested_max_tokens"]:
+                entry["termination_reason"] = "request_token_cap_exceeded"
+                raise ValueError("Child usage exceeded the per-request token cap")
+            if usage_tokens > entry["child_total_tokens"]:
+                entry["termination_reason"] = "aggregate_token_budget"
+                raise ValueError("Child usage exceeded the aggregate token budget")
             content = visible_response(choice.message.content or "")
             if not content.strip() or getattr(choice.message, "tool_calls", None):
                 raise ValueError(
@@ -233,13 +317,21 @@ class BoundedSubcalls:
                 status="completed",
                 response=content,
                 finish_reason=choice.finish_reason,
-                usage=response.usage.model_dump() if response.usage else None,
+                usage=usage_dump,
+                completion_tokens=usage_tokens,
+                usage_accounting="complete",
+                termination_reason="length" if choice.finish_reason == "length" else "finish",
             )
             if choice.finish_reason == "length":
                 return "Child output was truncated; treat it as incomplete advice.\n" + content
             return content
         except BaseException as error:
-            entry.update(status="failed", error=f"{type(error).__name__}: {error}")
+            entry.update(
+                status="failed",
+                termination_reason=entry.get("termination_reason")
+                or ("cancelled" if isinstance(error, asyncio.CancelledError) else "error"),
+                error=f"{type(error).__name__}: {error}",
+            )
             raise
         finally:
             entry["elapsed_seconds"] = time.monotonic() - started

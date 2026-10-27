@@ -515,7 +515,7 @@ def test_enabled_subcall_through_program_and_worker(modules, monkeypatch, tmp_pa
                 finish_reason="stop",
             )
         ],
-        usage=None,
+        usage=SimpleNamespace(completion_tokens=3, model_dump=lambda: {"completion_tokens": 3}),
     )
     client = SimpleNamespace(
         chat=SimpleNamespace(

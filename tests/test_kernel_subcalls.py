@@ -22,7 +22,7 @@ def subcalls(monkeypatch):
 def fake_client(content="CUDA advice", finish="stop"):
     response = SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=content), finish_reason=finish)],
-        usage=SimpleNamespace(model_dump=lambda: {"completion_tokens": 3}),
+        usage=SimpleNamespace(completion_tokens=3, model_dump=lambda: {"completion_tokens": 3}),
     )
     create = AsyncMock(return_value=response)
     return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))

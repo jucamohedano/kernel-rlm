@@ -12,7 +12,7 @@ from typing import Any
 from aiohttp import web
 from kernel_rlm.capacity import ContextExhaustedError
 from kernel_rlm.child_tools import TOOL_CHILD_SYSTEM
-from kernel_rlm.subcalls import CHILD_SYSTEM, SUBCALL_REPLY_TOKENS
+from kernel_rlm.subcalls import CHILD_SYSTEM
 from kernel_rlm.verifier_slot import INFERENCE_ADMISSION_TIMEOUT_S, inference_request_slot
 
 from kernel_rollout.contract import exact_sample
@@ -29,6 +29,9 @@ class CompletionBridge:
         trace_path,
         timeout_s: float = 150,
         provenance: dict | None = None,
+        child_reply_limit: int = 4096,
+        child_total_limit: int = 4096,
+        context_tokens: int | None = None,
     ):
         if not adapter_name:
             raise ValueError("An explicit LoRA adapter name is required")
@@ -36,6 +39,9 @@ class CompletionBridge:
         self.adapter_name = adapter_name
         self.context_limit = context_limit
         self.max_reply = max_reply
+        self.child_reply_limit = child_reply_limit
+        self.child_total_limit = child_total_limit
+        self.context_tokens = context_tokens if context_tokens is not None else context_limit
         self.timeout_s = timeout_s
         self.session_id = uuid.uuid4().hex
         self.api_key = secrets.token_urlsafe(32)
@@ -89,6 +95,12 @@ class CompletionBridge:
         with self.trace_path.with_name("child-progress.jsonl").open("a") as stream:
             stream.write(json.dumps(event) + "\n")
 
+    def output_limit(self, requested: int, *, child: bool, prompt_tokens: int = 0) -> int:
+        configured_limit = self.child_reply_limit if child else self.max_reply
+        total_limit = self.child_total_limit if child else self.max_reply
+        context_limit = self.context_tokens - prompt_tokens
+        return min(requested, configured_limit, total_limit, context_limit)
+
     async def complete(self, request: web.Request) -> web.Response:
         if request.headers.get("Authorization") != f"Bearer {self.api_key}":
             raise web.HTTPUnauthorized()
@@ -121,17 +133,19 @@ class CompletionBridge:
             child = bool(
                 messages
                 and messages[0].get("role") == "system"
-                and messages[0].get("content") in (CHILD_SYSTEM, TOOL_CHILD_SYSTEM)
+                and (
+                    messages[0].get("content") == CHILD_SYSTEM
+                    or str(messages[0].get("content", "")).startswith(TOOL_CHILD_SYSTEM[:120])
+                )
             )
-            limit = SUBCALL_REPLY_TOKENS if child else self.max_reply
-            requested = body.pop("max_completion_tokens", body.pop("max_tokens", limit))
+            requested = body.pop("max_completion_tokens", body.pop("max_tokens", self.max_reply))
             if type(requested) is not int or requested <= 0 or body.get("stream"):
                 raise ValueError("Expected a bounded non-streaming completion")
             body.update(
                 model=self.adapter_name,
                 session_id=self.session_id,
                 n=1,
-                max_tokens=min(requested, limit),
+                max_tokens=self.output_limit(requested, child=child),
                 logprobs=True,
                 return_token_ids=True,
                 return_tokens_as_token_ids=True,
