@@ -39,7 +39,10 @@ def candidate(action, code="x=1"):
     return f"{action}\nfindings\n```python\n{code}\n```"
 
 
-def test_multi_turn_trace_keeps_raw_actions_and_observations(tmp_path):
+def test_multi_turn_trace_keeps_raw_actions_and_observations(tmp_path, monkeypatch):
+    from kernel_rlm import child_tools
+
+    monkeypatch.setattr(child_tools, "validate_submission_source", lambda source: (True, ""))
     client = CompletionClient([response(candidate("CHECK")), response(candidate("FINISH"))])
 
     async def checker(reference, source, directory, timeout):
@@ -351,3 +354,31 @@ def test_artifact_export_preserves_child_sessions_and_root_action_joins(tmp_path
     assert info["kernel_subcalls"] == []
     assert info["kernel_root_actions"][0]["action_id"] == "action"
     assert info["kernel_root_actions"][0]["observation_id"] == "obs"
+
+
+def test_static_rejection_is_not_reported_as_executed_check(tmp_path, monkeypatch):
+    from kernel_rlm import child_tools
+
+    checked = []
+
+    async def checker(*args):
+        checked.append(args)
+        return {"compiled": True}
+
+    replies = [
+        response(candidate("CHECK", "import torch"), tokens=10),
+        response(candidate("FINISH", ""), tokens=10),
+    ]
+    client = CompletionClient(replies)
+    monkeypatch.setattr(
+        child_tools, "validate_submission_source", lambda source: (False, "unsafe import")
+    )
+    calls = IterativeSubcalls(
+        client, "model", lambda _: 1, [], reference="ref", directory=tmp_path, checker=checker
+    )
+    asyncio.run(calls.query("question"))
+    record = calls.records[0]
+    assert not checked
+    assert record["turns"][0]["parsed_action"]["action"] == "check"
+    assert record["turns"][0]["outcome"] == "static_rejected"
+    assert record["turns"][0]["observation"]["verification_status"] == "static_rejected"

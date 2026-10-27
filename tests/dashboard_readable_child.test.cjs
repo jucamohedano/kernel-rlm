@@ -29,13 +29,13 @@ test('iterative child turns render raw replies and executed observations separat
     status:'failed', completion_tokens:12, child_total_tokens:4096,
     turns:[{step:1,finish_reason:'stop',observed_completion_tokens:12,
       raw_reply:{content:'<tool_call>literal'},format_error:'malformed',outcome:'malformed_action'},
-      {step:2,outcome:'check_executed',parsed_action:{action:'check'},
-        observation:{compiled:true}}],
+      {step:2,outcome:'static_rejected',parsed_action:{action:'check'},
+        observation:{verification_status:'static_rejected'}}],
   }],parent);
   assert.equal(parent.children.some(child=>child.title==='Error'), false);
   function texts(node){return [node.textContent,node.title,node.value,...(node.children||[]).flatMap(texts)].filter(Boolean).join(" ");}
   const serialized=texts(parent);
   assert.match(serialized,/Malformed action · not executed/);
   assert.match(serialized,/<tool_call>literal/);
-  assert.match(serialized,/Compiler\/check observation/);
+  assert.match(serialized,/Static validation observation · compiler\/checker not run/);
 });

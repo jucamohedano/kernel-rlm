@@ -467,8 +467,8 @@ function renderChildCalls(records,parent) {
       const raw=turn.raw_reply?.content ?? turn.visible_reply;
       if(raw != null)turnSection.append(panel("Raw child reply · generated markers are not executed calls",String(raw)));
       if(turn.format_error)turnSection.append(panel("Malformed action · not executed",turn.format_error));
-      if(turn.parsed_action)turnSection.append(panel("Parsed child action",JSON.stringify(turn.parsed_action,null,2)));
-      if(turn.observation)turnSection.append(panel("Compiler/check observation",JSON.stringify(turn.observation,null,2)));
+      if(turn.parsed_action)turnSection.append(panel("Parsed child action · request, not execution",JSON.stringify(turn.parsed_action,null,2)));
+      if(turn.observation)turnSection.append(panel(turn.outcome==="static_rejected"?"Static validation observation · compiler/checker not run":"Compiler/check observation",JSON.stringify(turn.observation,null,2)));
       section.append(turnSection);
     }
     if(child.checks?.length) section.append(panel("Compiler/check actions and observations",JSON.stringify(child.checks,null,2)));

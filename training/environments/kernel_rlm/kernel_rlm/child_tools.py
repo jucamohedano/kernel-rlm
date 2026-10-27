@@ -430,7 +430,9 @@ class IterativeSubcalls:
                         }
                     )
                     turn_record.update(
-                        outcome="check_executed", observation_id=observation_id, observation=result
+                        outcome="check_executed" if valid else "static_rejected",
+                        observation_id=observation_id,
+                        observation=result,
                     )
                     messages.append({"role": "assistant", "content": content})
                     feedback = {
