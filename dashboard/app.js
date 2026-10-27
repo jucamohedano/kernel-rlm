@@ -450,8 +450,8 @@ function renderChildCalls(records,parent) {
   for (const [i,child] of records.entries()) {
     const section=el("section","child-summary");
     const choices=child.response?.choices || [];
-    section.append(el("h3","",`Child ${i+1} · ${child.mode || "one-shot"} · ${child.child_invocation_id || child.call_id || "invocation unknown"}`));
-    section.append(el("p","muted",`Parent turn ${child.parent_turn_id || "unknown"} · action ${child.parent_action_id || child.parent_tool_call_id || "unknown"} · ${child.completion_tokens == null ? "usage unknown" : `${child.completion_tokens} generated tokens`} / ${child.child_total_tokens ?? "unknown"} total cap · ${child.termination_reason || "termination unknown"}`));
+    section.append(el("h3","",`Child session ${i+1} · ${child.mode || "one-shot"} · ${child.child_invocation_id || child.call_id || "invocation unknown"}`));
+    section.append(el("p","muted",`Parent turn ${child.parent_turn_id || "unknown"} · action ${child.parent_action_id || child.parent_tool_call_id || "unknown"} · ${child.usage_accounting === "incomplete" ? `at least ${child.observed_completion_tokens ?? "unknown"} generated tokens · accounting incomplete` : child.completion_tokens == null ? "usage unknown" : `${child.completion_tokens} generated tokens`} / ${child.child_total_tokens ?? "unknown"} total cap · ${child.termination_reason || "termination unknown"}`));
     const summary=el("p","muted");
     summary.textContent=[child.status,choices[0]?.finish_reason,typeof child.elapsed_seconds==="number"?`${child.elapsed_seconds.toFixed(1)} seconds`:null].filter(Boolean).join(" · ");section.append(summary);
     const assignment=readableChildText(child.prompt||child.assignment||child.input) || (child.request?.messages||[]).filter(m=>m.role==="user").map(m=>readableChildText(m.content)).filter(Boolean).join("\n\n");
@@ -478,7 +478,7 @@ function renderChildCalls(records,parent) {
 function renderTurnTimeline(events,parent) {
   const groups=[];let current=null;
   for(const event of events) {
-    if(event.source==="kernel_child_progress"||event.source==="kernel_subcalls"||event.source==="kernel_child_sessions")continue;
+    if(event.source==="kernel_child_progress"||event.source==="kernel_subcalls"||event.source==="kernel_child_sessions"||event.source==="kernel_root_actions")continue;
     if(event.role==="assistant") {current={assistant:event,observations:[]};groups.push(current);}
     else if(current)current.observations.push(event);
     else {const context=el("details","timeline-context");context.append(el("summary","",event.role==="system"?"System instructions":"Initial request"));renderEvents([event],context,{expanded:true});parent.append(context);}
@@ -489,8 +489,8 @@ function renderTurnTimeline(events,parent) {
     if(group.observations.length){const observations=el("details","turn-observations");observations.append(el("summary","",`Observations · ${group.observations.length}`));renderEvents(group.observations,observations,{expanded:true});turn.append(observations);}
     parent.append(turn);
   }
-  const children=events.filter(event=>event.source==="kernel_subcalls"||event.source==="kernel_child_sessions");
-  if(children.length){const section=el("details","timeline-context");section.append(el("summary","","Child assignments, model turns, checks and observations"));for(const event of children)renderChildCalls(event.records||[],section);parent.append(section);}
+  const children=events.filter(event=>event.source==="kernel_subcalls"||event.source==="kernel_child_sessions"||event.source==="kernel_root_actions");
+  if(children.length){const section=el("details","timeline-context");section.append(el("summary","","Recorded child requests and sessions"));for(const event of children){section.append(el("h3","",event.source==="kernel_child_sessions"?"Child invocation sessions":event.source==="kernel_root_actions"?"Root actions and observations":"Recorded child model requests"));if(event.source==="kernel_root_actions"){for(const [index,action] of (event.records||[]).entries()){const actionView=el("details","child-turn");actionView.append(el("summary","",`Root action ${action.action_id || index+1} · ${action.status} · ${action.tool_call_id || "call unknown"}`));actionView.append(panel("Executed source",action.code||""),panel("Observation",action.observation||""));section.append(actionView);}}else renderChildCalls(event.records||[],section);}parent.append(section);}
 }
 
 function renderEvents(events,parent,{expanded=false}={}) {

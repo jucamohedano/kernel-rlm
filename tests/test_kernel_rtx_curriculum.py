@@ -19,6 +19,9 @@ def test_commands_keep_measured_split_card_protocol():
         cuda_docs=Path("docs"),
         cuda_docs_sha256="hash",
         run_id="campaign-123",
+        child_prompt_tokens=4096,
+        child_reply_tokens=4096,
+        child_total_tokens=4096,
     )
     command = module.collector_command(arguments, Path("out"), "task-a", 19, "group-a", "attempt-2")
     for name, value in (

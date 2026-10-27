@@ -151,11 +151,11 @@ def collector_command(
         "--context-tokens",
         "16384",
         "--child-prompt-tokens",
-        "4096",
+        str(arguments.child_prompt_tokens),
         "--child-reply-tokens",
-        "4096",
+        str(arguments.child_reply_tokens),
         "--child-total-tokens",
-        "4096",
+        str(arguments.child_total_tokens),
         "--child-tools",
         "--policy-version",
         str(version),
@@ -711,6 +711,9 @@ def main():
     for name in ("source-commit", "run-id", "python", "inference-python", "cuda-docs-sha256"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--experiment-id", default="trl-l1-rtx-continuation")
+    parser.add_argument("--child-prompt-tokens", type=int, default=4096)
+    parser.add_argument("--child-reply-tokens", type=int, default=4096)
+    parser.add_argument("--child-total-tokens", type=int, default=4096)
     parser.add_argument("--resume", action="store_true")
     arguments = parser.parse_args()
     arguments.context_tokens = 16384

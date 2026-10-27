@@ -91,6 +91,8 @@ def test_length_usage_failure_and_parent_link_are_recorded(tmp_path):
     record = calls.records[0]
     assert record["termination_reason"] == "length"
     assert record["completion_tokens"] == 4096
+    assert record["observed_completion_tokens"] == 4096
+    assert record["usage_accounting"] == "complete"
     assert record["turns"][0]["parent_turn_id"] == "parent"
 
 
@@ -225,3 +227,127 @@ def test_iterative_request_cap_is_limited_by_active_context(tmp_path):
     request = client.requests[0]
     assert request["max_tokens"] < 8192
     assert calls.records[0]["turns"][0]["context_output_allowance"] < 8192
+
+
+def test_failure_after_observed_turn_marks_usage_incomplete(tmp_path):
+    client = CompletionClient([response("not an action", tokens=10), RuntimeError("disconnected")])
+    calls = IterativeSubcalls(client, "model", lambda _: 1, [], reference="ref", directory=tmp_path)
+    with unittest.TestCase().assertRaisesRegex(RuntimeError, "disconnected"):
+        asyncio.run(calls.query("question"))
+    record = calls.records[0]
+    assert record["usage_accounting"] == "incomplete"
+    assert record["completion_tokens"] is None
+    assert record["observed_completion_tokens"] == 10
+    assert record["termination_reason"] == "error"
+
+
+def test_one_shot_invalid_and_over_cap_usage_keep_raw_turn(tmp_path):
+    for usage in (None, 0, -1, True, 20):
+        client = OneShotClient([one_shot_response(usage=usage)])
+        records = []
+        subcalls = BoundedSubcalls(
+            client, "model", lambda _: 1, records, child_reply_tokens=10, child_total_tokens=100
+        )
+        with unittest.TestCase().assertRaises(ValueError):
+            asyncio.run(subcalls.query("question"))
+        entry = records[0]
+        assert entry["turns"][0]["raw_reply"]["content"] == "reply"
+        assert entry["turns"][0]["requested_max_tokens"] == 10
+        assert entry["usage_accounting"] == "incomplete"
+        assert entry["termination_reason"] in {"usage_unavailable", "request_token_cap_exceeded"}
+
+
+def test_one_shot_cancellation_has_no_fabricated_usage(tmp_path):
+    client = OneShotClient([asyncio.CancelledError()])
+    records = []
+    subcalls = BoundedSubcalls(client, "model", lambda _: 1, records)
+    with unittest.TestCase().assertRaises(asyncio.CancelledError):
+        asyncio.run(subcalls.query("question"))
+    entry = records[0]
+    assert entry["turns"] == []
+    assert entry.get("completion_tokens") is None
+    assert entry["usage_accounting"] == "unknown"
+    assert entry["termination_reason"] == "cancelled"
+
+
+def test_cancel_after_observed_turn_keeps_partial_usage_unknown_total(tmp_path):
+    client = CompletionClient([response("not an action", tokens=10), asyncio.CancelledError()])
+    calls = IterativeSubcalls(client, "model", lambda _: 1, [], reference="ref", directory=tmp_path)
+    with unittest.TestCase().assertRaises(asyncio.CancelledError):
+        asyncio.run(calls.query("question"))
+    record = calls.records[0]
+    assert record["usage_accounting"] == "incomplete"
+    assert record["completion_tokens"] is None
+    assert record["observed_completion_tokens"] == 10
+    assert record["turns"][-1]["status"] == "request_failed_or_cancelled"
+
+
+def test_length_termination_retains_complete_usage_accounting(tmp_path):
+    client = CompletionClient([response("partial", tokens=4096, finish="length")])
+    calls = IterativeSubcalls(
+        client,
+        "model",
+        lambda _: 1,
+        [],
+        reference="ref",
+        directory=tmp_path,
+        child_reply_tokens=4096,
+        child_total_tokens=4096,
+    )
+    with unittest.TestCase().assertRaisesRegex(ValueError, "length cap"):
+        asyncio.run(calls.query("question"))
+    record = calls.records[0]
+    assert record["completion_tokens"] == 4096
+    assert record["observed_completion_tokens"] == 4096
+    assert record["usage_accounting"] == "complete"
+
+
+def test_malformed_action_termination_retains_complete_usage(tmp_path):
+    client = CompletionClient(
+        [response("not an action", tokens=7), response(candidate("FINISH"), tokens=5)]
+    )
+    calls = IterativeSubcalls(client, "model", lambda _: 1, [], reference="ref", directory=tmp_path)
+    asyncio.run(calls.query("question"))
+    record = calls.records[0]
+    assert record["completion_tokens"] == 12
+    assert record["usage_accounting"] == "complete"
+    assert record["turns"][0]["outcome"] == "malformed_action"
+
+
+def test_artifact_export_preserves_child_sessions_and_root_action_joins(tmp_path):
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(
+        "kernel_rlm_trl_artifacts",
+        Path(__file__).parents[1] / "training/environments/kernel_rlm/kernel_trl/artifacts.py",
+    )
+    artifacts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(artifacts)
+    directory = tmp_path / "episode"
+    directory.mkdir()
+    (directory / "submission.json").write_text(
+        json.dumps(
+            {
+                "messages": [],
+                "subcalls": [{"child_invocation_id": "child", "turns": []}],
+                "root_actions": [
+                    {
+                        "action_id": "action",
+                        "observation_id": "obs",
+                        "tool_call_id": "generated",
+                        "code": "x=1",
+                        "observation": "ok",
+                    }
+                ],
+            }
+        )
+    )
+    (directory / "score.json").write_text("{}")
+    (directory / "task.json").write_text("{}")
+    trace = artifacts.episode_trace(directory, "run")
+    info = trace["info"]
+    assert info["kernel_child_sessions"][0]["child_invocation_id"] == "child"
+    assert info["kernel_subcalls"] == []
+    assert info["kernel_root_actions"][0]["action_id"] == "action"
+    assert info["kernel_root_actions"][0]["observation_id"] == "obs"

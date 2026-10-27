@@ -98,7 +98,10 @@ def test_child_hardware_context_preserves_bridge_identity_and_reference(module, 
     )
     asyncio.run(session.query("Review indexing"))
     messages = client.chat.completions.create.call_args.kwargs["messages"]
-    assert messages[0]["content"] == module.TOOL_CHILD_SYSTEM
+    assert messages[0]["content"].startswith(
+        module.TOOL_CHILD_SYSTEM.split("CHILD_TOTAL_TOKENS")[0]
+    )
+    assert "4096 generated tokens TOTAL" in messages[0]["content"]
     assert messages[1]["content"].startswith("Target RTX PRO 6000 sm_120")
     assert "Immutable reference source:\nunchanged reference" in messages[1]["content"]
     assert session.reference == "unchanged reference"
@@ -465,7 +468,9 @@ def test_tool_children_are_reachable_from_the_real_root_repl(module, tmp_path, m
 
         async def chat_completion(self, payload):
             messages = payload["json"]["messages"]
-            if messages[0]["content"] == module.TOOL_CHILD_SYSTEM:
+            if messages[0]["content"].startswith(
+                module.TOOL_CHILD_SYSTEM.split("CHILD_TOTAL_TOKENS")[0]
+            ):
                 texts = [
                     "CHECK\n```python\nimport torch\n```",
                     "FINISH\nStatic feedback requires a complete candidate.\n```python\n\n```",

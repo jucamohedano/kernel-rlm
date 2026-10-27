@@ -420,6 +420,12 @@ async def run(task: dict) -> None:
             )
             record["turns"] += 1
             for code_index, code in enumerate(codes):
+                root_action_id = uuid.uuid4().hex
+                root_tool_call_id = (
+                    repl_calls[code_index]["id"]
+                    if structured_action
+                    else f"generated-{root_turn_id}-{code_index}"
+                )
                 rejection = preparation_error(code, compiler_names, recovery=recovery)
                 if rejection:
                     record["action_rejections"].append({"turn": turn + 1, "error": rejection})
@@ -446,6 +452,19 @@ async def run(task: dict) -> None:
                             child_provenance.clear()
                 record["repl_calls"] += 1
                 observation = "REPL output:\n" + (result.stdout + result.stderr)[:20000]
+                root_observation_id = uuid.uuid4().hex
+                record.setdefault("root_actions", []).append(
+                    {
+                        "action_id": root_action_id,
+                        "observation_id": root_observation_id,
+                        "root_turn_id": root_turn_id,
+                        "tool_call_id": root_tool_call_id,
+                        "tool_call_id_generated": not structured_action,
+                        "code": code,
+                        "observation": observation,
+                        "status": "rejected" if rejection else "executed",
+                    }
+                )
                 for line in result.stdout.splitlines():
                     if line.startswith("CUDA feedback: "):
                         feedback = json.loads(line.removeprefix("CUDA feedback: "))

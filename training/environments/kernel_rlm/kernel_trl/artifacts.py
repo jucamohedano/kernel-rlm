@@ -187,6 +187,7 @@ def episode_trace(directory: Path, run_id: str, trace_id: str | None = None) -> 
             "kernel_raw_call_records": [compact_call_record(row) for row in rows],
             "kernel_subcalls": children,
             "kernel_child_sessions": record.get("subcalls", []),
+            "kernel_root_actions": record.get("root_actions", []),
             "kernel_child_progress": [
                 json.loads(line)
                 for line in (directory / "child-progress.jsonl").read_text().splitlines()

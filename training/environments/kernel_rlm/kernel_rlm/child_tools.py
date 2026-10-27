@@ -23,8 +23,8 @@ TOOL_CHILD_SYSTEM = (
     "At most two checks, then write FINISH on its own first line, concise findings, "
     "and one fenced python block containing your best complete candidate. "
     "Resource faults/timeouts are infrastructure, not numerical failure. Never invent measurements. "
-    "Final grading is independent. You have 4096 generated tokens TOTAL including reasoning "
-    "across this entire session, not 4096 per reply."
+    "Final grading is independent. You have CHILD_TOTAL_TOKENS generated tokens TOTAL including reasoning "
+    "across this entire session, and CHILD_REPLY_TOKENS per model reply."
 )
 TOOL_CHILD_TIMEOUT_S = 480
 TOOL_SUBCALL_INSTRUCTION = (
@@ -232,8 +232,9 @@ class IterativeSubcalls:
             "child_total_tokens": self.child_total_tokens,
             "child_prompt_tokens": self.child_prompt_tokens,
             "model": self.model,
-            "usage_accounting": "incomplete",
-            "completion_tokens": None,
+            "usage_accounting": "unknown",
+            "completion_tokens": 0,
+            "requests_dispatched": 0,
             "turns": [],
             "child_tokens_in_root_loss": 0,
         }
@@ -242,7 +243,12 @@ class IterativeSubcalls:
         directory.mkdir(parents=True, exist_ok=False)
         started = time.monotonic()
         messages = [
-            {"role": "system", "content": TOOL_CHILD_SYSTEM},
+            {
+                "role": "system",
+                "content": TOOL_CHILD_SYSTEM.replace(
+                    "CHILD_TOTAL_TOKENS", str(self.child_total_tokens)
+                ).replace("CHILD_REPLY_TOKENS", str(self.child_reply_tokens)),
+            },
             {"role": "user", "content": assignment},
         ]
         try:
@@ -275,6 +281,13 @@ class IterativeSubcalls:
                         parent_action_id=record.get("parent_action_id"),
                     )
                     record["requests"].append(request_record)
+                    record["requests_dispatched"] += 1
+                    turn_record = {
+                        **request_record,
+                        "status": "pending",
+                        "action_id": uuid.uuid4().hex,
+                    }
+                    record["turns"].append(turn_record)
                     response = await self.client.chat.completions.create(
                         model=self.model,
                         messages=messages,
@@ -304,24 +317,27 @@ class IterativeSubcalls:
                         else None
                     )
                     usage = response.usage.completion_tokens if response.usage else None
-                    turn_record = {
-                        **request_record,
-                        "raw_reply": raw_reply,
-                        "finish_reason": choice.finish_reason,
-                        "usage": usage_dump,
-                        "action_id": uuid.uuid4().hex,
-                    }
-                    record["turns"].append(turn_record)
+                    turn_record.update(
+                        status="response_received",
+                        raw_reply=raw_reply,
+                        finish_reason=choice.finish_reason,
+                        usage=usage_dump,
+                    )
                     if not isinstance(usage, int) or isinstance(usage, bool) or usage <= 0:
                         record["usage_accounting"] = "incomplete"
+                        record["observed_completion_tokens"] = record["completion_tokens"]
                         record["completion_tokens"] = None
+                        turn_record["observed_completion_tokens"] = usage
+                        turn_record["outcome"] = "usage_unavailable"
                         record["termination_reason"] = "usage_unavailable"
                         raise ValueError(
                             "Child usage unavailable; aggregate token budget cannot be verified"
                         )
-                    record["completion_tokens"] = (record["completion_tokens"] or 0) + usage
+                    record["completion_tokens"] += usage
+                    record["observed_completion_tokens"] = record["completion_tokens"]
                     record["usage_accounting"] = "complete"
                     turn_record["observed_completion_tokens"] = usage
+                    turn_record["status"] = "usage_recorded"
                     content = visible_response(choice.message.content or "")
                     turn_record["visible_reply"] = content
                     if choice.finish_reason == "length":
@@ -331,9 +347,17 @@ class IterativeSubcalls:
                         record["termination_reason"] = "unsupported_native_tool_call"
                         raise ValueError("Child emitted unsupported native tool calls")
                     if usage > request_cap:
+                        record["usage_accounting"] = "incomplete"
+                        record["observed_completion_tokens"] = record["completion_tokens"]
+                        record["completion_tokens"] = None
+                        turn_record["outcome"] = "request_token_cap_exceeded"
                         record["termination_reason"] = "request_token_cap_exceeded"
                         raise ValueError("Provider usage exceeded child per-request token cap")
                     if record["completion_tokens"] > self.child_total_tokens:
+                        record["usage_accounting"] = "incomplete"
+                        record["observed_completion_tokens"] = record["completion_tokens"]
+                        record["completion_tokens"] = None
+                        turn_record["outcome"] = "aggregate_token_budget"
                         record["termination_reason"] = "aggregate_token_budget"
                         raise ValueError("Provider usage exceeded child aggregate token budget")
                     try:
@@ -434,6 +458,15 @@ class IterativeSubcalls:
                 record["termination_reason"] = (
                     "cancelled" if isinstance(error, asyncio.CancelledError) else "error"
                 )
+            pending_turn = next(
+                (turn for turn in reversed(record["turns"]) if turn["status"] == "pending"),
+                None,
+            )
+            if pending_turn is not None:
+                record["usage_accounting"] = "incomplete"
+                record["observed_completion_tokens"] = record["completion_tokens"] or 0
+                record["completion_tokens"] = None
+                pending_turn["status"] = "request_failed_or_cancelled"
             record.update(status="failed", error=f"{type(error).__name__}: {error}")
             raise
         finally:

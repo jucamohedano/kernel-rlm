@@ -283,15 +283,16 @@ class BoundedSubcalls:
                 if hasattr(choice.message, "model_dump")
                 else vars(choice.message)
             )
-            entry["turns"].append(
-                {
-                    "request_id": child_call_id,
-                    "model_turn_id": entry["model_turn_id"],
-                    "raw_reply": raw_reply,
-                    "usage": usage_dump,
-                    "finish_reason": choice.finish_reason,
-                }
-            )
+            turn_record = {
+                "request_id": child_call_id,
+                "model_turn_id": entry["model_turn_id"],
+                "requested_max_tokens": entry["requested_max_tokens"],
+                "raw_reply": raw_reply,
+                "usage": usage_dump,
+                "observed_completion_tokens": usage_tokens,
+                "finish_reason": choice.finish_reason,
+            }
+            entry["turns"].append(turn_record)
             if (
                 not isinstance(usage_tokens, int)
                 or isinstance(usage_tokens, bool)
@@ -299,13 +300,20 @@ class BoundedSubcalls:
             ):
                 entry["usage_accounting"] = "incomplete"
                 entry["termination_reason"] = "usage_unavailable"
+                entry["observed_completion_tokens"] = usage_tokens
                 raise ValueError(
                     "Child usage unavailable or invalid; aggregate token budget cannot be verified"
                 )
             if usage_tokens > entry["requested_max_tokens"]:
+                entry["usage_accounting"] = "incomplete"
+                turn_record["outcome"] = "request_token_cap_exceeded"
+                entry["observed_completion_tokens"] = usage_tokens
                 entry["termination_reason"] = "request_token_cap_exceeded"
                 raise ValueError("Child usage exceeded the per-request token cap")
             if usage_tokens > entry["child_total_tokens"]:
+                entry["usage_accounting"] = "incomplete"
+                turn_record["outcome"] = "aggregate_token_budget"
+                entry["observed_completion_tokens"] = usage_tokens
                 entry["termination_reason"] = "aggregate_token_budget"
                 raise ValueError("Child usage exceeded the aggregate token budget")
             content = visible_response(choice.message.content or "")
@@ -315,6 +323,7 @@ class BoundedSubcalls:
                 )
             entry.update(
                 status="completed",
+                observed_completion_tokens=usage_tokens,
                 response=content,
                 finish_reason=choice.finish_reason,
                 usage=usage_dump,
