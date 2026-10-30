@@ -189,9 +189,33 @@ URL --receipt GPU_RECEIPT --sandbox-spec SPEC --observer-root EVIDENCE_DIRECTORY
 It does not start the serving process itself. It verifies the attached `/models`
 record against the protected startup evidence before sending scored requests.
 
-The current target is **RTX PRO 6000 Blackwell with the CUDA 13.3 toolkit**. A
-CUDA version printed by `nvidia-smi` is driver capability, not proof that the 13.3
-toolkit and compiler are installed. Pin actual `nvcc`, Torch, CuTe and driver
+The default target remains **RTX PRO 6000 Blackwell, compute capability 12.0
+(sm_120), with the CUDA 13.3 toolkit**. For a new GPU, freeze its actual model name
+in `gpu_model` and explicitly set `gpu_compute_capability` as a positive
+major.minor string. For example, an L40S run uses `"gpu_model": "NVIDIA L40S"` and
+`"gpu_compute_capability": "8.9"`. These fields render the task's execution target.
+Readiness requires matching observed `hardware.gpu_model` and
+`hardware.gpu_compute_capability` in the GPU receipt, not just requested settings.
+Do not reuse an old hardware receipt or change historical experiment snapshots.
+
+CuTe JIT uses the worker's actual CUDA device to select its compilation target;
+this configuration does not invent or set a CuTe architecture environment option.
+The `cute_compile_launch` readiness evidence must confirm compilation/launch on
+the configured device and compute capability. A prompt or startup argument alone
+does not establish that match. Do not force an architecture copied from another
+GPU. No Torch extension architecture override is needed by the CuTe-only worker.
+
+Serving `tensor_parallel_size` defaults to 1 and is separate from
+`max_concurrent_requests`. Set `"tensor_parallel_size": 2` explicitly for a
+2-GPU serving setup; the generated vLLM arguments include `--tensor-parallel-size`.
+The receipt must record the observed integer `server_identity.tensor_parallel_size`
+matching the frozen configuration, backed by the server startup evidence.
+This does not change the 262,144-token context, BF16 model, concurrency, scoring
+or task budgets, and does not prove that the GPU pair has enough memory. The
+operator must validate actual serving capacity before a scored run.
+
+A CUDA version printed by `nvidia-smi` is driver capability, not proof that the
+13.3 toolkit and compiler are installed. Pin actual `nvcc`, Torch, CuTe and driver
 versions in the later GPU receipt.
 
 `sandbox.SandboxSpec` describes explicit read-only runtime mounts and GPU device

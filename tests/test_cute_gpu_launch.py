@@ -26,13 +26,21 @@ def config():
     )
 
 
-def test_gpu_target_is_frozen_to_rtx_pro_6000_cuda_133():
-    cfg = config()
+@pytest.mark.parametrize(
+    "target",
+    [{}, {"gpu_model": "NVIDIA L40S", "gpu_compute_capability": "8.9", "tensor_parallel_size": 2}],
+)
+def test_gpu_receipt_matches_frozen_gpu_capability_parallelism_and_toolkit(target):
+    cfg = EvalConfig(**{**config().payload(), **target})
     receipt = {
         "config_sha256": cfg.sha256(),
         "manifest_sha256": "m",
         "observed_context_tokens": 262144,
-        "hardware": {"gpu_model": cfg.gpu_model},
+        "server_identity": {"tensor_parallel_size": cfg.tensor_parallel_size},
+        "hardware": {
+            "gpu_model": cfg.gpu_model,
+            "gpu_compute_capability": cfg.gpu_compute_capability,
+        },
         "software": {"cuda_toolkit_version": "13.3"},
         "checks": {
             key: {"status": "passed", "evidence": {"path": "e", "sha256": "h"}}
@@ -40,6 +48,21 @@ def test_gpu_target_is_frozen_to_rtx_pro_6000_cuda_133():
         },
     }
     check_gpu_receipt(receipt, cfg, "m")
+    for wrong_hardware in (
+        {"gpu_model": "WRONG GPU", "gpu_compute_capability": cfg.gpu_compute_capability},
+        {
+            "gpu_model": cfg.gpu_model,
+            "gpu_compute_capability": "8.9" if cfg.gpu_compute_capability == "12.0" else "12.0",
+        },
+        {"gpu_model": cfg.gpu_model},
+    ):
+        with pytest.raises(ValueError, match="frozen GPU target"):
+            check_gpu_receipt({**receipt, "hardware": wrong_hardware}, cfg, "m")
+    for wrong_tp in (None, cfg.tensor_parallel_size + 1, True):
+        with pytest.raises(ValueError, match="tensor parallel size"):
+            check_gpu_receipt(
+                {**receipt, "server_identity": {"tensor_parallel_size": wrong_tp}}, cfg, "m"
+            )
     receipt["software"]["cuda_toolkit_version"] = "13.0"
     with pytest.raises(ValueError, match="CUDA 13.3"):
         check_gpu_receipt(receipt, cfg, "m")
