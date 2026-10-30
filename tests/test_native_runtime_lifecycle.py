@@ -1,6 +1,7 @@
 """Native runtime limits and cancellation contracts without external inference."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -204,3 +205,38 @@ async def test_model_call_budget_stops_before_second_dispatch():
         "context_tokens": {"limit": None, "source": None},
     }
     assert runtime.root.backend.stopped
+
+
+@pytest.mark.asyncio
+async def test_cleanup_retry_keeps_initiating_native_failure(tmp_path):
+    from rlm_train.repl.subprocess import WorkerProtocolError
+
+    class FailedExecution(BlockingStopBackend):
+        attempts = 0
+
+        async def execute(self, code):
+            raise WorkerProtocolError("initiating protocol failure")
+
+        async def stop(self):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("cleanup read failure")
+            self.stopped = True
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    runtime = NativeRuntime(
+        ScriptedClient("fail"),
+        "mock",
+        SubLLMProxy(),
+        backend_factory=lambda **kw: FailedExecution(entered, release, **kw),
+        event_path=tmp_path / "events.jsonl",
+    )
+    record = await runtime.run("question", "context")
+    assert record["status"] == "failed"
+    assert record["error_class"] == "infrastructure"
+    assert record["error"] == "WorkerProtocolError('initiating protocol failure')"
+    assert "cleanup_error" not in record
+    assert runtime.root.backend.stopped
+    events = [json.loads(line) for line in runtime.event_path.read_text().splitlines()]
+    cleanup = next(event for event in events if event["type"] == "cleanup_failed")
+    assert "cleanup read failure" in cleanup["error"]
