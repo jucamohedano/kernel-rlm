@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import ast
+import copy
+import http.client
 import io
 import json
 import os
 import signal
+import socket
 import sys
 import threading
 import time
@@ -128,6 +131,9 @@ RESERVED_TOOL_NAMES = frozenset(
         "llm_query_batched",
         "rlm_query",
         "rlm_query_batched",
+        "rlm_status",
+        "rlm_result",
+        "rlm_wait",
         "SHOW_VARS",
         "answer",
         "context",
@@ -172,6 +178,7 @@ class Worker:
         self._lock = threading.Lock()
         self._last_final_answer: str | None = None
         self._context_count = 0
+        self._history: list[Any] = []
         self.globals: dict[str, Any] = {}
         self.locals: dict[str, Any] = {}
         self._setup_namespace()
@@ -182,8 +189,12 @@ class Worker:
         self.globals["SHOW_VARS"] = self._show_vars
         self.globals["llm_query"] = self._llm_query
         self.globals["llm_query_batched"] = self._llm_query_batched
-        self.globals["rlm_query"] = self._llm_query
-        self.globals["rlm_query_batched"] = self._llm_query_batched
+        self.globals["rlm_query"] = self._rlm_query
+        self.globals["rlm_query_batched"] = self._rlm_query_batched
+        self.globals["rlm_status"] = self._rlm_status
+        self.globals["rlm_result"] = self._rlm_result
+        self.globals["rlm_wait"] = self._rlm_wait
+        self.locals["history"] = tuple()
         self.locals["answer"] = _AnswerDict(on_ready=self._capture_answer)
 
     def _restore_scaffold(self) -> None:
@@ -193,9 +204,17 @@ class Worker:
             elif name == "llm_query_batched":
                 self.globals["llm_query_batched"] = self._llm_query_batched
             elif name == "rlm_query":
-                self.globals["rlm_query"] = self._llm_query
+                self.globals["rlm_query"] = self._rlm_query
             elif name == "rlm_query_batched":
-                self.globals["rlm_query_batched"] = self._llm_query_batched
+                self.globals["rlm_query_batched"] = self._rlm_query_batched
+            elif name == "rlm_status":
+                self.globals["rlm_status"] = self._rlm_status
+            elif name == "rlm_result":
+                self.globals["rlm_result"] = self._rlm_result
+            elif name == "rlm_wait":
+                self.globals["rlm_wait"] = self._rlm_wait
+            elif name == "history":
+                self.locals["history"] = tuple(copy.deepcopy(self._history))
             elif name == "SHOW_VARS":
                 self.globals["SHOW_VARS"] = self._show_vars
             elif name == "answer":
@@ -225,8 +244,30 @@ class Worker:
         return f"Available variables: {available}"
 
     def _proxy_post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        url = f"{self.proxy_url}/rollout/{self.rollout_id}/{path.lstrip('/')}"
+        route = f"/rollout/{self.rollout_id}/{path.lstrip('/')}"
         body = json.dumps(payload).encode("utf-8")
+        if self.proxy_url.startswith("unix://"):
+            connection = http.client.HTTPConnection("localhost", timeout=600)
+            channel = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            channel.settimeout(600)
+            try:
+                channel.connect(self.proxy_url[len("unix://") :])
+                connection.sock = channel
+                connection.request("POST", route, body, {"Content-Type": "application/json"})
+                response = connection.getresponse()
+                content = response.read().decode("utf-8")
+                if response.status >= 400:
+                    return {
+                        "error": f"HTTP {response.status}: {content}",
+                        "too_large": response.status == 413,
+                    }
+                return json.loads(content)
+            except Exception as error:
+                return {"error": f"Proxy request failed: {error}"}
+            finally:
+                connection.close()
+                channel.close()
+        url = self.proxy_url + route
         req = urllib.request.Request(
             url,
             data=body,
@@ -250,9 +291,40 @@ class Worker:
         except Exception as e:
             return {"error": f"Proxy request failed: {e}"}
 
+    def _recursive_post(self, route: str, payload: dict[str, Any]) -> Any:
+        result = self._proxy_post(route, payload)
+        if result.get("error"):
+            error_type = result.get("error_type")
+            if error_type == "TimeoutError":
+                raise TimeoutError(result["error"])
+            raise RuntimeError(result["error"])
+        return result.get("response", result.get("responses"))
+
+    def _rlm_query(self, prompt: str, model: str | None = None, *, blocking: bool = True) -> str:
+        return self._recursive_post(
+            "rlm_query", {"prompt": prompt, "model": model, "blocking": blocking}
+        )
+
+    def _rlm_query_batched(self, prompts: list[str], model: str | None = None) -> list[str]:
+        return self._recursive_post("rlm_query_batched", {"prompts": list(prompts), "model": model})
+
+    def _rlm_status(self, handle: str) -> str:
+        return self._recursive_post("rlm_status", {"handle": handle})
+
+    def _rlm_result(self, handle: str) -> str:
+        return self._recursive_post("rlm_result", {"handle": handle})
+
+    def _rlm_wait(self, handle: str, timeout_s: float = 30) -> str:
+        return self._recursive_post("rlm_wait", {"handle": handle, "timeout_s": timeout_s})
+
+    def update_history(self, messages: list[Any]) -> None:
+        self._history = copy.deepcopy(messages)
+        self.locals["history"] = tuple(copy.deepcopy(self._history))
+
     def _llm_query(self, prompt: str, model: str | None = None) -> str:
-        del model
-        result = self._proxy_post("llm_query", {"prompt": prompt, "depth": self.depth})
+        result = self._proxy_post(
+            "llm_query", {"prompt": prompt, "model": model, "depth": self.depth}
+        )
         if "error" in result and result["error"]:
             if result.get("too_large"):
                 return (
@@ -266,9 +338,8 @@ class Worker:
     def _llm_query_batched(self, prompts: list[str], model: str | None = None) -> list[str]:
         if not prompts:
             return []
-        del model
         result = self._proxy_post(
-            "llm_query_batched", {"prompts": list(prompts), "depth": self.depth}
+            "llm_query_batched", {"prompts": list(prompts), "model": model, "depth": self.depth}
         )
         if "error" in result and result["error"]:
             if result.get("too_large"):
@@ -408,6 +479,12 @@ def main() -> None:
                 _send({"id": rid, "ok": True, "index": idx})
             except BaseException as e:  # noqa: BLE001
                 _send({"id": rid, "ok": False, "error": f"load_context failed: {e}"})
+        elif kind == "update_history":
+            try:
+                worker.update_history(req.get("messages", []))
+                _send({"id": rid, "ok": True})
+            except BaseException as e:  # noqa: BLE001
+                _send({"id": rid, "ok": False, "error": f"update_history failed: {e}"})
         elif kind == "bootstrap":
             code = req.get("code") or ""
             try:

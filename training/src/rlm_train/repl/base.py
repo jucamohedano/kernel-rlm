@@ -25,6 +25,9 @@ class ReplBackend(ABC):
     async def execute(self, code: str) -> ExecResult: ...
 
     @abstractmethod
+    async def update_history(self, messages: list[Any]) -> None: ...
+
+    @abstractmethod
     async def stop(self) -> None: ...
 
     async def bootstrap(self, code: str) -> None:
