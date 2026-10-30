@@ -30,7 +30,7 @@ class KernelTask(vf.Task[KernelData]):
         trace.info["repl_transcript"] = record["messages"]
         trace.info["kernel_termination"] = record.get("termination_reason", "unknown")
         trace.info["kernel_model_calls"] = record.get("model_calls", [])
-        trace.info["kernel_subcalls"] = record.get("subcalls", [])
+        trace.info["rlm_child_calls"] = record.get("subcalls", [])
         trace.info["kernel_recovery"] = record.get("recovery", [])
         trace.info["kernel_action_rejections"] = record.get("action_rejections", [])
         if not source.strip():
