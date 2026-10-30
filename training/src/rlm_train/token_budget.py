@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 from dataclasses import dataclass
 from typing import Any
@@ -72,6 +73,10 @@ class VllmPromptCounter:
         return count
 
 
+class BudgetReservationPending(RuntimeError):
+    """Allowance is reserved by running requests, not yet spent."""
+
+
 class GeneratedTokenBudget:
     """Episode-wide fail-closed settlement for generated token reservations."""
 
@@ -80,6 +85,7 @@ class GeneratedTokenBudget:
         self.used = 0
         self.reserved: dict[str, int] = {}
         self.incomplete = False
+        self.changed = asyncio.Event()
 
     @property
     def outstanding(self) -> int:
@@ -100,6 +106,9 @@ class GeneratedTokenBudget:
             math.floor(self.policy.output_fraction * context_remaining),
         )
         if cap <= 0:
+            if self.used < self.policy.max_generated_tokens and self.outstanding:
+                self.changed.clear()
+                raise BudgetReservationPending("allowance reserved by running requests")
             raise RuntimeError("episode generated-token budget exhausted")
         if call_id in self.reserved:
             raise ValueError("duplicate generated-token reservation")
@@ -117,16 +126,20 @@ class GeneratedTokenBudget:
             or actual > reserved
         ):
             self.incomplete = True
+            self.changed.set()
             return None, reserved
         del self.reserved[call_id]
         self.used += actual
+        self.changed.set()
         return actual, reserved
 
     def release_undispatched(self, call_id: str) -> None:
         del self.reserved[call_id]
+        self.changed.set()
 
     def retain_uncertain(self, call_id: str) -> int:
         if call_id not in self.reserved:
             raise RuntimeError("unknown generated-token reservation")
         self.incomplete = True
+        self.changed.set()
         return self.reserved[call_id]

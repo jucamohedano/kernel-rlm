@@ -42,6 +42,8 @@ class EvalConfig:
     dataset_id: str = DATASET_ID
     dataset_revision: str = DATASET_REVISION
     server_context_tokens: int = 262144
+    gpu_model: str = "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"
+    cuda_toolkit_version: str = "13.3"
     output_fraction: float = 0.9
     max_generated_tokens: int = 1000000
     max_depth: int = 2
@@ -72,6 +74,8 @@ class EvalConfig:
             raise ValueError("This evaluation targets the pinned fresh Laguna release")
         if self.dataset_id != DATASET_ID or self.dataset_revision != DATASET_REVISION:
             raise ValueError("This evaluation targets the pinned cudaLLM source")
+        if "RTX PRO 6000" not in self.gpu_model or self.cuda_toolkit_version != "13.3":
+            raise ValueError("This evaluation targets RTX PRO 6000 with the CUDA 13.3 toolkit")
         if self.server_context_tokens != 262144:
             raise ValueError("Do not silently lower the agreed 262144-token window")
         if not self.enable_thinking or not self.logprobs or self.compaction:
@@ -131,6 +135,10 @@ def check_gpu_receipt(receipt: dict, config: EvalConfig, manifest_sha256: str) -
         raise ValueError("Observed server window does not match requested context")
     if not receipt.get("hardware") or not receipt.get("software"):
         raise ValueError("GPU hardware and software evidence is required")
+    if receipt["hardware"].get("gpu_model") != config.gpu_model:
+        raise ValueError("Observed GPU model does not match the frozen RTX PRO 6000 target")
+    if receipt["software"].get("cuda_toolkit_version") != config.cuda_toolkit_version:
+        raise ValueError("Observed CUDA toolkit does not match the frozen CUDA 13.3 target")
 
 
 def serving_arguments(model_path: str, config: EvalConfig) -> list[str]:

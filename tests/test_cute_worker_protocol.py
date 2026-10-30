@@ -60,3 +60,25 @@ def test_cross_tree_storage_aliases_fail_closed_before_serialization():
     reject_cross_tree_aliases(torch, [Tensor(1)], {"result": Tensor(2)}, {"weight": Tensor(3)})
     with pytest.raises(NotImplementedError, match="alias contract"):
         reject_cross_tree_aliases(torch, [Tensor(1)], {"result": Tensor(1)}, {})
+
+
+def test_precreated_sandbox_output_mount_must_be_empty(tmp_path):
+    import pytest
+    from cute_rlm.verify_worker import prepare_output_directory
+
+    target = tmp_path / "mounted-output"
+    target.mkdir()
+    assert prepare_output_directory(target) == target
+    (target / "old.json").write_text("old result")
+    with pytest.raises(ValueError, match="empty directory"):
+        prepare_output_directory(target)
+
+
+def test_candidate_source_remains_available_to_inspection():
+    import inspect
+
+    from cute_rlm.verify_worker import load_module
+
+    module = load_module("def function():\n    return 42\n", "cpu_candidate_source")
+    assert "return 42" in inspect.getsource(module.function)
+    assert module.function() == 42

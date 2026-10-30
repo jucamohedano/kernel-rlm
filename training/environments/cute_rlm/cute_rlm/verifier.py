@@ -15,6 +15,12 @@ from pathlib import Path
 from cute_rlm.contracts import VerificationConfig
 
 
+def checked_output(path: Path) -> Path:
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("verifier output must be a regular file, not a symbolic link")
+    return path
+
+
 def configuration_hash(config):
     return hashlib.sha256(json.dumps(config.payload(), sort_keys=True).encode()).hexdigest()
 
@@ -93,7 +99,13 @@ async def verify_submission(
     candidate_hash = hashlib.sha256(candidate_source.encode()).hexdigest()
     config_hash = configuration_hash(config)
     request_id = uuid.uuid4().hex
-    common = {"request_id": request_id, "task_id": task["task_id"], "config": config.payload()}
+    common = {
+        "request_id": request_id,
+        "task_id": task["task_id"],
+        "config": config.payload(),
+        "config_sha256": config_hash,
+        "candidate_sha256": candidate_hash,
+    }
     reference_request = {
         **common,
         "role": "reference",
@@ -125,7 +137,7 @@ async def verify_submission(
             "init_args.npz",
             *(f"inputs-{i}.npz" for i in range(config.correctness_runs)),
         ):
-            shutil.copyfile(directory / "reference" / name, inputs / name)
+            shutil.copyfile(checked_output(directory / "reference" / name), inputs / name)
         candidate_request = {
             **common,
             "role": "candidate",
@@ -158,8 +170,8 @@ async def verify_submission(
         for trial in range(config.correctness_runs):
             for kind in ("outputs", "mutated-inputs", "post-state"):
                 result = compare_trees(
-                    load_tree(directory / "reference" / f"{kind}-{trial}.npz"),
-                    load_tree(directory / "candidate" / f"{kind}-{trial}.npz"),
+                    load_tree(checked_output(directory / "reference" / f"{kind}-{trial}.npz")),
+                    load_tree(checked_output(directory / "candidate" / f"{kind}-{trial}.npz")),
                     atol=config.atol,
                     rtol=config.rtol,
                 )

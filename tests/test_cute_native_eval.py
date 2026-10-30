@@ -89,8 +89,8 @@ async def test_cpu_scripted_native_tree_records_caps_logprobs_and_verification(
         "config_sha256": config.sha256(),
         "manifest_sha256": readiness["manifest_sha256"],
         "observed_context_tokens": 262144,
-        "hardware": {"fixture": True},
-        "software": {"fixture": True},
+        "hardware": {"fixture": True, "gpu_model": config.gpu_model},
+        "software": {"fixture": True, "cuda_toolkit_version": config.cuda_toolkit_version},
         "checks": {
             key: {"status": "passed", "evidence": "CPU_FIXTURE_NOT_GPU"}
             for key in REQUIRED_GPU_CHECKS
