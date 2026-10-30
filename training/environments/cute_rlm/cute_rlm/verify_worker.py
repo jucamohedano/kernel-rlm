@@ -14,7 +14,22 @@ import random
 import statistics
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
+
+
+class InitializationError(RuntimeError):
+    """The model or its trusted example bundle could not be initialized."""
+
+
+@contextmanager
+def initialization():
+    try:
+        yield
+    except (SyntaxError, NotImplementedError):
+        raise
+    except Exception as error:
+        raise InitializationError(str(error)) from error
 
 
 def seed_all(torch, np, seed):
@@ -152,65 +167,91 @@ def run(request):
         seed_all(torch, np, config.seed)
         module = load_module(source, "task_reference" if role == "reference" else "task_candidate")
         compile_wall_started = time.monotonic()
-        if role == "reference":
-            if not hasattr(module, "Model") or not hasattr(module, "get_inputs"):
-                raise NotImplementedError("reference requires Model and get_inputs")
-            init_args = module.get_init_inputs() if hasattr(module, "get_init_inputs") else []
-            model_type = module.Model
-            baseline = model_type(*copy.deepcopy(init_args)).cuda()
-            if config.mode == "eval":
-                baseline.eval()
-            initial_state = to_arrays(torch, baseline.state_dict())
-            init_tree = to_arrays(torch, init_args)
-            save_tree(output / "initial_state.npz", initial_state)
-            save_tree(output / "init_args.npz", init_tree)
-            inputs = []
-            for trial in range(config.correctness_runs):
-                seed_all(torch, np, config.seed + trial)
-                raw = module.get_inputs()
-                if not isinstance(raw, (list, tuple)):
-                    raise NotImplementedError("get_inputs must return positional list/tuple inputs")
-                tree = place_inputs(to_arrays(torch, raw), config.input_device)
-                save_tree(output / f"inputs-{trial}.npz", tree)
-                inputs.append(tree)
-            training = baseline.training
-            modes = {name: child.training for name, child in baseline.named_modules()}
-        else:
-            if not hasattr(module, "ModelNew"):
-                raise NotImplementedError("candidate must define ModelNew")
-            bundle = Path(request["input_dir"])
-            initial_state = load_tree(bundle / "initial_state.npz")
-            init_tree = load_tree(bundle / "init_args.npz")
-            inputs = [
-                load_tree(bundle / f"inputs-{trial}.npz")
-                for trial in range(config.correctness_runs)
-            ]
-            model_type = module.ModelNew
-            training = request["training"]
-            modes = request["module_training"]
+        with initialization():
+            if role == "reference":
+                if not hasattr(module, "Model") or not hasattr(module, "get_inputs"):
+                    raise NotImplementedError("reference requires Model and get_inputs")
+                init_args = module.get_init_inputs() if hasattr(module, "get_init_inputs") else []
+                model_type = module.Model
+                baseline = model_type(*copy.deepcopy(init_args)).cuda()
+                if config.mode == "eval":
+                    baseline.eval()
+                initial_state = to_arrays(torch, baseline.state_dict())
+                init_tree = to_arrays(torch, init_args)
+                save_tree(output / "initial_state.npz", initial_state)
+                save_tree(output / "init_args.npz", init_tree)
+                inputs = []
+                for trial in range(config.correctness_runs):
+                    seed_all(torch, np, config.seed + trial)
+                    raw = module.get_inputs()
+                    if not isinstance(raw, (list, tuple)):
+                        raise NotImplementedError(
+                            "get_inputs must return positional list/tuple inputs"
+                        )
+                    tree = place_inputs(to_arrays(torch, raw), config.input_device)
+                    save_tree(output / f"inputs-{trial}.npz", tree)
+                    inputs.append(tree)
+                training = baseline.training
+                modes = {name: child.training for name, child in baseline.named_modules()}
+            else:
+                if not hasattr(module, "ModelNew"):
+                    raise NotImplementedError("candidate must define ModelNew")
+                bundle = Path(request["input_dir"])
+                initial_state = load_tree(bundle / "initial_state.npz")
+                init_tree = load_tree(bundle / "init_args.npz")
+                inputs = [
+                    load_tree(bundle / f"inputs-{trial}.npz")
+                    for trial in range(config.correctness_runs)
+                ]
+                model_type = module.ModelNew
+                training = request["training"]
+                modes = request["module_training"]
+
+        if role == "reference" and request.get("prepare_only"):
+            return {
+                "status": "prepared",
+                "role": role,
+                "source_sha256": source_hash,
+                "training": training,
+                "module_training": modes,
+            }
 
         def fresh(trial):
-            seed_all(torch, np, config.seed + trial)
-            args = from_arrays(torch, init_tree)
-            model = model_type(*args).cuda()
-            if config.mode == "eval":
-                model.eval()
-            elif {name: child.training for name, child in model.named_modules()} != modes:
-                raise NotImplementedError(
-                    "candidate module modes differ from preserved reference modes"
-                )
-            state = from_arrays(torch, initial_state)
-            # Exact state keys/shapes are a declared supported contract, not a silent repair.
-            try:
-                model.load_state_dict(state, strict=True)
-            except RuntimeError as error:
-                raise NotImplementedError(
-                    "candidate parameter/buffer state contract differs"
-                ) from error
-            args = from_arrays(torch, inputs[trial])
-            # Constructor RNG consumption may differ in an optimized candidate.
-            seed_all(torch, np, config.seed + trial)
-            return model, args
+            with initialization():
+                seed_all(torch, np, config.seed + trial)
+                args = from_arrays(torch, init_tree)
+                model = model_type(*args).cuda()
+                if config.mode == "eval":
+                    model.eval()
+                elif {name: child.training for name, child in model.named_modules()} != modes:
+                    raise NotImplementedError(
+                        "candidate module modes differ from preserved reference modes"
+                    )
+                state = from_arrays(torch, initial_state)
+                # Exact state keys/shapes are a declared supported contract, not a silent repair.
+                try:
+                    model.load_state_dict(state, strict=True)
+                except RuntimeError as error:
+                    raise NotImplementedError(
+                        "candidate parameter/buffer state contract differs"
+                    ) from error
+                args = from_arrays(torch, inputs[trial])
+                # Constructor RNG consumption may differ in an optimized candidate.
+                seed_all(torch, np, config.seed + trial)
+                return model, args
+
+        if role == "candidate" and request.get("compile_feedback"):
+            model, args = fresh(0)
+            with torch.no_grad():
+                model(*args)
+            torch.cuda.synchronize()
+            return {
+                "status": "compiled",
+                "role": role,
+                "source_sha256": source_hash,
+                "cute_verified": None,
+                "correct": None,
+            }
 
         for trial in range(config.correctness_runs):
             model, args = fresh(trial)
@@ -273,18 +314,34 @@ def run(request):
 
 
 def main():
-    request = json.load(sys.stdin)
-    try:
-        from contextlib import redirect_stdout
+    import io
+    import traceback
+    from contextlib import redirect_stderr, redirect_stdout
 
-        with redirect_stdout(sys.stderr):
+    request = json.load(sys.stdin)
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        try:
             result = run(request)
-    except SyntaxError as error:
-        result = {"status": "compile_error", "detail": str(error)}
-    except NotImplementedError as error:
-        result = {"status": "unsupported", "detail": str(error)}
-    except Exception as error:
-        result = {"status": "runtime_error", "detail": repr(error)}
+        except Exception as error:
+            if isinstance(error, SyntaxError):
+                status = "compile_error"
+            elif isinstance(error, NotImplementedError):
+                status = "unsupported"
+            elif isinstance(error, InitializationError):
+                status = "initialization_error"
+            else:
+                # CuTe DSLUserCodeError and other JIT errors need not be Python
+                # SyntaxError. Preserve their full traceback without guessing.
+                status = "runtime_error"
+            result = {
+                "status": status,
+                "detail": str(error),
+                "error_type": type(error).__name__,
+                "traceback": traceback.format_exc(),
+            }
+    result["stdout"] = stdout.getvalue()
+    result["stderr"] = stderr.getvalue()
     json.dump(result, sys.stdout, allow_nan=False)
     sys.stdout.write("\n")
 

@@ -54,6 +54,53 @@ The next-eval plan requests:
   verifier and timing measurements inform later changes. An explicit child wait
   timeout does not cancel the child. Freeze any change under a new run ID.
 
+## Model interface and compile feedback
+
+The task is already in the root REPL as a Python dictionary. Start with
+`print(context["reference_code"])`; do not search the filesystem for the task.
+Use `search_docs(...)` and `read_doc(...)` for pinned CuTe documentation. The
+reasoning REPL has no GPU. Recursive children receive their supplied prompt as
+context, not the root dictionary; pass the needed task snippets explicitly.
+
+Keep a complete Python source string defining `ModelNew` in a variable such as
+`source`. Inside the native REPL, call:
+
+```python
+feedback = compile_candidate(source)  # Prints diagnostics and returns a dictionary.
+# Revise source and call compile_candidate again when useful.
+```
+
+This host-backed helper runs the source in the configured isolated GPU worker.
+CuTe compiles lazily, so the check includes constructing the model, loading the
+reference initialization/state contract, one example forward and synchronization.
+It returns compiler/runtime diagnostics. It does **not** return reference outputs,
+compare numerical results, measure speed, or establish CuTe launch provenance.
+Each call and its source hash, owner session, diagnostics and duration are saved.
+The complete returned dictionary remains in REPL memory and host logs; the existing
+12,000-character tool-observation display limit is unchanged. Inspect selected
+fields or excerpts from the saved dictionary if a long diagnostic is truncated.
+
+There is **no feedback-call quota**. Repeat within the existing turn, token,
+REPL, worker and episode deadlines, including multiple checks in one REPL action.
+Checks are not final submissions and do not set `answer["ready"]`. Submit only
+when finished:
+
+```python
+answer["content"] = source
+answer["ready"] = True
+```
+
+The host warns before model turn **28/32**, counting turns from one. Warnings
+continue through turn 31 so the model can correct and submit before the last turn.
+On turn 32 it is told to submit immediately rather than start another check.
+The warning is guidance, not an automatic submission or an extra turn. The same
+rule applies to recursive REPL sessions. Generic callers without this CuTe hook
+keep their prior prompts and behavior. The historical two-feedback-call cap is
+not used. No old experiment snapshot or result is changed by this protocol.
+This feedback path is CPU-tested with scripted models/workers. Its new broker-to-GPU
+path still needs a target-VM smoke under a new frozen run before a model evaluation.
+The earlier generic GPU verifier precheck is not evidence that this new path ran.
+
 ## GPU handoff
 
 Before any scored model task, verify and save evidence for:
@@ -84,8 +131,8 @@ timing measures the forward call, after state/input reset and warmup. The end ev
 The timed forward must join any other streams back to the caller stream; validate
 that contract with the GPU trace before interpreting timing.
 Compile/setup and process wall time are reported separately. Validate this timing
-protocol on the target GPU before interpreting a speedup. This is
-final-submission verification, not a model-visible intermediate test tool.
+protocol on the target GPU before interpreting a speedup. Final verification
+remains independent of the model-visible compile feedback described below.
 
 The GPU worker has passed a generic addition smoke on RTX PRO 6000 with CUDA
 13.3 and CuTe DSL 4.8.1. This does not validate every cudaLLM reference or candidate.
