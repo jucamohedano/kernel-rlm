@@ -28,11 +28,13 @@ class SubprocessReplBackend(ReplBackend):
         worker_module: str = "rlm_train.worker",
         startup_timeout: float = 30.0,
         request_timeout: float = 1200.0,
+        worker_env: dict[str, str] | None = None,
     ):
         self._python = python or sys.executable
         self._worker_module = worker_module
         self._startup_timeout = startup_timeout
         self._request_timeout = request_timeout
+        self._worker_env = worker_env
         self._proc: asyncio.subprocess.Process | None = None
         self._req_counter = 0
         self._lock = asyncio.Lock()
@@ -40,7 +42,7 @@ class SubprocessReplBackend(ReplBackend):
         self._stderr_buf: list[str] = []
 
     async def start(self, proxy_url: str, rollout_id: str, depth: int = 1) -> None:
-        env = os.environ.copy()
+        env = os.environ.copy() if self._worker_env is None else dict(self._worker_env)
         env["RLM_TRAIN_PROXY_URL"] = proxy_url
         env["RLM_TRAIN_ROLLOUT_ID"] = rollout_id
         env["RLM_TRAIN_DEPTH"] = str(depth)

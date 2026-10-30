@@ -84,4 +84,4 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "training/src", "training/environments/kernel_rlm"]
+pythonpath = [".", "training/src", "training/environments/kernel_rlm", "training/environments/cute_rlm"]
