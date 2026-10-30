@@ -108,7 +108,7 @@ class _Session:
     prompt: str
     context: Any
     record: dict[str, Any]
-    task: asyncio.Task | None = None
+    task: asyncio.Task = field(init=False)
     cleanup_task: asyncio.Task | None = None
     backend: ReplBackend | None = None
     messages: list[dict[str, Any]] = field(default_factory=list)
@@ -279,7 +279,7 @@ class NativeRuntime:
     def new_session(self, parent: _Session | None, prompt: str, context: Any, model: str):
         sid = uuid.uuid4().hex
         origin = copy.deepcopy(parent.current_action) if parent else {}
-        record = {
+        record: dict[str, Any] = {
             "session_id": sid,
             "episode_id": self.episode_id,
             "parent_session_id": parent.id if parent else None,
