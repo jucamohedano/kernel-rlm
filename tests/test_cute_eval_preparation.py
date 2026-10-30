@@ -138,7 +138,15 @@ def test_prepared_manifest_captures_resolved_config_and_doc_bytes(tmp_path):
         "docs.json",
         ".eval-inputs/docs-corpus.json",
         ".eval-inputs/resolved-config.json",
+        ".eval-inputs/system-prompt.txt",
+        ".eval-inputs/user-prompts.json",
     } <= captured
+    from cute_rlm.prompts import CUTE_SYSTEM_PROMPT, first_user_message
+
+    assert (run / "inputs/.eval-inputs/system-prompt.txt").read_text() == CUTE_SYSTEM_PROMPT
+    assert json.loads((run / "inputs/.eval-inputs/user-prompts.json").read_text()) == {
+        "t": first_user_message(task, cfg)
+    }
     assert readiness["status"] == "CPU_prepared_GPU_pending"
     start_evaluation(manifest, run.parent)
     with pytest.raises(ValueError, match="already started"):
