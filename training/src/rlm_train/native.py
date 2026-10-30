@@ -424,11 +424,12 @@ class NativeRuntime:
             except Exception as error:
                 failures.append(repr(error))
         if failures:
-            session.record.update(
-                cleanup_error=str(failures),
-                error_class="cleanup",
-                error=f"worker cleanup failed: {failures}",
-            )
+            session.record["cleanup_error"] = str(failures)
+            if not session.record["error"]:
+                session.record.update(
+                    error_class="cleanup",
+                    error=f"worker cleanup failed: {failures}",
+                )
             self.log("cleanup_failed", session, error=session.record["cleanup_error"])
         else:
             session.record.pop("cleanup_error", None)
