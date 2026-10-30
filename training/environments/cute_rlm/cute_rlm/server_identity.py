@@ -6,6 +6,15 @@ import hashlib
 import json
 
 
+def model_card_sha256(card):
+    """Hash serving identity, not vLLM's per-response timestamps/permission IDs."""
+    identity = {
+        key: card.get(key)
+        for key in ("id", "object", "owned_by", "root", "parent", "max_model_len")
+    }
+    return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+
+
 async def check_server_identity(client, config, receipt):
     models = await client.get("models")
     models.raise_for_status()
@@ -29,7 +38,8 @@ async def check_server_identity(client, config, receipt):
     # protected startup evidence must pin the actual weight path/revision/argv.
     if not recorded.get("model_path") or not recorded.get("startup_evidence_sha256"):
         raise ValueError("GPU receipt needs pinned model path and startup command evidence")
-    fingerprint = hashlib.sha256(json.dumps(card, sort_keys=True).encode()).hexdigest()
-    if recorded.get("model_card_sha256") != fingerprint:
+    if card.get("root") != recorded["model_path"]:
+        raise ValueError("Attached serving weight path differs from frozen identity")
+    if recorded.get("model_card_sha256") != model_card_sha256(card):
         raise ValueError("Attached serving model metadata changed after preflight")
     return card
