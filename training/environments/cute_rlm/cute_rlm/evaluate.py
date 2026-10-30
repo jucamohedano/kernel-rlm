@@ -80,6 +80,13 @@ def prepare(project: Path, config: EvalConfig, run_id: str, output_root: Path) -
             "task_data": "REPL context",
             "selected_logprobs": True,
             "compaction": False,
+            "compile_feedback": {
+                "helper": "compile_candidate(source)",
+                "call_quota": None,
+                "scope": "compile and one forward; no numerical comparison or timing",
+            },
+            "turn_warning_start": 28,
+            "final_submission": "answer['content'] = source; answer['ready'] = True",
         },
     )
     directory = output_root / run_id
@@ -118,6 +125,7 @@ async def evaluate_prepared(
 
     from cute_rlm.dataset import load_tasks, task_context
     from cute_rlm.docs import docs_bootstrap
+    from cute_rlm.feedback import CompileFeedback
     from cute_rlm.verifier import verify_submission
 
     manifest = json.loads((directory / "provenance.json").read_text())
@@ -148,6 +156,12 @@ async def evaluate_prepared(
     results = []
     try:
         for index, task in enumerate(tasks):
+            feedback = CompileFeedback(
+                task,
+                config.verification,
+                directory / f"compile-feedback-{index:05d}",
+                worker_command=worker_command,
+            )
             runtime = NativeRuntime(
                 client,
                 config.model_id,
@@ -173,6 +187,8 @@ async def evaluate_prepared(
                 backend_factory=backend_factory,
                 bootstrap_code=docs_bootstrap(json.loads(corpus_bytes)),
                 system_prompt=CUTE_SYSTEM_PROMPT,
+                compile_candidate=feedback,
+                turn_notice=cute_turn_notice,
                 event_path=directory / "native-events.jsonl",
             )
             try:
@@ -265,18 +281,54 @@ def isolated_backend_factory(config: EvalConfig, worker_python: str):
     return factory
 
 
+def cute_turn_notice(turn: int, max_turns: int | None) -> str | None:
+    """Warn before the numbered request, leaving turns 28–31 for finalization."""
+    if max_turns is None or turn < min(28, max_turns):
+        return None
+    remaining = max_turns - turn + 1
+    if turn == max_turns:
+        return (
+            f"FINAL TURN {turn}/{max_turns}. Submit your best complete ModelNew now: "
+            "answer['content'] = source; answer['ready'] = True. "
+            "Do not spend this final turn on another compile check or exploration."
+        )
+    return (
+        f"Turn {turn}/{max_turns}: {remaining} model turns remain, including this one. "
+        f"Finish corrections and submit before the final turn ({max_turns}) if possible. "
+        "Set answer['content'] = source and answer['ready'] = True to submit. "
+        "Do not wait for more feedback once your remaining turns are needed to finalize."
+    )
+
+
 CUTE_SYSTEM_PROMPT = (
-    "Use only the native repl(code) tool. Variables persist. context contains the "
-    "original PyTorch task specification, not a solution in CuTe. Inspect reference_code "
-    "and its input/init functions, then implement the same operation using NVIDIA "
-    "CuTe DSL (cutlass.cute). search_docs and read_doc access pinned documentation. "
-    "Submit complete Python defining ModelNew with the same initialization and forward "
-    "contract as Model. Do not import the reference module or read hidden verifier outputs. "
-    "Store candidate source in answer['content'] and set answer['ready']=True. "
-    "llm_query makes plain model calls; rlm_query runs independent recursive REPL children. "
-    "rlm_query(prompt, blocking=False) returns a handle; use rlm_status, rlm_result or "
-    "rlm_wait(handle, timeout_s=30). Pass needed snippets to children; their variables are "
-    "separate. history contains your prior messages. Do not print entire docs or context."
+    "Use only the native repl(code) tool. Python variables persist. At the root, context "
+    "is a Python dictionary already loaded in your REPL, not a filename. Start with "
+    "print(context['reference_code']) to read the original PyTorch Model and its "
+    "get_inputs/get_init_inputs. Do not search the filesystem for the task. "
+    "Implement the same operation using NVIDIA CuTe DSL (cutlass.cute), preserving "
+    "the constructor, forward, parameter and buffer state contract. "
+    "This REPL has no GPU. Use it to inspect the task and construct Python source. "
+    "Use search_docs(query) and read_doc(doc_id, start=0, chars=1200) for pinned CuTe "
+    "documentation instead of wandering through installed packages. "
+    "Call feedback = compile_candidate(source) to compile and run one example "
+    "forward in a separate GPU sandbox. It prints feedback automatically and also "
+    "returns a dictionary; do not print it a second time. It returns compiler/runtime "
+    "diagnostics, not numerical correctness, hidden reference outputs or speed. "
+    "There is no fixed compile-feedback call quota: correct your source and call "
+    "compile_candidate again as often as useful within the remaining turns and time. "
+    "A compile check does not submit or end the episode. Do not set answer['ready'] "
+    "while still seeking feedback. Final independent verification happens only after "
+    "submission. Submit complete Python defining ModelNew by executing "
+    "answer['content'] = source; answer['ready'] = True. Submit your best implementation "
+    "within the turn budget even if uncertain. A warning begins at turn 28 for the "
+    "32-turn limit; aim to submit before the last turn and use the final turn to "
+    "submit immediately if still unfinished. Do not import the reference module or "
+    "read hidden verifier outputs. llm_query makes plain model calls; rlm_query runs "
+    "independent recursive REPL children. rlm_query(prompt, blocking=False) returns "
+    "a handle; use rlm_status, rlm_result or rlm_wait(handle, timeout_s=30). Children "
+    "receive their supplied prompt as context, not the root task dictionary or its "
+    "variables; pass needed snippets explicitly. history contains your prior messages. "
+    "Do not print entire docs or history."
 )
 
 

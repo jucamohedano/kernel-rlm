@@ -31,6 +31,7 @@ class ClientHandle:
     fake_query_batched: FakeQueryBatched | None = None
     state_ref: Any | None = None
     recursive: Any | None = None
+    compile_candidate: Callable[[str], Awaitable[dict[str, Any]]] | None = None
 
 
 async def _maybe_await(result: Any) -> Any:
@@ -117,6 +118,7 @@ class SubLLMProxy:
         app.router.add_post("/rollout/{rollout_id}/rlm_status", self._recursive_status)
         app.router.add_post("/rollout/{rollout_id}/rlm_result", self._recursive_result)
         app.router.add_post("/rollout/{rollout_id}/rlm_wait", self._recursive_wait)
+        app.router.add_post("/rollout/{rollout_id}/compile_candidate", self._compile_candidate)
         runner = web.AppRunner(app)
         await runner.setup()
         if self._socket_path is not None and self._socket_path.exists():
@@ -271,6 +273,32 @@ class SubLLMProxy:
 
         results = await asyncio.gather(*(run_one(p) for p in prompts))
         return web.json_response({"responses": results})
+
+    async def _compile_candidate(self, request: web.Request) -> web.Response:
+        rollout_id = request.match_info["rollout_id"]
+        handle = self._handles.get(rollout_id)
+        if handle is None:
+            return web.json_response(
+                {"error": f"unknown rollout_id {rollout_id!r}", "error_type": "LookupError"},
+                status=404,
+            )
+        try:
+            if handle.compile_candidate is None:
+                raise RuntimeError("compile_candidate is not configured")
+            body = await request.json()
+            if not isinstance(body, dict) or "source" not in body:
+                raise ValueError("compile_candidate requires a source field")
+            source = body["source"]
+            if not isinstance(source, str):
+                raise TypeError("compile_candidate source must be a string")
+            if not source.strip():
+                raise ValueError("compile_candidate source must not be empty")
+            value = await handle.compile_candidate(source)
+            if not isinstance(value, dict):
+                raise TypeError("compile_candidate callback must return a dict")
+            return web.json_response({"response": value})
+        except Exception as error:  # noqa: BLE001
+            return web.json_response({"error": str(error), "error_type": type(error).__name__})
 
     async def _recursive_call(self, request: web.Request, method: str) -> web.Response:
         rollout_id = request.match_info["rollout_id"]

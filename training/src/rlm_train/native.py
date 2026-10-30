@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import math
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -228,6 +229,8 @@ class NativeRuntime:
         prompt_counter: Callable[[dict[str, Any]], Any] | None = None,
         bootstrap_code: str = "",
         system_prompt: str = SYSTEM_PROMPT,
+        compile_candidate: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None,
+        turn_notice: Callable[[int, int | None], str | None] | None = None,
     ):
         self.client, self.model, self.proxy = client, model, proxy
         if (
@@ -239,6 +242,8 @@ class NativeRuntime:
         if not isinstance(bootstrap_code, str) or not isinstance(system_prompt, str):
             raise TypeError("bootstrap_code and system_prompt must be strings")
         self.bootstrap_code, self.system_prompt = bootstrap_code, system_prompt
+        self.compile_candidate = compile_candidate
+        self.turn_notice = turn_notice
         if budget_policy is not None and prompt_counter is None:
             raise ValueError("budget_policy requires an async prompt_counter")
         self.budget_policy = budget_policy
@@ -436,6 +441,59 @@ class NativeRuntime:
             self.proxy.unregister(session.id)
             self.log("cleanup_confirmed", session)
 
+    async def candidate_feedback(self, owner: str, source: str) -> dict[str, Any]:
+        session = self.sessions.get(owner)
+        if self.closed or session is None or not session.accepting or session.task.done():
+            raise RuntimeError("compile_candidate owner session is finalizing or closed")
+        if self.compile_candidate is None:
+            raise RuntimeError("compile_candidate is not configured")
+        if not isinstance(source, str):
+            raise TypeError("compile_candidate source must be a string")
+        if not source.strip():
+            raise ValueError("compile_candidate source must not be empty")
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise NativeBudgetError("episode deadline exceeded")
+        entries = session.record.setdefault("compile_feedback", [])
+        entry = {
+            "session_id": owner,
+            "source_sha256": hashlib.sha256(source.encode("utf-8")).hexdigest(),
+            "ordinal": len(entries) + 1,
+            "status": "running",
+        }
+        entries.append(entry)
+        started = time.monotonic()
+        request = asyncio.create_task(self.compile_candidate(owner, source))
+        session.requests.add(request)
+        try:
+            async with asyncio.timeout(min(self.limits.request_timeout, remaining)):
+                response = await request
+            if not isinstance(response, dict):
+                raise TypeError("compile_candidate callback must return a dict")
+            entry.update(status="completed", response=copy.deepcopy(response))
+            return response
+        except BaseException as error:
+            entry.update(
+                status="cancelled" if isinstance(error, asyncio.CancelledError) else "failed",
+                error=str(error),
+                error_type=type(error).__name__,
+            )
+            raise
+        finally:
+            session.requests.discard(request)
+            entry["duration_s"] = time.monotonic() - started
+            # The trajectory retains actual diagnostics; the journal references it
+            # without duplicating potentially large compiler output.
+            self.log(
+                "compile_feedback",
+                session,
+                **{
+                    key: value
+                    for key, value in entry.items()
+                    if key not in {"session_id", "response"}
+                },
+            )
+
     async def tool_loop(self, session: _Session):
         session.backend = self.backend_factory(request_timeout=self.limits.episode_timeout)
         self.proxy.register(
@@ -445,6 +503,9 @@ class NativeRuntime:
                 model=session.model,
                 max_concurrent=self.limits.max_concurrent_requests,
                 recursive=_ChildService(self, session.id),
+                compile_candidate=(lambda source: self.candidate_feedback(session.id, source))
+                if self.compile_candidate is not None
+                else None,
             ),
         )
         await session.backend.start(self.proxy.url, session.id, depth=session.depth)
@@ -457,6 +518,13 @@ class NativeRuntime:
         ]
         turn = 0
         while self.limits.max_turns is None or turn < self.limits.max_turns:
+            if self.turn_notice is not None:
+                notice = self.turn_notice(turn + 1, self.limits.max_turns)
+                if notice is not None:
+                    if not isinstance(notice, str):
+                        raise TypeError("turn_notice must return a string or None")
+                    session.messages.append({"role": "user", "content": notice})
+                    self.log("turn_notice", session, turn=turn + 1, notice=notice)
             event = await self.request(session, session.messages, session.model, plain=False)
             event["turn"] = turn
             choice = event["response"]["choices"][0]

@@ -142,6 +142,7 @@ RESERVED_TOOL_NAMES = frozenset(
         "rlm_status",
         "rlm_result",
         "rlm_wait",
+        "compile_candidate",
         "SHOW_VARS",
         "answer",
         "context",
@@ -205,6 +206,7 @@ class Worker:
         self.globals["rlm_status"] = self._rlm_status
         self.globals["rlm_result"] = self._rlm_result
         self.globals["rlm_wait"] = self._rlm_wait
+        self.globals["compile_candidate"] = self._compile_candidate
         self.locals["history"] = tuple()
         self.locals["answer"] = _AnswerDict(on_ready=self._capture_answer)
 
@@ -224,6 +226,8 @@ class Worker:
                 self.globals["rlm_result"] = self._rlm_result
             elif name == "rlm_wait":
                 self.globals["rlm_wait"] = self._rlm_wait
+            elif name == "compile_candidate":
+                self.globals["compile_candidate"] = self._compile_candidate
             elif name == "history":
                 self.locals["history"] = tuple(copy.deepcopy(self._history))
             elif name == "SHOW_VARS":
@@ -301,6 +305,26 @@ class Worker:
             return {"error": f"HTTP {e.code}: {detail or e.reason}", "too_large": too_large}
         except Exception as e:
             return {"error": f"Proxy request failed: {e}"}
+
+    def _compile_candidate(self, source: str) -> dict[str, Any]:
+        if not isinstance(source, str):
+            raise TypeError("compile_candidate source must be a string")
+        if not source.strip():
+            raise ValueError("compile_candidate source must not be empty")
+        result = self._proxy_post("compile_candidate", {"source": source})
+        if "error" in result:
+            error_type = {
+                "TypeError": TypeError,
+                "ValueError": ValueError,
+                "TimeoutError": TimeoutError,
+                "LookupError": LookupError,
+            }.get(result.get("error_type"), RuntimeError)
+            raise error_type(result["error"])
+        response = result.get("response")
+        if not isinstance(response, dict):
+            raise TypeError("compile_candidate returned no feedback dict")
+        print(json.dumps(response, ensure_ascii=False))
+        return response
 
     def _recursive_post(self, route: str, payload: dict[str, Any]) -> Any:
         result = self._proxy_post(route, payload)
