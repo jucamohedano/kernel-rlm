@@ -140,6 +140,11 @@ def trace_submitted(trace: dict) -> bool:
     return bool(info.get("kernel_submission")) or info.get("kernel_termination") == "submitted"
 
 
+def child_calls(trace: dict) -> list[dict]:
+    info = trace.get("info", {})
+    return info.get("rlm_child_calls", info.get("kernel_subcalls", []))
+
+
 def model_calls(trace: dict) -> list[dict]:
     return trace.get("info", {}).get("kernel_model_calls", trace.get("calls", []))
 
@@ -221,7 +226,7 @@ def run_summary(run: dict) -> dict:
         "duration_source": duration_source,
         "truncated_calls": sum(call.get("finish_reason") == "length" for call in calls),
         "model_calls": len(calls),
-        "subcalls": sum(len(trace.get("info", {}).get("kernel_subcalls", [])) for trace in traces),
+        "subcalls": sum(len(child_calls(trace)) for trace in traces),
         "optimizer_step": max(steps) if steps else None,
     }
     return run["summary"]
@@ -938,7 +943,7 @@ def assistant_response_text(content, tool_calls: list) -> str:
 def render_timeline(trace: dict) -> str:
     info = trace.get("info", {})
     calls = iter(trace.get("calls", []))
-    if info.get("kernel_subcalls"):
+    if child_calls(trace):
         calls = iter(info.get("kernel_model_calls", []))
     events = []
     transcript = info.get("repl_transcript", [])
@@ -981,7 +986,7 @@ def render_timeline(trace: dict) -> str:
         events.append(
             f'<article class="event"><div class="event-label">{text(label)}</div>{body}</article>'
         )
-    if info.get("kernel_subcalls"):
+    if child_calls(trace):
         child_systems = [
             node["message"]
             for index, node in enumerate(trace.get("nodes", []))
@@ -990,7 +995,7 @@ def render_timeline(trace: dict) -> str:
         if child_systems:
             events.append(folded("Child system instructions", child_systems))
         events.append(
-            folded("Child calls · full prompts, replies, usage and errors", info["kernel_subcalls"])
+            folded("Child calls · full prompts, replies, usage and errors", child_calls(trace))
         )
     if info.get("kernel_child_progress"):
         events.append(

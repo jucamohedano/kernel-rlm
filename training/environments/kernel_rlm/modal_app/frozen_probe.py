@@ -265,7 +265,7 @@ async def probe(
                         trace = episode.traces[0]
                         group["completed_subcalls"] += sum(
                             call.get("status") == "completed"
-                            for call in trace.info.get("kernel_subcalls", [])
+                            for call in trace.info.get("rlm_child_calls", [])
                         )
                         group["rewards"].append(trace.reward)
                         group["submitted"] += bool(trace.info.get("kernel_submission"))

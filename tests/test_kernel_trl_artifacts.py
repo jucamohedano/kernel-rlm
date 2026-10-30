@@ -94,7 +94,20 @@ def test_saved_messages_and_reasoning_survive_without_ui_redesign(tmp_path, monk
         "usage": {"completion_tokens": 20},
     }
     (directory / "calls.jsonl").write_text(
-        json.dumps({"branch": "root", "response": response, "elapsed_seconds": 1.0}) + "\n"
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "branch": "root",
+                        "response": response,
+                        "request": {"max_tokens": 777},
+                        "elapsed_seconds": 1.0,
+                    }
+                ),
+                json.dumps({"branch": "child", "request": {"max_tokens": 99}}),
+            ]
+        )
+        + "\n"
     )
     (directory / "child-progress.jsonl").write_text(
         json.dumps({"call_id": "child", "stage": "generating", "completion_tokens": 257}) + "\n"
@@ -104,6 +117,9 @@ def test_saved_messages_and_reasoning_survive_without_ui_redesign(tmp_path, monk
     assert trace["info"]["repl_transcript"][0]["content"] == "all system instructions"
     assert trace["nodes"][1]["message"]["reasoning_content"] == "saved reasoning"
     assert trace["calls"][0]["node"] == 1
+    assert trace["calls"][0]["request"]["max_tokens"] == 777
+    assert trace["info"]["rlm_child_calls"][0]["request"]["max_tokens"] == 99
+    assert "kernel_subcalls" not in trace["info"]
     assert trace["rewards"]["kernel_reward"]["score"] == 0.8
     (directory / "score.json").unlink()
     assert artifacts.episode_trace(directory, "run")["rewards"]["kernel_reward"]["score"] is None

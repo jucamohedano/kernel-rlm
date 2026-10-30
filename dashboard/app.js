@@ -213,7 +213,14 @@ function tokenPanel(title, usage) {
     const coverage = metric ? metric.total == null ? `${metric.recorded} calls recorded · coverage unknown` : `${metric.recorded}/${metric.total} calls recorded${metric.recorded < metric.total ? " · partial sum" : " · complete"}` : "Not recorded";
     const item = el("div", "token-stat"); item.append(el("span", "muted", label), el("strong", "", value), el("small", "muted", coverage)); grid.append(item);
   }
-  node.append(grid);
+  const outputUsage = usage?.output_tokens;
+  const outputCap = usage?.output_cap_tokens;
+  const completeOutput = outputUsage?.sum != null && outputUsage.total != null && outputUsage.total > 0 && outputUsage.recorded === outputUsage.total;
+  const completeCaps = outputCap?.sum != null && outputCap.total === outputUsage?.total && outputCap.recorded === outputUsage?.total;
+  const outputCapText = completeOutput && completeCaps
+    ? `Output used / sum of per-call caps: ${outputUsage.sum.toLocaleString()} / ${outputCap.sum.toLocaleString()} tokens (${outputUsage.recorded}/${outputUsage.total} calls)`
+    : `Output used / sum of per-call caps: ${outputUsage?.sum == null ? "Unknown" : outputUsage.sum.toLocaleString()} / Unknown`;
+  node.append(grid, el("small", "muted", outputCapText));
   const elapsed = usage?.elapsed_seconds;
   const elapsedText = elapsed?.sum == null ? "Elapsed sum unavailable" : `${elapsed.sum.toFixed(3)} s summed across ${elapsed.recorded}/${elapsed.total ?? "?"} calls (not wall time)`;
   node.append(el("small", "muted", elapsedText));
@@ -221,10 +228,10 @@ function tokenPanel(title, usage) {
 }
 function aggregateRunUsage(traces) {
   const aggregate = {root: {}, children: {}, all: {}};
-  for (const group of ["root", "children", "all"]) for (const key of ["input_tokens", "output_tokens", "total_tokens", "elapsed_seconds"]) {
+  for (const group of ["root", "children", "all"]) for (const key of ["input_tokens", "output_tokens", "total_tokens", "output_cap_tokens", "elapsed_seconds"]) {
     const entries = traces.map(t => t.metrics?.token_usage?.[group]?.[key]).filter(Boolean);
     const known = entries.filter(entry => entry.sum != null);
-    aggregate[group][key] = {sum: known.length ? known.reduce((sum, entry) => sum + entry.sum, 0) : null, recorded: entries.reduce((sum, entry) => sum + entry.recorded, 0), total: entries.every(entry => entry.total != null) ? entries.reduce((sum, entry) => sum + entry.total, 0) : null};
+    aggregate[group][key] = {sum: known.length ? known.reduce((sum, entry) => sum + entry.sum, 0) : null, recorded: entries.reduce((sum, entry) => sum + entry.recorded, 0), total: (key !== "output_cap_tokens" || entries.length === traces.length) && entries.every(entry => entry.total != null) ? entries.reduce((sum, entry) => sum + entry.total, 0) : null};
   }
   return aggregate;
 }
@@ -284,6 +291,12 @@ function experimentNav(experiments, selected, {view = "experiments", onSelect} =
     }
   };
 }
+function experimentHistoryContext(group) {
+  if (group !== "L1 post-training") return null;
+  const context = el("div", "experiment-context");
+  context.append(el("p", "", "The project began with Modal trials and moved to CloudRift after the compute grant. These records cover training, setup checks, applied fixes and pilot branches—not independent proof of improvement."), link("Read the stage history →", "#writing/first-campaign"));
+  return context;
+}
 async function experimentsPage(id, signal, ticket) {
   const data = await api("experiments", signal);
   if (ticket !== renderId) return;
@@ -293,11 +306,10 @@ async function experimentsPage(id, signal, ticket) {
   if (!selected) { notice("Experiment not found."); return; }
   heading.textContent = selected.title;
   const actions = el("div", "detail-actions");
-  actions.append(categoryTag(selected.category), el("span", "muted", `Stage 1 · saved status: ${statusLabel(selected.status)}`));
+  actions.append(categoryTag(selected.category), el("span", "muted", `${selected.campaign} · saved status: ${statusLabel(selected.status)}`));
   content.append(actions);
-  const context = el("div", "campaign-context");
-  context.append(el("p", "", "The project began with Modal trials and moved to CloudRift after the compute grant. These records cover training, setup checks, applied fixes and pilot branches—not independent proof of improvement."), link("Read the stage history →", "#writing/first-campaign"));
-  content.append(context);
+  const historyContext = experimentHistoryContext(selected.campaign);
+  if (historyContext) content.append(historyContext);
   if (selected.scope_note) content.append(el("p", "scope-note", selected.scope_note));
   content.append(panel("Intent", selected.intent), panel("Conclusion", selected.conclusion));
   const details = el("details", "experiment-notes"); details.append(el("summary", "", "Change, limitations and recorded decision"));
@@ -427,7 +439,7 @@ async function lineagePage(focus,signal,ticket) {
   if(focus)selectExperiment(focus);
 }
 function eventTitle(event,index) {
-  if(event.source==="kernel_subcalls")return "Child assignments and responses";
+  if(event.source==="rlm_child_calls"||event.source==="kernel_subcalls")return "Child assignments and responses";
   if(event.source==="kernel_child_progress")return "Child progress";
   const role=event.role||"event";
   if(role==="system")return "System instructions";
@@ -445,6 +457,23 @@ function readableChildText(value) {
   if (Array.isArray(value)) return value.filter(part=>part?.type === "text").map(part=>part.text).join("\n") || null;
   return null;
 }
+function tokenUsageLabel(usage, token_limits) {
+  const prompt = usage?.prompt_tokens;
+  const completion = usage?.completion_tokens;
+  const output = completion;
+  const total = usage?.total_tokens;
+  const contextUsed = prompt != null && completion != null ? prompt + completion : total;
+  const outputLimit = token_limits?.output_tokens;
+  const contextLimit = token_limits?.context_tokens;
+  const limitText = (entry) => {
+    if (entry?.limit == null) return "Unknown";
+    const label = entry.source?.startsWith("request.") && entry.source !== "request.model_context_tokens" ? "requested" : entry.source?.includes("effective") ? "effective" : "recorded";
+    return `${entry.limit.toLocaleString()} (${label})`;
+  };
+  const outputText = output == null ? "Unknown" : output.toLocaleString();
+  const contextText = contextUsed == null ? "Unknown" : contextUsed.toLocaleString();
+  return el("p", "muted", `Output used/cap: ${outputText} / ${limitText(outputLimit)} · Context used/window: ${contextText} / ${limitText(contextLimit)}`);
+}
 function renderChildCalls(records,parent) {
   parent.append(el("p","muted","Recorded child calls. Their placement here does not establish which root turn invoked them."));
   for (const [i,child] of records.entries()) {
@@ -455,6 +484,8 @@ function renderChildCalls(records,parent) {
     summary.textContent=[child.status,choices[0]?.finish_reason,typeof child.elapsed_seconds==="number"?`${child.elapsed_seconds.toFixed(1)} seconds`:null].filter(Boolean).join(" · ");section.append(summary);
     const assignment=readableChildText(child.prompt||child.assignment||child.input) || (child.request?.messages||[]).filter(m=>m.role==="user").map(m=>readableChildText(m.content)).filter(Boolean).join("\n\n");
     const response=readableChildText(child.response||child.output);
+    const usage = child.response?.usage || child.usage;
+    section.append(tokenUsageLabel(usage, child.token_limits));
     const assignmentPanel=panel("Assignment");
     assignmentPanel.append(el("div","child-assignment-text",assignment||"Assignment text not recorded"));
     section.append(assignmentPanel,panel("Response",response||"Response text not recorded"));
@@ -465,7 +496,7 @@ function renderChildCalls(records,parent) {
 function renderTurnTimeline(events,parent) {
   const groups=[];let current=null;
   for(const event of events) {
-    if(event.source==="kernel_child_progress"||event.source==="kernel_subcalls")continue;
+    if(event.source==="kernel_child_progress"||event.source==="kernel_subcalls"||event.source==="rlm_child_calls")continue;
     if(event.role==="assistant") {current={assistant:event,observations:[]};groups.push(current);}
     else if(current)current.observations.push(event);
     else {const context=el("details","timeline-context");context.append(el("summary","",event.role==="system"?"System instructions":"Initial request"));renderEvents([event],context,{expanded:true});parent.append(context);}
@@ -476,7 +507,8 @@ function renderTurnTimeline(events,parent) {
     if(group.observations.length){const observations=el("details","turn-observations");observations.append(el("summary","",`Observations · ${group.observations.length}`));renderEvents(group.observations,observations,{expanded:true});turn.append(observations);}
     parent.append(turn);
   }
-  const children=events.filter(event=>event.source==="kernel_subcalls");
+  const childSource = events.some(event => event.source === "rlm_child_calls") ? "rlm_child_calls" : "kernel_subcalls";
+  const children=events.filter(event=>event.source===childSource);
   if(children.length){const section=el("details","timeline-context");section.append(el("summary","","Child assignments and responses"));for(const event of children)renderChildCalls(event.records||[],section);parent.append(section);}
 }
 
@@ -485,7 +517,9 @@ function renderEvents(events,parent,{expanded=false}={}) {
     const role=event.role||"child";
     const node=el("article","event trace-event role-"+role);
     const title=el("div","event-head");title.append(el("span","event-label",`${event.index == null ? "" : "#"+(event.index+1)+" · "}${eventTitle(event,position)}`));
-    if(event.usage)title.append(el("span","muted",`in ${event.usage.prompt_tokens??"—"} · out ${event.usage.completion_tokens??"—"}`));node.append(title);
+    if(event.usage)title.append(el("span","muted",`in ${event.usage.prompt_tokens??"—"} · out ${event.usage.completion_tokens??"—"}`));
+    if(role==="assistant")title.append(tokenUsageLabel(event.usage,event.token_limits));
+    node.append(title);
     if(event.source==="kernel_child_progress") {
       const latest=new Map();for(const record of event.records||[])latest.set(record.call_id,record);
       for(const record of latest.values())node.append(el("p","muted",`${statusLabel(record.stage)} · ${record.completion_tokens ?? "—"} generated tokens · ${typeof record.elapsed_seconds === "number" ? record.elapsed_seconds.toFixed(1)+" seconds" : "Duration unavailable"}`));

@@ -198,4 +198,9 @@ async def test_model_call_budget_stops_before_second_dispatch():
     assert record["error_class"] == "budget"
     assert len(client.calls) == 1
     assert len(record["events"]) == 1
+    assert record["events"][0]["request"]["max_tokens"] == 8192
+    assert record["events"][0]["token_limits"] == {
+        "output_tokens": {"limit": 8192, "source": "request.max_tokens"},
+        "context_tokens": {"limit": None, "source": None},
+    }
     assert runtime.root.backend.stopped

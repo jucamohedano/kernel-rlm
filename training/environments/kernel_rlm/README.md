@@ -540,7 +540,7 @@ without an optimizer, run from this directory:
 - Root and child use the same intercepted client and model. No second model is loaded.
 - Overall deadline: 780 seconds, including inference startup (at most 420 seconds).
 - Full child prompts, replies, usage, errors, and latency are saved in
-  `trace.info.kernel_subcalls` and displayed in a closed dashboard section.
+  `trace.info.rlm_child_calls` and displayed in a closed dashboard section.
 
 The child returns focused text that can include a code fragment and explanation.
 The root stores the reply in the REPL and should inspect only the required parts.
