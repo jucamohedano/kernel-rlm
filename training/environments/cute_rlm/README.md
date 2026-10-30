@@ -80,14 +80,15 @@ unsupported rather than silently changed. `preserve` mode keeps the reference's
 training flag; `eval` mode is an explicit configuration choice. No tolerance is
 chosen by this package. Both are required fields in the verifier configuration.
 Nested outputs, changed inputs and changed state are checked separately. CUDA event
-timing measures the forward call, after state/input reset and warmup. A device-wide
-synchronization precedes the end event so work on other streams is not omitted;
-this includes synchronization overhead and is not a pure single-kernel latency.
+timing measures the forward call, after state/input reset and warmup. The end event is recorded directly after forward, then the device is synchronized.
+The timed forward must join any other streams back to the caller stream; validate
+that contract with the GPU trace before interpreting timing.
 Compile/setup and process wall time are reported separately. Validate this timing
 protocol on the target GPU before interpreting a speedup. This is
 final-submission verification, not a model-visible intermediate test tool.
 
-The GPU worker code is implemented, but its CuTe/driver execution is unvalidated.
+The GPU worker has passed a generic addition smoke on RTX PRO 6000 with CUDA
+13.3 and CuTe DSL 4.8.1. This does not validate every cudaLLM reference or candidate.
 GPU dependencies (Torch/CUTLASS/CuTe and the matching compiler/driver) belong in the
 later GPU worker image, not the CPU test environment. Warmup and timing settings,
 input placement, module modes, state-key constraints and tolerance choices are all
@@ -123,3 +124,83 @@ for those explicit checks, not executed during CPU preparation.
 Run CPU checks from the project root with `make check`. No existing OOLONG evidence
 or active VM is changed by this package. Track #21 (execution/budgets) and #24
 (model-first CuTe baseline); this branch is stacked on #28 and #27.
+
+## Explicit launch wiring
+
+The scored host entry point is `python -m cute_rlm.launch RUN_DIRECTORY --base-url
+URL --receipt GPU_RECEIPT --sandbox-spec SPEC --observer-root EVIDENCE_DIRECTORY`.
+It does not start the serving process itself. It verifies the attached `/models`
+record against the protected startup evidence before sending scored requests.
+
+The current target is **RTX PRO 6000 Blackwell with the CUDA 13.3 toolkit**. A
+CUDA version printed by `nvidia-smi` is driver capability, not proof that the 13.3
+toolkit and compiler are installed. Pin actual `nvcc`, Torch, CuTe and driver
+versions in the later GPU receipt.
+
+`sandbox.SandboxSpec` describes explicit read-only runtime mounts and GPU device
+nodes. The namespace starts with no host root, no network and no inherited secret
+environment. REPL workers receive only their Unix broker socket and allowlisted
+rollout/time settings, with no GPU. Reference and candidate phases get separate
+writable output mounts; candidate inputs contain no reference outputs. Validate
+actual Python/library paths, namespace support and device permissions on the VM.
+A live VM smoke checked hidden host files, absent REPL GPU devices, a Unix broker
+round trip and persistent Python state. Reference/candidate phases also passed a
+CuTe addition smoke. These checks do not establish resistance to every malicious
+candidate or certify all task/runtime combinations.
+
+`compile_trace` retains exact PTX/CUBIN artifacts and records compiled-call NVTX
+ranges during an extra profile pass. `NsightObserver` requires matching artifact
+hashes, PTX entry symbols and CUPTI launch correlations within the exact forward
+and compiled-call ranges. CUDA activity alone is not CuTe compiler provenance.
+The profile runs in an isolated namespace and is copied to host evidence afterward;
+these are observational records, **not tamper-proof attestation** against malicious
+Python that replaces instrumentation. Numerical results and timings come from a
+fresh unprofiled process. The integrated capture passed the generic addition smoke on the actual VM.
+Readiness for a scored run still needs its exact task/config/document bundle and
+operator-reviewed evidence receipt. Traced probe timings are never scored.
+
+
+Example sandbox shape (replace all paths after inspecting the actual VM):
+
+```json
+{
+  "bwrap": "/usr/bin/bwrap",
+  "runtime_python": "/opt/cute-worker/bin/python",
+  "readonly_bindings": [
+    {"source": "/usr", "target": "/usr"},
+    {"source": "/lib", "target": "/lib"},
+    {"source": "/lib64", "target": "/lib64"},
+    {"source": "/opt/cute-worker", "target": "/opt/cute-worker"},
+    {"source": "/opt/eval-worker-modules", "target": "/runtime/python"}
+  ],
+  "gpu_devices": [{"source": "/dev/nvidia0", "target": "/dev/nvidia0"}],
+  "observer_root": "/opt/protected-captures",
+  "nsys_binary": "/opt/nvidia/nsight-systems/2026.1.3/target-linux-x64/nsys",
+  "privileged_setup": true,
+  "sandbox_uid": 1000,
+  "sandbox_gid": 1000
+}
+```
+
+Keep the Python environment at the same path inside the namespace so venv and
+shared-library resolution are preserved. Mount only code/runtime trees, not the
+project's run directory, home directory, model secrets, or protected captures.
+List every required allocated NVIDIA device and library explicitly after VM
+inspection. The example is not a validated launch specification.
+
+The tested VM requires privileged namespace setup. `sudo` runs only bubblewrap's
+mount/namespace setup; `setpriv` drops to the configured non-root UID/GID, removes
+capabilities and sets no-new-privs before Python starts. The live spec also binds
+`/bin`, small read-only account/loader files, the installed Nsight runtime and
+read-only `/sys/devices/system`, `/sys/module/nvidia` and `/sys/module/nvidia_uvm`
+metadata. `/tmp` and `/dev/shm` are private writable mounts. These paths were needed
+for the Nsight helper; do not replace them with a broad host-root/home mount.
+
+Live serving capacity: the 262,144-token model window started successfully, with
+477,395 tokens of reported KV cache (1.82 full-window requests). Two simultaneous
+238,051-token prompts completed with matching tokenizer usage and selected-token
+logprobs. That is not a guarantee that two full 262k prompts plus arbitrary output
+fit at once. Queue/preemption and memory pressure must stay visible during eval.
+Torch is `2.13.0+cu130` (built with CUDA 13.0); the toolkit compiler is CUDA
+13.3.73 and the 610.57.04 compatibility library is used over kernel driver
+580.159.03. Preserve those distinctions in the run record.

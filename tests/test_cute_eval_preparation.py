@@ -54,8 +54,8 @@ def test_gpu_receipt_must_bind_observed_checks_to_frozen_inputs():
         "config_sha256": cfg.sha256(),
         "manifest_sha256": "manifest",
         "observed_context_tokens": 262144,
-        "hardware": {"gpu": "observed"},
-        "software": {"vllm": "observed"},
+        "hardware": {"gpu_model": cfg.gpu_model},
+        "software": {"cuda_toolkit_version": cfg.cuda_toolkit_version},
         "checks": {
             key: {"status": "passed", "evidence": "receipt:" + key} for key in REQUIRED_GPU_CHECKS
         },

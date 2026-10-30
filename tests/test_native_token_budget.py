@@ -269,3 +269,112 @@ async def test_predispatch_journal_error_does_not_charge_or_send_request():
         await runtime.request(session, [], "m", plain=False)
     assert runtime.generated_budget.outstanding == 0
     assert runtime.calls == 0 and not client.payloads
+
+
+@pytest.mark.asyncio
+async def test_child_waits_for_parent_unused_reservation_without_spending_inference_slot():
+    parent_started = asyncio.Event()
+    release_parent = asyncio.Event()
+    dispatched = []
+
+    class Client:
+        async def post(self, endpoint, *, json):
+            dispatched.append(json["messages"][0]["content"])
+            if dispatched[-1] == "parent":
+                parent_started.set()
+                await release_parent.wait()
+            return FakeResponse(
+                {"usage": {"prompt_tokens": 20, "completion_tokens": 10}, "choices": []}
+            )
+
+    async def count(payload):
+        return 20
+
+    runtime = NativeRuntime(
+        Client(),
+        "m",
+        object(),
+        budget_policy=ContextBudgetPolicy(
+            server_context_tokens=100, max_generated_tokens=50, logprobs=False
+        ),
+        prompt_counter=count,
+    )
+    runtime.deadline = time.monotonic() + 5
+
+    def session(name):
+        return SimpleNamespace(
+            id=name,
+            parent=None,
+            depth=0,
+            origin={},
+            current_action={},
+            record={"events": []},
+            requests=set(),
+            accepting=True,
+        )
+
+    parent = asyncio.create_task(
+        runtime.request(session("p"), [{"role": "user", "content": "parent"}], "m", plain=False)
+    )
+    await parent_started.wait()
+    child = asyncio.create_task(
+        runtime.request(session("c"), [{"role": "user", "content": "child"}], "m", plain=True)
+    )
+    await asyncio.sleep(0)
+    assert not child.done()
+    assert dispatched == ["parent"]
+    release_parent.set()
+    await asyncio.gather(parent, child)
+    assert dispatched == ["parent", "child"]
+    assert runtime.generated_budget.used == 20
+
+
+@pytest.mark.asyncio
+async def test_reserved_waiter_wakes_and_fails_closed_after_owner_error():
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = []
+
+    class Client:
+        async def post(self, endpoint, *, json):
+            calls.append(json)
+            started.set()
+            await release.wait()
+            raise OSError("transport failed after dispatch")
+
+    async def count(payload):
+        return 20
+
+    runtime = NativeRuntime(
+        Client(),
+        "m",
+        object(),
+        budget_policy=ContextBudgetPolicy(
+            server_context_tokens=100, max_generated_tokens=50, logprobs=False
+        ),
+        prompt_counter=count,
+    )
+    runtime.deadline = time.monotonic() + 3
+
+    def s(name):
+        return SimpleNamespace(
+            id=name,
+            parent=None,
+            depth=0,
+            origin={},
+            current_action={},
+            record={"events": []},
+            requests=set(),
+            accepting=True,
+        )
+
+    first = asyncio.create_task(runtime.request(s("first"), [], "m", plain=True))
+    await started.wait()
+    second = asyncio.create_task(runtime.request(s("second"), [], "m", plain=True))
+    await asyncio.sleep(0)
+    release.set()
+    results = await asyncio.gather(first, second, return_exceptions=True)
+    assert isinstance(results[0], OSError)
+    assert isinstance(results[1], RuntimeError)
+    assert "incomplete" in str(results[1])
+    assert len(calls) == 1
