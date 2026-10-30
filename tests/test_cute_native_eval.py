@@ -12,6 +12,7 @@ import pytest
 from aiohttp import web
 from cute_rlm.config import DATASET_ID, DATASET_REVISION, REQUIRED_GPU_CHECKS, EvalConfig
 from cute_rlm.evaluate import evaluate_prepared, isolated_backend_factory, prepare
+from cute_rlm.prompts import CUTE_SYSTEM_PROMPT, first_user_message
 
 
 @pytest.mark.asyncio
@@ -104,6 +105,7 @@ async def test_cpu_scripted_native_tree_records_caps_logprobs_and_verification(
         user = next(
             message["content"] for message in payload["messages"] if message["role"] == "user"
         )
+        assert payload["messages"][0]["content"] == CUTE_SYSTEM_PROMPT
         if user == "child":
             code = (
                 "assert read_doc('cute')['excerpt']; "
@@ -111,6 +113,7 @@ async def test_cpu_scripted_native_tree_records_caps_logprobs_and_verification(
                 "answer['content']='child-ok'; answer['ready']=True"
             )
         else:
+            assert user == first_user_message(task, config)
             code = (
                 "assert context['reference_code'] == '# reference specification only'; "
                 "assert read_doc('cute')['excerpt']; import os; assert 'DO_NOT_INHERIT_API_KEY' not in os.environ; "
@@ -178,6 +181,13 @@ async def test_cpu_scripted_native_tree_records_caps_logprobs_and_verification(
                 "detail": "scripted compiler diagnostic; no GPU execution",
             }
 
+    # Dispatch must use the frozen rendered messages, not live module defaults.
+    monkeypatch.setattr("cute_rlm.evaluate.CUTE_SYSTEM_PROMPT", "changed after preparation")
+
+    def forbidden_render(*args):
+        pytest.fail("execution must not re-render captured first-user messages")
+
+    monkeypatch.setattr("cute_rlm.evaluate.first_user_message", forbidden_render)
     monkeypatch.setattr("cute_rlm.feedback.CompileFeedback", ScriptedFeedback)
     monkeypatch.setattr("cute_rlm.verifier.verify_submission", fake_verify)
     monkeypatch.setenv("DO_NOT_INHERIT_API_KEY", "secret")
