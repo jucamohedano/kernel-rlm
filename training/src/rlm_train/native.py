@@ -17,6 +17,7 @@ from typing import Any
 from rlm_train.proxy import ClientHandle, SubLLMProxy
 from rlm_train.repl.base import ReplBackend
 from rlm_train.repl.subprocess import SubprocessReplBackend
+from rlm_train.token_budget import ContextBudgetPolicy, GeneratedTokenBudget, VllmPromptCounter
 
 TOOL = {
     "type": "function",
@@ -66,33 +67,33 @@ class NativeCleanupError(RuntimeError):
 @dataclass(frozen=True)
 class NativeLimits:
     max_depth: int = 2
-    max_turns: int = 32
+    max_turns: int | None = 32
     max_tokens: int = 8192
     child_max_tokens: int = 4096
-    max_children: int = 32
+    max_children: int | None = 32
     max_live_children: int = 8
     max_concurrent_requests: int = 2
-    max_model_calls: int = 256
+    max_model_calls: int | None = 256
     request_timeout: float = 600
     episode_timeout: float = 1800
-    max_prompt_chars: int = 65536
+    max_prompt_chars: int | None = 65536
 
     def __post_init__(self):
         for name in (
             "max_depth",
-            "max_turns",
             "max_tokens",
             "child_max_tokens",
             "max_live_children",
             "max_concurrent_requests",
-            "max_model_calls",
-            "max_prompt_chars",
         ):
             value = getattr(self, name)
             if type(value) is not int or value <= 0:
                 raise ValueError(f"{name} must be a positive integer")
-        if type(self.max_children) is not int or self.max_children < 0:
-            raise ValueError("max_children must be a nonnegative integer")
+        for name in ("max_turns", "max_model_calls", "max_children", "max_prompt_chars"):
+            value = getattr(self, name)
+            minimum = 0 if name == "max_children" else 1
+            if value is not None and (type(value) is not int or value < minimum):
+                raise ValueError(f"{name} must be an integer >= {minimum}, or None")
         for name in ("request_timeout", "episode_timeout"):
             value = getattr(self, name)
             if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
@@ -128,7 +129,10 @@ class _PlainClient:
             copy.deepcopy(m) if isinstance(m, dict) else m.model_dump(exclude_none=True)
             for m in prompt
         ]
-        if len(json.dumps(messages, ensure_ascii=False)) > self.runtime.limits.max_prompt_chars:
+        if (
+            self.runtime.limits.max_prompt_chars is not None
+            and len(json.dumps(messages, ensure_ascii=False)) > self.runtime.limits.max_prompt_chars
+        ):
             raise NativeBudgetError("plain prompt exceeds max_prompt_chars")
         event = await self.runtime.request(self.session, messages, model, plain=True)
         content = self.runtime.plain_answer(event["response"])
@@ -215,8 +219,26 @@ class NativeRuntime:
         enable_thinking: bool = True,
         event_path: Path | None = None,
         episode_id: str | None = None,
+        budget_policy: ContextBudgetPolicy | None = None,
+        prompt_counter: Callable[[dict[str, Any]], Any] | None = None,
+        bootstrap_code: str = "",
+        system_prompt: str = SYSTEM_PROMPT,
     ):
         self.client, self.model, self.proxy = client, model, proxy
+        if (
+            isinstance(prompt_counter, VllmPromptCounter)
+            and budget_policy is not None
+            and prompt_counter.model_context != budget_policy.server_context_tokens
+        ):
+            raise ValueError("prompt_counter model_context must match server_context_tokens")
+        if not isinstance(bootstrap_code, str) or not isinstance(system_prompt, str):
+            raise TypeError("bootstrap_code and system_prompt must be strings")
+        self.bootstrap_code, self.system_prompt = bootstrap_code, system_prompt
+        if budget_policy is not None and prompt_counter is None:
+            raise ValueError("budget_policy requires an async prompt_counter")
+        self.budget_policy = budget_policy
+        self.prompt_counter = prompt_counter
+        self.generated_budget = GeneratedTokenBudget(budget_policy) if budget_policy else None
         self.limits = limits or NativeLimits()
         self.backend_factory, self.enable_thinking = backend_factory, enable_thinking
         self.event_path = Path(event_path) if event_path is not None else None
@@ -313,11 +335,13 @@ class NativeRuntime:
         parent = self.sessions.get(owner)
         if self.closed or parent is None or not parent.accepting:
             raise RuntimeError("parent session is finalizing or closed")
-        if not isinstance(prompt, str) or len(prompt) > self.limits.max_prompt_chars:
+        if not isinstance(prompt, str) or (
+            self.limits.max_prompt_chars is not None and len(prompt) > self.limits.max_prompt_chars
+        ):
             raise ValueError("child prompt must be text within max_prompt_chars")
         if model is not None and (not isinstance(model, str) or not model):
             raise ValueError("model must be a nonempty string")
-        if self.children >= self.limits.max_children:
+        if self.limits.max_children is not None and self.children >= self.limits.max_children:
             raise NativeBudgetError("episode child admission budget exhausted")
         live = sum(s.parent is not None and not s.task.done() for s in self.sessions.values())
         if live >= self.limits.max_live_children:
@@ -419,11 +443,14 @@ class NativeRuntime:
         )
         await session.backend.start(self.proxy.url, session.id, depth=session.depth)
         await session.backend.load_context(session.context)
+        if self.bootstrap_code:
+            await session.backend.bootstrap(self.bootstrap_code)
         session.messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": session.prompt},
         ]
-        for turn in range(self.limits.max_turns):
+        turn = 0
+        while self.limits.max_turns is None or turn < self.limits.max_turns:
             event = await self.request(session, session.messages, session.model, plain=False)
             event["turn"] = turn
             choice = event["response"]["choices"][0]
@@ -455,13 +482,16 @@ class NativeRuntime:
                     "tool_call_id": call.get("id"),
                 }
                 await session.backend.update_history(session.messages)
+                repl_started = time.monotonic()
                 result = await session.backend.execute(arguments["code"])
+                repl_elapsed = time.monotonic() - repl_started
                 action = {
                     "code": arguments["code"],
                     "tool_call_id": call.get("id"),
                     "stdout": result.stdout,
                     "stderr": result.stderr,
                     "final_answer": result.final_answer,
+                    "elapsed_seconds": repl_elapsed,
                 }
                 event.setdefault("actions", []).append(action)
                 self.log("action_executed", session, call_id=event["call_id"], action=action)
@@ -477,6 +507,7 @@ class NativeRuntime:
                 if result.final_answer is not None:
                     session.record["final_answer"] = result.final_answer
                     return
+            turn += 1
         raise NativeBudgetError("turn limit reached without explicit final answer")
 
     @staticmethod
@@ -493,35 +524,58 @@ class NativeRuntime:
         return content
 
     async def request(self, session: _Session, messages: list, model: str, *, plain: bool):
-        remaining = self.deadline - time.monotonic()
+        started = time.monotonic()
+        budget = self.generated_budget
+        remaining = self.deadline - started
         if remaining <= 0:
             raise NativeBudgetError("episode deadline exceeded")
-        # One request permit, never held across Python execution or child waits.
         async with asyncio.timeout(min(self.limits.request_timeout, remaining)):
             async with self.semaphore:
+                queued = time.monotonic() - started
                 if self.closed or not session.accepting:
                     raise RuntimeError("session is finalizing or closed")
-                if self.calls >= self.limits.max_model_calls:
-                    raise NativeBudgetError("episode model-call budget exhausted")
-                self.calls += 1
-                cap = (
-                    self.limits.child_max_tokens
-                    if plain or session.depth
-                    else self.limits.max_tokens
-                )
                 payload = {
                     "model": model,
                     "messages": copy.deepcopy(messages),
                     "temperature": 0,
                     "top_p": 1,
-                    "max_tokens": cap,
-                    "logprobs": False,
+                    "max_tokens": self.limits.child_max_tokens
+                    if plain or session.depth
+                    else self.limits.max_tokens,
+                    "logprobs": bool(self.budget_policy and self.budget_policy.logprobs),
                     "chat_template_kwargs": {"enable_thinking": self.enable_thinking},
                 }
+                if payload["logprobs"]:
+                    payload.update(top_logprobs=0, return_tokens_as_token_ids=True)
                 if not plain:
                     payload.update(tools=[copy.deepcopy(TOOL)], tool_choice="auto")
-                event = {
-                    "call_id": uuid.uuid4().hex,
+                prompt_tokens = None
+                count_started = time.monotonic()
+                if self.budget_policy:
+                    assert self.prompt_counter is not None
+                    prompt_tokens = await self.prompt_counter(payload)
+                    if type(prompt_tokens) is not int or prompt_tokens < 0:
+                        raise NativeProtocolError("prompt counter returned no valid token count")
+                count_elapsed = time.monotonic() - count_started
+                # Tokenization yielded: recheck admission before reserving or dispatching.
+                if self.closed or not session.accepting:
+                    raise RuntimeError("session is finalizing or closed")
+                if (
+                    self.limits.max_model_calls is not None
+                    and self.calls >= self.limits.max_model_calls
+                ):
+                    raise NativeBudgetError("episode model-call budget exhausted")
+                call_id = uuid.uuid4().hex
+                reservation = None
+                if budget:
+                    assert prompt_tokens is not None
+                    try:
+                        reservation = budget.reserve(call_id, prompt_tokens)
+                    except RuntimeError as error:
+                        raise NativeBudgetError(str(error)) from error
+                    payload["max_tokens"] = reservation
+                event: dict[str, Any] = {
+                    "call_id": call_id,
                     "branch": "plain" if plain else ("child" if session.parent else "root"),
                     "episode_id": self.episode_id,
                     "session_id": session.id,
@@ -531,22 +585,100 @@ class NativeRuntime:
                     "caller_action": copy.deepcopy(session.current_action),
                     "request": payload,
                     "token_limits": {
-                        "output_tokens": {"limit": cap, "source": "request.max_tokens"},
-                        "context_tokens": {"limit": None, "source": None},
+                        "output_tokens": {
+                            "limit": payload["max_tokens"],
+                            "source": "request.max_tokens",
+                        },
+                        "context_tokens": {
+                            "limit": self.budget_policy.server_context_tokens
+                            if self.budget_policy
+                            else None,
+                            "source": "tokenize.max_model_len" if self.budget_policy else None,
+                        },
                     },
+                    "rendered_prompt_tokens": prompt_tokens,
+                    "timing": {"queue_wait_s": queued, "tokenize_elapsed_s": count_elapsed},
                 }
+                if budget:
+                    assert reservation is not None
+                    event["budget"] = {
+                        "used_before": budget.used,
+                        "outstanding_before": budget.outstanding - reservation,
+                        "reserved_tokens": reservation,
+                        "generated_limit": budget.policy.max_generated_tokens,
+                    }
+                try:
+                    self.log("request_started", session, call=event)
+                except BaseException:
+                    if reservation is not None:
+                        assert budget is not None
+                        budget.release_undispatched(call_id)
+                    raise
                 session.record["events"].append(event)
-                self.log("request_started", session, call=event)
-                # Track the actual request, not its owning session/broker handler task.
+                self.calls += 1
+                dispatched = time.monotonic()
                 request = asyncio.create_task(self.client.post("chat/completions", json=payload))
                 session.requests.add(request)
+                settled = False
                 try:
                     response = await request
+                    event["timing"]["http_elapsed_s"] = time.monotonic() - dispatched
                     response.raise_for_status()
                     event["response"] = response.json()
+                    usage = event["response"].get("usage")
+                    if reservation is not None:
+                        assert budget is not None
+                        actual, _ = budget.settle(call_id, usage)
+                        settled = True
+                        event["budget"].update(
+                            used_tokens=actual,
+                            used_after=budget.used,
+                            outstanding_after=budget.outstanding,
+                            incomplete=budget.incomplete,
+                        )
+                        if actual is None:
+                            raise NativeBudgetError(
+                                "reported generation usage is missing or invalid; budget closed"
+                            )
+                        observed = usage.get("prompt_tokens")
+                        event["prompt_count_matches"] = observed == prompt_tokens
+                        if observed != prompt_tokens:
+                            budget.incomplete = True
+                            raise NativeProtocolError(
+                                "rendered prompt count differs from reported prompt usage"
+                            )
+                    if payload["logprobs"]:
+                        choices = event["response"].get("choices") or []
+                        logprobs = choices[0].get("logprobs") if choices else None
+                        selected = logprobs.get("content") if isinstance(logprobs, dict) else None
+                        event["selected_logprob_tokens"] = (
+                            len(selected) if isinstance(selected, list) else None
+                        )
+                        if not isinstance(selected, list) or not selected:
+                            raise NativeProtocolError(
+                                "selected token log probabilities were not returned"
+                            )
+                        event["logprob_coverage"] = {
+                            "returned_tokens": len(selected),
+                            "completion_tokens": usage.get("completion_tokens")
+                            if isinstance(usage, dict)
+                            else None,
+                            "scope": "provider selected-token entries; reasoning coverage is not inferred",
+                        }
+                    event["timing"]["request_elapsed_s"] = time.monotonic() - started
                     self.log("request_finished", session, call=event)
                     return event
                 except BaseException as error:
+                    if reservation is not None and not settled:
+                        assert budget is not None
+                        budget.retain_uncertain(call_id)
+                        event["budget"].update(
+                            used_tokens=None, retained_uncertain=reservation, incomplete=True
+                        )
+                    event["timing"].update(
+                        http_elapsed_s=time.monotonic() - dispatched,
+                        request_elapsed_s=time.monotonic() - started,
+                    )
                     event["error"] = repr(error)
                     self.log("request_failed", session, call=event)
                     raise
