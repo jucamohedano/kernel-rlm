@@ -4,7 +4,7 @@ import ast
 
 import pytest
 from cute_rlm.config import EvalConfig
-from cute_rlm.prompts import CUTE_SYSTEM_PROMPT, first_user_message
+from cute_rlm.prompts import CUTE_SYSTEM_PROMPT, ORCHESTRATOR_ADDENDUM, first_user_message
 
 
 @pytest.mark.parametrize("max_turns", [20, None])
@@ -71,18 +71,16 @@ def test_task_prompt_inspects_reference_and_indexed_resources_once(max_turns, ca
     assert capsys.readouterr().out.splitlines() == [
         str(inventory),
         reference,
-        *(
-            f"{key} {resources[key]}"
-            for key in ("target", "validation", "limits", "example_index", "api_notes")
-        ),
+        str(resources["target"]),
+        str(resources["example_index"]),
     ]
     assert 'resources["examples"]' in rendered and 'resources["helper_help"]' in rendered
 
 
 def test_prompt_compile_action_calls_injected_helper_once_and_keeps_feedback(capsys):
-    action = CUTE_SYSTEM_PROMPT.split("Run this native REPL action early enough to repair:\n", 1)[
-        1
-    ].split("\n\n", 1)[0]
+    action = next(
+        line for line in CUTE_SYSTEM_PROMPT.splitlines() if line.startswith("feedback = ")
+    )
     calls = []
     feedback = {"status": "compiled", "detail": "forward/synchronize smoke"}
 
@@ -106,8 +104,9 @@ def test_prompt_compile_action_calls_injected_helper_once_and_keeps_feedback(cap
 
 
 def test_system_finalizer_submits_the_stored_complete_source():
-    final_section = CUTE_SYSTEM_PROMPT.split("even if uncertain:\n", 1)[1]
-    finalizer = final_section.split("\nSetting ready", 1)[0]
+    assert CUTE_SYSTEM_PROMPT.endswith(ORCHESTRATOR_ADDENDUM)
+    final_section = CUTE_SYSTEM_PROMPT.split("or on the final turn:\n", 1)[1]
+    finalizer = final_section.split("\n\n", 1)[0]
     namespace = {"answer": {"content": "", "ready": False}, "best_source": "class ModelNew: pass"}
     exec(finalizer, namespace)
     assert namespace["answer"] == {"content": namespace["best_source"], "ready": True}

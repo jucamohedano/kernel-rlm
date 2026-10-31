@@ -94,7 +94,6 @@ async def test_documented_complete_model_repair_uses_child_repl_and_trusted_task
                 return (
                     f"best_source = {bad_source!r}\n"
                     "root_only = 'not inherited'\n"
-                    "contract = ['Preserve Model forward(a,b)', 'CuTe numerical addition']\n"
                     "feedback = compile_candidate(best_source)\n"
                     "assert feedback['error_type'] == 'ModuleNotFoundError'\n"
                     "assert not answer['ready']"
@@ -105,8 +104,6 @@ async def test_documented_complete_model_repair_uses_child_repl_and_trusted_task
                 "assert not answer['ready'] and root_only == 'not inherited'\n"
                 "assert 'child_only' not in SHOW_VARS()\n"
                 "assert len(child_report['checks']) == 2\n"
-                "assert all(check['correct'] is None and check['cute_verified'] is None "
-                "for check in child_report['checks'])\n"
                 "assert child_report['checks'][0]['error_type'] == 'ModuleNotFoundError'\n"
                 "if child_report['checks'][-1]['status'] == 'compiled':\n"
                 "    best_source = child_source\n"
@@ -114,6 +111,7 @@ async def test_documented_complete_model_repair_uses_child_repl_and_trusted_task
                 "answer['ready'] = True"
             )
         delegated = json.loads(prompt.split("\nREQUEST_JSON:\n", 1)[1])
+        assert set(delegated) == {"reference_code", "candidate_source", "last_feedback"}
         assert delegated["reference_code"] == reference
         assert delegated["candidate_source"] == bad_source
         assert delegated["last_feedback"]["error_type"] == "ModuleNotFoundError"
@@ -121,7 +119,7 @@ async def test_documented_complete_model_repair_uses_child_repl_and_trusted_task
         child_turns += 1
         if child_turns == 1:
             return (
-                "import ast, json\n"
+                "import json\n"
                 "assert isinstance(context, str) and 'root_only' not in SHOW_VARS()\n"
                 "assert 'best_source' not in SHOW_VARS() and 'feedback' not in SHOW_VARS()\n"
                 "assert callable(compile_candidate) and callable(search_docs) and callable(read_doc)\n"
@@ -144,11 +142,8 @@ async def test_documented_complete_model_repair_uses_child_repl_and_trusted_task
         return (
             "assert child_only == 'persistent child state' and len(checks) == 1\n"
             "best_source = best_source.replace('import cute', 'import cutlass.cute as cute')\n"
-            "ast.parse(best_source)\n"
             "checks.append(compile_candidate(best_source))\n"
-            "answer['content'] = json.dumps({'source': best_source, 'checks': checks, "
-            "'changes': ['Use indexed CuTe import path'], "
-            "'remaining_risks': ['No numerical or launch verification performed']})\n"
+            "answer['content'] = json.dumps({'source': best_source, 'checks': checks})\n"
             "answer['ready'] = True"
         )
 
@@ -204,6 +199,7 @@ async def test_documented_complete_model_repair_uses_child_repl_and_trusted_task
     assert child["depth"] == 1 and child["parent_session_id"] == record["session_id"]
     assert child["status"] == "completed"
     report = json.loads(child["final_answer"])
+    assert set(report) == {"source", "checks"}
     assert report["source"] == good_source
     assert [check["status"] for check in report["checks"]] == [
         "runtime_error",

@@ -59,146 +59,62 @@ The next-eval plan requests:
 
 ## Model interface and compile feedback
 
-The concise system prompt and first user message are defined in
-`cute_rlm/prompts.py`. The first action prints `SHOW_VARS()` for the actual
-session's helper inventory and signatures, then reads the authoritative reference
-and a small resource index. The model reads one relevant example section and
-starts a candidate. Its current diagnostic goal is a standalone CuTe `ModelNew`
-that passes compile/forward-smoke; reference behavior, constructor/forward
-signatures and the configured target remain requirements. There is no new lookup
-quota, early-check deadline or automatic submission. Keep the complete candidate
-in `best_source`; reserve the final turn for the two answer assignments.
+`cute_rlm/prompts.py` defines the model-facing guidance. The goal is a complete
+`ModelNew` using **Python CuTe DSL**, introduced in mid-2025 (`import cutlass.cute
+as cute`), not the older CUTLASS CuTe C++ API, that passes compile/forward smoke.
+This prompt change does not change the verifier, scoring, runtime or budgets.
 
-The only model tool is native `repl(code)`. `compile_candidate`, `search_docs`,
-`read_doc`, `SHOW_VARS` and `rlm_*` helpers are injected callables: call them
-directly inside the REPL, without importing or redefining them. `resources` and
-`resources["helper_help"]` are data dictionaries, not objects with helper methods.
-Delegation is optional.
+The only model tool is native `repl(code)`. Start with `SHOW_VARS()` for live helper
+signatures, the root's `context["reference_code"]`, target and example index.
+`compile_candidate`, `search_docs`, `read_doc` and `rlm_*` are injected callables:
+call them directly, without imports or redefinitions. `resources` and
+`resources["helper_help"]` contain data, not helper methods. Documentation reads
+return a dictionary; use its `excerpt` field.
 
-The shared `resources` dictionary is preloaded in root and recursive child REPLs:
-
-- `target`, `validation`, `limits`: allowlisted views of the captured config, not
-  hidden verifier inputs/outputs or a second source of settings. Limits are
-  configured ceilings, not live remaining balances.
-- `example_index`, `examples`: character-indexed, exact historical generic CuTe
-  addition source. NVIDIA's BSD-3-Clause notice is retained. That exact source
-  passed the separate L40S/SM89, CuTe 4.8.1 numerical/launch/timing fixture in
-  `20261030T200639Z-xs21-cute-l40s-detailed4`; its provenance records the source
-  and result hashes. This is not a benchmark task solution, a task-specific
-  implementation plan or readiness evidence for a new VM/dtype/layout/stream.
-- `api_notes`, `helper_help`: short launch/adaptation/source-inspection notes and
-  documented helper bounds and return schemas; `SHOW_VARS()` shows live signatures.
-  The indexed `imports` section shows the exact `cutlass.cute` import paths without
-  changing the verified example source.
-- `delegation_example`: executable root REPL code for a bounded complete-`ModelNew`
-  repair by a recursive child, followed by structured result collection and review.
-
-Preparation captures exact system/user messages and `.eval-inputs/resources.json`
-as hashed inputs; execution loads the captured bytes, not current defaults.
-The same generic resources are bootstrapped into children; their task context
-remains the delegated prompt string. Large examples stay in REPL variables rather
-than the initial prompt. Inspect the indexed sections instead of dumping a whole
-CLI example.
-
-Documentation search returns match-centered excerpts with `start`/`end` character
-offsets, not the first file header ranked by raw repetition. `read_doc` still
-returns a dictionary: use its `excerpt` and `more` fields; `chars` is 1..1600.
-These CPU changes require a new frozen run and target-VM checks. This contract
-clarification changes model-facing guidance and tool discovery, not verifier or
-scoring behavior. Historical prompts, inputs and results are not rewritten.
-
-The task is already in the root REPL as a Python dictionary. Start with
-`print(SHOW_VARS())` and `print(context["reference_code"])`; do not search the
-filesystem for the task.
-Use `search_docs(...)` and `read_doc(...)` for pinned CuTe documentation. The
-reasoning REPL has no GPU. Recursive children receive their supplied prompt as
-context, not the root dictionary; pass the needed task snippets explicitly.
-
-Keep a complete Python source string defining `ModelNew` in `best_source`.
-Inside the native REPL, call:
+Keep the complete candidate in `best_source`:
 
 ```python
 feedback = compile_candidate(best_source)
-# Feedback is automatically printed once; do not print it again.
-# Revise best_source and call compile_candidate again when useful.
 ```
 
-This host-backed helper runs the source in the configured isolated GPU worker.
-CuTe compiles lazily, so the check includes constructing the model, loading the
-reference initialization/state contract, one example forward and synchronization.
-It returns compiler/runtime diagnostics. It does **not** return reference outputs,
-compare numerical results, measure speed, or establish CuTe launch provenance.
-Each call and its source hash, owner session, diagnostics and duration are saved.
-The complete returned dictionary remains in REPL memory and host logs; the existing
-12,000-character tool-observation display limit is unchanged. Inspect selected
-fields or excerpts from the saved dictionary if a long diagnostic is truncated.
-
-There is **no feedback-call quota**. Repeat within the existing turn, token,
-REPL, worker and episode deadlines, including multiple checks in one REPL action.
-Checks are not final submissions and do not set `answer["ready"]`. Submit only
-when finished:
+The helper prints feedback once and returns the full dictionary. Repair reported
+errors and retry as needed within the existing budgets. `status="compiled"` is
+PASS for one isolated compile/forward/synchronize smoke, not a final submission.
+This helper does not compare numerical outputs or measure performance. Submit
+separately:
 
 ```python
 answer["content"] = best_source
 answer["ready"] = True
 ```
 
-With the 64-turn preset, the host warns before model turn **60/64**, counting
-turns from one. Warnings continue through turn 63 so the model can correct and
-submit before the last turn. On turn 64 it is told to submit immediately rather
-than start another check.
-The warning is guidance, not an automatic submission or an extra turn. The same
-rule applies to recursive REPL sessions. Generic callers without this CuTe hook
-keep their prior prompts and behavior. The historical two-feedback-call cap is
-not used. No old experiment snapshot or result is changed by this protocol.
-This feedback path is CPU-tested with scripted models/workers. Its new broker-to-GPU
-path still needs a target-VM smoke under a new frozen run before a model evaluation.
-The earlier generic GPU verifier precheck is not evidence that this new path ran.
+Captured `resources` are shared with children. `target`, `validation` and `limits`
+remain frozen config data; validation settings are not printed at startup.
+`example_index` and `examples` retain the exact generic addition asset, SHA and
+historical verification provenance. That history is not current-task evidence.
+Read only the relevant indexed source sections. Preparation hashes the prompts
+and resources; execution loads those captured bytes, without rewriting old runs.
 
-### Recursive child kernel-development example
+### Recursive child repair
 
-Delegation is available, not required. Use it for a bounded repair or an independent
-stage audit while the root continues useful work. Both root and child have their
-own persistent REPL, `compile_candidate`, `search_docs`, `read_doc` and captured
-`resources`. They share the task tree's token, model-call and time budgets. Child
-context is its prompt string: it does **not** inherit the root's variables or task
-dictionary. Pass the authoritative reference, complete candidate, contract and
-exact diagnostics explicitly. A kernel fragment alone cannot construct `ModelNew`
-with the trusted task inputs used by compile feedback.
+The root orchestrator delegates a concrete implementation or repair while doing
+its own work. Each child has its own REPL, helpers and resources. Root `context`
+is a task dictionary; child `context` is the supplied prompt string. No root
+variables are inherited. Pass the reference, complete candidate and feedback.
 
-Read `print(resources["delegation_example"])` after storing `best_source`, `contract`
-and `feedback` in the root. The example assembles a child prompt from those values
-and `context["reference_code"]`, then calls:
+`resources["delegation_example"]` is a complete root REPL example. It starts a
+child with `rlm_query(repair_prompt, blocking=False)` and collects JSON with
+`rlm_wait(handle, timeout_s=30)`. The child calls `compile_candidate` in its own
+REPL and returns `source` plus actual feedback in `checks`, including failures.
+The root chooses the source and submits separately.
 
-```python
-repair_handle = rlm_query(repair_prompt, blocking=False)
-# Keep working independently, then collect in a later root action:
-child_report = json.loads(rlm_wait(repair_handle, timeout_s=30))
-child_source = child_report["source"]
-ast.parse(child_source)
-```
+`rlm_status` inspects progress and `rlm_result` collects a finished child. A wait
+timeout does not cancel work; root submission stops unfinished children. Depth-1
+children cannot delegate. `llm_query` is a plain completion, without a child REPL.
 
-The child must repair the **complete** source and call `compile_candidate` in its
-own REPL. It returns JSON containing `source`, actual feedback dictionaries in
-`checks`, `changes` and `remaining_risks`, using its own answer assignments. A failed
-repair returns its real diagnostics, not a success claim. `compiled` means only a
-forward/synchronize smoke; it does not establish numerical correctness or full-CuTe
-execution. The root reviews the source and checks before choosing whether to set
-`best_source = child_source`, and submits separately. The example does not accept
-or submit a child result automatically.
-
-`rlm_status(handle)` inspects progress; `rlm_result(handle)` collects an already
-finished child. A timed-out wait does not cancel the child, so retain its handle
-and collect later. Root submission stops unfinished children. At depth 1 a child
-still has its REPL and compilation helper, but a grandchild request is rejected.
-`llm_query` is a plain completion, not a substitute for this workflow.
-
-`tests/test_cute_delegation_example.py` executes the example through real root and
-child subprocess REPLs, a real broker and a scripted model/compilation callback.
-It checks child-owned feedback, complete-source return, root integration, rejected
-grandchildren and confirmed worker exit. This CPU protocol test is **not** evidence
-of a GPU compilation, correct kernel or a model choosing to delegate. No task
-solution or hidden expected output is added to the example.
+`tests/test_cute_delegation_example.py` exercises separate root/child subprocess
+REPLs and the real broker with scripted model/worker responses. These CPU tests
+are not GPU evidence. No rollout or GPU work is launched by this change.
 
 ### Laguna thinking setting
 

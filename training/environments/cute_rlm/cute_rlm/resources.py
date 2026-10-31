@@ -102,19 +102,15 @@ def build_resources(config: EvalConfig) -> dict:
         "examples": {"elementwise_add": source},
         "delegation_example": (Path(__file__).parent / "examples/delegation.py.txt").read_text(),
         "api_notes": [
-            "Use native repl(code). compile_candidate, search_docs, read_doc, SHOW_VARS and rlm_* are already injected: call them directly, without imports or redefinitions. resources and helper_help contain data, not helper methods; SHOW_VARS() shows this session's live signatures.",
-            "Read example_index.sections: imports, ModelNew host adapter, elementwise_add JIT launch, then elementwise_add_kernel. Offsets are character slices of examples[id]; do not dump the full CLI example.",
-            "Use the exact imports shown in the indexed header: import cutlass.cute as cute; from cutlass.cute.runtime import from_dlpack. Do not guess import cute or import cutlass.cute.dsl.",
-            "Keep Torch allocation and state access in ordinary Python. Follow the example's adaptation boundary; JIT tensor arguments may already be CuTe tensors, not Torch tensors to adapt again.",
-            "DLPack rejects requires-grad parameters. Adapt detached views when needed without replacing registered state or changing training/state semantics. torch.no_grad does not clear requires_grad.",
-            "Device functions use kernel(...).launch(grid=..., block=...). Match caller stream ordering; the historical example is not proof of every stream configuration.",
-            "Define decorated functions directly in source, not exec strings. Direct @cute.jit calls may compile implicitly; explicit cute.compile is not always required.",
+            "Use Python CuTe DSL (introduced in mid-2025): import cutlass.cute as cute; from cutlass.cute.runtime import from_dlpack. This is not the older CUTLASS CuTe C++ API.",
+            "Helpers are live injected callables: use compile_candidate, search_docs, read_doc, SHOW_VARS and rlm_* directly in repl, without importing or redefining them. resources contains data, not helper methods.",
+            "Example sections are character slices of examples[id]. Read the imports, ModelNew, JIT launch or device kernel as needed; do not dump the whole example.",
         ],
         "helper_help": {
-            "search_docs": "search_docs(query, limit=2) -> list[dict]. Query 1..300 characters, limit 1..5. Hits contain id/title/sha256/excerpt/start/end character offsets; use the matching offset rather than rereading the file header.",
-            "read_doc": "read_doc(doc_id, start=0, chars=1200) -> dict with excerpt/more/id/title/sha256. chars 1..1600. Print result['excerpt']; a dictionary cannot be sliced as source text.",
-            "compile_candidate": "compile_candidate(source: str) -> dict. Call feedback = compile_candidate(best_source) directly in repl; it automatically prints once, so do not print the returned dictionary again. Inspect status/detail/error_type/traceback/stdout/stderr/launcher_stderr when present. status='compiled' is one isolated compile/forward/synchronize smoke; never submits.",
-            "delegation": "rlm_query(prompt, blocking=False) creates a child with its own REPL and compile_candidate/docs/resources; rlm_status(handle), rlm_result(handle), rlm_wait(handle, timeout_s=30) manage it. Child context is its prompt string, not the root task dictionary; no root variables are inherited. Pass reference/complete source/contract/exact errors explicitly. resources['delegation_example'] is root REPL code for a bounded complete-model repair. Depth 1 permits root 0 and child 1, rejects grandchildren. Tree budgets are shared; a wait timeout does not cancel work, but root finalization does. llm_query(prompt) is plain completion without REPL helpers.",
+            "search_docs": "search_docs(query, limit=2) -> hits with id/excerpt/start/end. Query 1..300 characters; limit 1..5.",
+            "read_doc": "read_doc(doc_id, start=0, chars=1200) -> dict; read result['excerpt']. chars 1..1600.",
+            "compile_candidate": "compile_candidate(source) -> dict, automatically printed once. status='compiled' is PASS for one compile/forward/synchronize smoke. Retain returned diagnostics for repairs; this does not submit.",
+            "delegation": "rlm_query(prompt, blocking=False) -> child handle; rlm_status(handle), rlm_result(handle), rlm_wait(handle, timeout_s=30) collect it. Root context is a task dictionary; child context is its prompt string. Pass reference/source/feedback explicitly. Each child has its own REPL, helpers and resources, not root variables. See resources['delegation_example'].",
         },
     }
 
