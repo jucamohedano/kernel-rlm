@@ -65,7 +65,7 @@ as cute`), not the older CUTLASS CuTe C++ API, that passes compile/forward smoke
 This prompt change does not change the verifier, scoring, runtime or budgets.
 
 The only model tool is native `repl(code)`. Start with `SHOW_VARS()` for live helper
-signatures, the root's `context["reference_code"]`, target and example index.
+signatures, the root's `context["cute_dsl_task"]`, target and example index.
 `compile_candidate`, `search_docs`, `read_doc` and `rlm_*` are injected callables:
 call them directly, without imports or redefinitions. `resources` and
 `resources["helper_help"]` contain data, not helper methods. Documentation reads
@@ -395,3 +395,33 @@ convolution and BMM. It was demonstrably mixed-backend, not full CuTe. Kernel-co
 or time fractions are diagnostics, not numerical-operation coverage or a scoring
 threshold. A scoped full-CuTe claim currently needs reviewer sign-off in addition
 to correctness and trace evidence. Timing remains unprofiled and correctness-gated.
+
+## Compile/forward diagnostics (unscored)
+
+Use the separate diagnostic entrypoint for repeated independent roots. Freeze the
+number **per example**; two tasks with `N=4` means eight roots. Roots run
+sequentially, while each root retains the configured async child/request limits.
+The model, context, budgets and task identities stay unchanged.
+
+```bash
+python -m cute_rlm.diagnose --prepare --project PROJECT --config CONFIG.json \
+  --run-id RUN_ID --output-root RUNS --rollouts-per-example N
+python -m cute_rlm.diagnose --run RUNS/RUN_ID --base-url URL \
+  --sandbox-spec SPEC --receipt DIAGNOSTIC_RECEIPT --host-python PYTHON
+```
+
+The diagnostic receipt binds the frozen manifest/config and sandbox hashes,
+observed hardware/toolkit and server identity, and evidence files for the six
+checks listed by `diagnostic_checks(config)`. Its mode is
+`compile-forward-diagnostic`. Do not fabricate passing checks or reuse scored
+correctness/timing gates. Preparation writes a pending template, not GPU evidence.
+
+Each `task-NNNNN/rollout-NNNNN` retains native streams, children, checkpoints,
+compiler requests/diagnostics, and final source. A submitted source gets one
+explicit **host final smoke**, separate from model tool actions. `compiled` means
+one forward and synchronization completed, not correctness, speedup or full-CuTe
+verification. Actual PTX/CUBIN artifacts are retained when observed; absence is
+not fabricated or treated as a provenance failure. No numerical comparison,
+timing, Nsight, scoring, automatic retry, or diagnostic resume is performed.
+`report.json` keeps unknown token usage and incomplete/failed roots explicit.
+Verify the external backup before deleting artifacts or terminating the VM.

@@ -19,7 +19,7 @@ from cute_rlm.verifier import checked_output, configuration_hash, launch_phase
 
 
 class CompileFeedback:
-    def __init__(self, task, config, run_dir, *, worker_command):
+    def __init__(self, task, config, run_dir, *, worker_command, capture_compiler_artifacts=False):
         self.config = VerificationConfig(**config) if isinstance(config, dict) else config
         if not isinstance(self.config, VerificationConfig):
             raise TypeError("config must be VerificationConfig or its complete mapping")
@@ -31,6 +31,7 @@ class CompileFeedback:
             raise ValueError("reference source hash mismatch")
         self.task = task
         self.worker_command = list(worker_command)
+        self.capture_compiler_artifacts = capture_compiler_artifacts
         self.config_hash = configuration_hash(self.config)
         self.directory = Path(run_dir).resolve() / "compile-feedback"
         self.directory.mkdir(parents=True, exist_ok=False, mode=0o700)
@@ -162,6 +163,8 @@ class CompileFeedback:
                             "module_training": reference["module_training"],
                             "compile_feedback": True,
                         }
+                        if self.capture_compiler_artifacts:
+                            request["profile_compile"] = True
                         self.save(directory / "worker-request.json", request)
                         result = await launch_phase(self.worker_command, request, self.config)
                         self.save(directory / "worker-response.json", result)

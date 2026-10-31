@@ -72,6 +72,6 @@ def test_resume_requires_original_frozen_task_prompts_and_limits(tmp_path):
     with pytest.raises(ValueError, match="frozen"):
         check_checkpoint_binding(changed, tmp_path, {}, cfg)
     changed = copy.deepcopy(saved)
-    changed["session"]["context"]["reference_code"] = "different task"
+    changed["session"]["context"]["cute_dsl_task"] = "different task"
     with pytest.raises(ValueError, match="specification"):
         check_checkpoint_binding(changed, tmp_path, {}, cfg)

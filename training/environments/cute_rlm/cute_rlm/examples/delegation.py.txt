@@ -2,7 +2,7 @@
 import json
 
 repair_request = {
-    "reference_code": context["reference_code"],
+    "cute_dsl_task": context["cute_dsl_task"],
     "candidate_source": best_source,
     "last_feedback": feedback,
 }
@@ -12,7 +12,7 @@ Your context is this prompt string, not the root task dictionary. In your own RE
     import json
     request = json.loads(context.split("\nREQUEST_JSON:\n", 1)[1])
     best_source = request["candidate_source"]
-Use request's reference_code and last_feedback to repair the complete source, then:
+Use request's cute_dsl_task and last_feedback to repair the complete source, then:
     checks = [compile_candidate(best_source)]
 The helper prints feedback once. Repair and append further feedback as needed.
 Use live search_docs/read_doc for API blockers; do not import or redefine helpers.

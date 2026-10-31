@@ -63,7 +63,7 @@ def test_task_prompt_inspects_reference_and_indexed_resources_once(max_turns, ca
         inspection,
         {
             "SHOW_VARS": show_vars,
-            "context": {"reference_code": reference},
+            "context": {"cute_dsl_task": reference},
             "resources": resources,
         },
     )

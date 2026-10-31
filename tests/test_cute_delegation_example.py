@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from cute_rlm import feedback as feedback_module
 from cute_rlm.contracts import VerificationConfig
+from cute_rlm.dataset import task_context
 from cute_rlm.docs import docs_bootstrap
 from cute_rlm.prompts import CUTE_SYSTEM_PROMPT
 from cute_rlm.resources import build_resources, resources_bootstrap
@@ -111,8 +112,8 @@ async def test_documented_complete_model_repair_uses_child_repl_and_trusted_task
                 "answer['ready'] = True"
             )
         delegated = json.loads(prompt.split("\nREQUEST_JSON:\n", 1)[1])
-        assert set(delegated) == {"reference_code", "candidate_source", "last_feedback"}
-        assert delegated["reference_code"] == reference
+        assert set(delegated) == {"cute_dsl_task", "candidate_source", "last_feedback"}
+        assert delegated["cute_dsl_task"] == reference
         assert delegated["candidate_source"] == bad_source
         assert delegated["last_feedback"]["error_type"] == "ModuleNotFoundError"
         assert "not inherited" not in prompt
@@ -185,7 +186,7 @@ async def test_documented_complete_model_repair_uses_child_repl_and_trusted_task
         event_path=tmp_path / "events.jsonl",
     )
     try:
-        record = await runtime.run("root-repair", task)
+        record = await runtime.run("root-repair", task_context(task))
     finally:
         await runtime.close()
         await proxy.stop()

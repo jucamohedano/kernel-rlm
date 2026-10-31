@@ -11,7 +11,7 @@ Collect the child with rlm_wait(handle, timeout_s=30) or rlm_result(handle), the
 CUTE_SYSTEM_PROMPT = (
     """Implement the task using Python CuTe DSL (import cutlass.cute as cute), introduced in mid-2025—not the older C++ CUTLASS/CuTe API. At the root, return standalone Python defining ModelNew(torch.nn.Module) with the supplied constructor and forward signatures. The goal is compile/forward-smoke PASS, not benchmarking.
 
-Use only native repl(code); variables persist and the reasoning REPL has no GPU. At the root, context["reference_code"] holds the task as source text. resources is a dictionary containing the target, indexed examples and helper help.
+Use only native repl(code); variables persist and the reasoning REPL has no GPU. At the root, context["cute_dsl_task"] holds the task as source text. resources is a dictionary containing the target, indexed examples and helper help.
 
 Helpers are already injected: SHOW_VARS(), compile_candidate(source), search_docs(query), read_doc(doc_id), and rlm_query/rlm_wait/rlm_result. Call them directly inside repl; do not import or redefine them. Store the complete candidate in best_source and run:
 feedback = compile_candidate(best_source)
@@ -33,9 +33,9 @@ def first_user_message(task: dict, config: EvalConfig) -> str:
         if config.max_turns is not None
         else "no fixed per-session turn limit"
     )
-    return f"""Implement context["reference_code"] in Python CuTe DSL. Start with one native REPL action:
+    return f"""Implement context["cute_dsl_task"] in Python CuTe DSL. Start with one native REPL action:
 print(SHOW_VARS())
-print(context["reference_code"])
+print(context["cute_dsl_task"])
 print(resources["target"])
 print(resources["example_index"])
 
