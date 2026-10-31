@@ -28,7 +28,7 @@ def test_task_prompt_inspects_reference_and_indexed_resources_once(max_turns, ca
         },
     )
     rendered = first_user_message({"task_id": "task-7"}, config)
-    assert "task-7" in rendered
+    assert "task-7" not in rendered
     expected_budget = (
         "20 model turns per REPL session"
         if max_turns is not None

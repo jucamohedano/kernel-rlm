@@ -128,6 +128,13 @@ class SubprocessReplBackend(ReplBackend):
             return
         await self._request({"type": "bootstrap", "code": code})
 
+    async def snapshot(self) -> dict[str, Any]:
+        result = await self._request({"type": "snapshot"})
+        return result["snapshot"]
+
+    async def restore(self, snapshot: dict[str, Any]) -> None:
+        await self._request({"type": "restore", "snapshot": snapshot})
+
     async def update_history(self, messages: list[Any]) -> None:
         await self._request({"type": "update_history", "messages": messages})
 

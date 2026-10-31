@@ -50,11 +50,11 @@ class EvalConfig:
     cuda_toolkit_version: str = "13.3"
     output_fraction: float = 0.9
     max_generated_tokens: int = 1000000
-    max_depth: int = 2
+    max_depth: int = 1
     max_live_children: int = 8
     max_concurrent_requests: int = 2
     max_model_calls: int | None = 256
-    max_turns: int | None = 32
+    max_turns: int | None = 64
     max_children: int | None = 32
     max_prompt_chars: int | None = None
     broker_timeout: float = 600
@@ -142,13 +142,22 @@ class EvalConfig:
         return digest(self.payload())
 
 
+def required_gpu_checks(config: EvalConfig) -> tuple[str, ...]:
+    if config.max_concurrent_requests == 1:
+        return tuple(
+            "single_long_request" if name == "two_concurrent_long_requests" else name
+            for name in REQUIRED_GPU_CHECKS
+        )
+    return REQUIRED_GPU_CHECKS
+
+
 def check_gpu_receipt(receipt: dict, config: EvalConfig, manifest_sha256: str) -> None:
     """A receipt records observed checks, not CPU simulation or requested settings."""
     if receipt.get("config_sha256") != config.sha256():
         raise ValueError("GPU readiness receipt does not match this configuration")
     if receipt.get("manifest_sha256") != manifest_sha256:
         raise ValueError("GPU readiness receipt does not match frozen inputs")
-    for key in REQUIRED_GPU_CHECKS:
+    for key in required_gpu_checks(config):
         check = receipt.get("checks", {}).get(key, {})
         if check.get("status") != "passed" or not check.get("evidence"):
             raise ValueError(f"GPU validation still required: {key}")

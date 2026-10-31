@@ -10,6 +10,8 @@ At the root, context is a dictionary and context["reference_code"] is the author
 
 The root must submit standalone Python defining ModelNew(torch.nn.Module). Preserve constructor/forward signatures, registered parameters and buffers, output structure/shapes/dtypes, training and stochastic behavior, state updates and input mutations. Numerical work must use CuTe; Torch is for state registration, allocation and host plumbing. Preserve the caller's stream ordering. Do not change the task, target, precision or validation settings. An advice-only child may return advice instead of a complete model.
 
+You may use rlm_query(prompt, blocking=False) for a bounded candidate repair or independent stage audit while you work; collect with rlm_wait(handle, timeout_s=30) or rlm_result(handle) once done. A child has its own REPL, compile_candidate, docs and resources, but no root variables or task dictionary: pass the reference, complete source, contract and exact feedback it needs. See resources["delegation_example"] for a complete repair workflow. Children share tree budgets; depth 1 permits root 0 plus child 1, no grandchildren. Delegation is available, not mandatory; collect useful work before submitting.
+
 For a root implementation, inspect the reference and one relevant example, then write a complete candidate. Store your task checklist in contract and current complete candidate in best_source. Search docs only for a named unresolved blocker. Do not repeat unchanged searches or reads. Keep decorated functions directly in source, not inside exec.
 
 Check early enough to repair: feedback = compile_candidate(best_source). Fix the reported failure, not unrelated code. The helper never submits; a successful smoke is not numerical correctness, speed or proof that CuTe ran. Never invent results.
@@ -27,12 +29,12 @@ def first_user_message(task: dict, config: EvalConfig) -> str:
         if config.max_turns is not None
         else "no fixed per-session turn limit"
     )
-    return f"""Implement root task {task["task_id"]}. Start with one native REPL action:
+    return f"""Implement the task in context["reference_code"]. Start with one native REPL action:
 print(context["reference_code"])
 for key in ("target", "validation", "limits", "example_index", "api_notes"):
     print(key, resources[key])
 
-resources is a dictionary: target/validation/limits are frozen settings dictionaries, example_index is a list of example metadata, and api_notes is a list of notes. resources["examples"] maps example IDs to full source strings. Use the character slices in each example_index entry's sections to read relevant sections, not the entire CLI example. resources["helper_help"] maps helper names to signatures, bounds and return schemas. Keep a short contract checklist, implement, check, repair, and submit. Do not dump the entire resources dictionary. The reference and frozen settings remain authoritative; examples are generic API demonstrations, not task solutions.
+resources is a dictionary: target/validation/limits are frozen settings dictionaries, example_index is a list of example metadata, and api_notes is a list of notes. resources["examples"] maps example IDs to full source strings. Use the character slices in each example_index entry's sections to read relevant sections, not the entire CLI example. resources["helper_help"] maps helper names to signatures, bounds and return schemas. The live functions are search_docs(query, limit=2) and read_doc(hit["id"], start=hit["start"], chars=1200), not methods on resources. Keep a short contract checklist, implement, check, repair, and submit. Do not dump the entire resources dictionary. The reference and frozen settings remain authoritative; examples are generic API demonstrations, not task solutions.
 
 Budget: {turn_budget}.
 """

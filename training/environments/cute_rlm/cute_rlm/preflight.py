@@ -56,9 +56,23 @@ async def probe_two_long_requests(client, config, messages, evidence_dir: Path) 
 
     async def one(index, payload, count):
         started = time.monotonic()
-        response = await client.post("chat/completions", json=payload)
-        response.raise_for_status()
-        raw = response.json()
+        try:
+            response = await client.post("chat/completions", json=payload)
+            response.raise_for_status()
+            raw = response.json()
+        except Exception as error:
+            record = {
+                "request": payload,
+                "rendered_prompt_tokens": count,
+                "elapsed_s": time.monotonic() - started,
+                "exception_type": type(error).__name__,
+                "exception": str(error),
+                "http_status": getattr(getattr(error, "response", None), "status_code", None),
+                "response_body": getattr(getattr(error, "response", None), "text", None),
+                "scope": "failed capacity probe; no inference-OOM classification inferred",
+            }
+            (evidence_dir / f"long-request-{index}-failed.json").write_text(json.dumps(record))
+            raise
         if raw.get("usage", {}).get("prompt_tokens") != count:
             raise ValueError("Probe tokenizer count differs from actual prompt usage")
         choices = raw.get("choices") or []
@@ -87,4 +101,31 @@ async def probe_two_long_requests(client, config, messages, evidence_dir: Path) 
         "execution_overlap": "requires scheduler/metrics evidence; response success alone is insufficient",
         "requests": results,
         "scope": "Observed simultaneous long-request submission; inspect scheduler metrics for execution overlap. Correctness and isolation are separate checks",
+    }
+
+
+def inference_concurrency_after_preflight(result: dict, *, requested: int = 2) -> dict:
+    """Select capacity before freezing a scored run; never replay scored requests.
+
+    The caller supplies a structured outcome from an actual inference preflight,
+    not a guessed error substring. Compilation failures and timeouts are not OOM.
+    """
+    if requested not in (1, 2):
+        raise ValueError("this preset supports one or two concurrent inference requests")
+    if result.get("status") == "passed":
+        effective, reason = requested, "preflight_passed"
+    elif (
+        result.get("failure_stage") == "model_inference"
+        and result.get("error_type") == "cuda_out_of_memory"
+    ):
+        effective, reason = 1, "inference_preflight_cuda_oom"
+    else:
+        raise ValueError("preflight did not establish inference capacity")
+    return {
+        "requested_concurrency": requested,
+        "effective_concurrency": effective,
+        "reason": reason,
+        "selection_stage": "before_frozen_scored_dispatch",
+        "requires_serial_recheck": reason == "inference_preflight_cuda_oom",
+        "automatic_scored_retry": False,
     }

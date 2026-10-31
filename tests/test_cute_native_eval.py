@@ -124,7 +124,7 @@ async def test_cpu_scripted_native_tree_records_caps_logprobs_and_verification(
             code = (
                 "assert context['reference_code'] == '# reference specification only'; "
                 f"assert resources['target']['gpu_model'] == {config.gpu_model!r}; "
-                "assert resources['limits']['turns_per_session'] == 32; "
+                "assert resources['limits']['turns_per_session'] == 64; "
                 "assert resources['examples']['elementwise_add']; "
                 "assert read_doc('cute')['excerpt']; import os; assert 'DO_NOT_INHERIT_API_KEY' not in os.environ; "
                 "assert compile_candidate('bad candidate')['status']=='compile_error'; "
@@ -133,30 +133,46 @@ async def test_cpu_scripted_native_tree_records_caps_logprobs_and_verification(
                 "reply=rlm_query('child'); "
                 "assert reply=='child-ok'; answer['content']='class ModelNew: pass'; answer['ready']=True"
             )
-        return web.json_response(
-            {
-                "choices": [
-                    {
-                        "finish_reason": "tool_calls",
-                        "message": {
-                            "role": "assistant",
-                            "reasoning_content": "scripted",
-                            "tool_calls": [
-                                {
-                                    "id": "repl",
-                                    "function": {
-                                        "name": "repl",
-                                        "arguments": json.dumps({"code": code}),
-                                    },
-                                }
-                            ],
-                        },
-                        "logprobs": {"content": [{"token": "token_id:1", "logprob": -0.1}]},
-                    }
-                ],
-                "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
-            }
-        )
+        raw = {
+            "choices": [
+                {
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "reasoning_content": "scripted",
+                        "tool_calls": [
+                            {
+                                "id": "repl",
+                                "function": {
+                                    "name": "repl",
+                                    "arguments": json.dumps({"code": code}),
+                                },
+                            }
+                        ],
+                    },
+                    "logprobs": {"content": [{"token": "token_id:1", "logprob": -0.1}]},
+                }
+            ],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
+        }
+        assert payload["stream"] is True and payload["stream_options"]["include_usage"] is True
+        choice = raw["choices"][0]
+        delta = dict(choice["message"])
+        for index, call in enumerate(delta.get("tool_calls", [])):
+            call["index"] = index
+        chunk = {
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": delta,
+                    "finish_reason": choice["finish_reason"],
+                    "logprobs": choice["logprobs"],
+                }
+            ],
+            "usage": raw["usage"],
+        }
+        body = "data: " + json.dumps(chunk) + "\n\ndata: [DONE]\n\n"
+        return web.Response(text=body, content_type="text/event-stream")
 
     async def tokenize(request):
         data = await request.json()

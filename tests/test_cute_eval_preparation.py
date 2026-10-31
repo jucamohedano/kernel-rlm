@@ -196,7 +196,8 @@ def test_different_gpu_requires_an_explicit_compute_capability():
     assert args[args.index("--max-model-len") + 1] == "262144"
     assert cfg.model_revision == default.model_revision
     assert cfg.verification == default.verification
-    assert cfg.max_turns == default.max_turns == 32
+    assert cfg.max_turns == default.max_turns == 64
+    assert cfg.max_depth == default.max_depth == 1
     assert cfg.max_generated_tokens == default.max_generated_tokens == 1000000
 
 
