@@ -63,14 +63,32 @@ import re as _cute_re
 def search_docs(query, limit=4):
     if not isinstance(query, str) or not query.strip() or len(query) > 300 or type(limit) is not int or not 1 <= limit <= 5:
         raise ValueError("query must be 1..300 chars and limit 1..5")
-    terms = set(_cute_re.findall(r"[a-zA-Z0-9_]+", query.casefold()))
+    terms = {{term.casefold() for term in _cute_re.findall(r"[a-zA-Z0-9_]+", query)}}
+    if not terms:
+        raise ValueError("query must contain a word or symbol")
     scored = []
     for doc_id, doc in _CUTE_DOCS.items():
-        body = doc["text"].casefold()
-        score = sum(body.count(term) for term in terms)
-        if score:
-            scored.append((score, doc_id, doc))
-    return [{{"id": doc_id, "title": doc["title"], "sha256": doc["sha256"], "excerpt": doc["text"][:900]}} for _, doc_id, doc in sorted(scored, key=lambda row: (-row[0], row[1]))[:limit]]
+        counts = dict.fromkeys(terms, 0)
+        lines = []
+        offset = 0
+        for line in doc["text"].splitlines(keepends=True):
+            matches = [(offset + match.start(), match.group().casefold()) for match in _cute_re.finditer(r"[a-zA-Z0-9_]+", line) if match.group().casefold() in terms]
+            if matches:
+                matched_terms = {{term for _, term in matches}}
+                for _, term in matches:
+                    counts[term] += 1
+                lines.append((matched_terms, matches))
+            offset += len(line)
+        if not lines:
+            continue
+        # Prefer line coverage, then rare query terms over repeated boilerplate.
+        best_terms, best_matches = max(lines, key=lambda row: (len(row[0]), sum(1 / counts[term] for term in sorted(row[0]))))
+        anchor, _ = min(best_matches, key=lambda match: (counts[match[1]], match[0]))
+        score = (sum(count > 0 for count in counts.values()), len(best_terms))
+        start = max(0, min(anchor - 450, len(doc["text"]) - 900))
+        end = min(start + 900, len(doc["text"]))
+        scored.append((score, doc_id, doc, start, end))
+    return [{{"id": doc_id, "title": doc["title"], "sha256": doc["sha256"], "excerpt": doc["text"][start:end], "start": start, "end": end}} for _, doc_id, doc, start, end in sorted(scored, key=lambda row: (-row[0][0], -row[0][1], row[1]))[:limit]]
 def read_doc(doc_id, start=0, chars=1200):
     if doc_id not in _CUTE_DOCS or type(start) is not int or start < 0 or type(chars) is not int or not 1 <= chars <= 1600:
         raise ValueError("valid doc ID, nonnegative start, and chars 1..1600 required")
