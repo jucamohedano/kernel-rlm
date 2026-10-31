@@ -47,8 +47,29 @@ def test_task_prompt_inspects_reference_and_indexed_resources_once(max_turns, ca
         "examples": {"addition": "GENERIC_EXAMPLE_SOURCE_NOT_DUMPED"},
         "helper_help": {"read_doc": "HELPER_SCHEMA_NOT_DUMPED"},
     }
-    exec(inspection, {"context": {"reference_code": reference}, "resources": resources})
+    inventory = {
+        "best_source": "str",
+        "compile_candidate": "compile_candidate(source: str)",
+        "search_docs": "search_docs(query, limit=2)",
+        "rlm_query": "rlm_query(prompt, blocking=True)",
+    }
+    inventory_calls = []
+
+    def show_vars():
+        inventory_calls.append(True)
+        return inventory
+
+    exec(
+        inspection,
+        {
+            "SHOW_VARS": show_vars,
+            "context": {"reference_code": reference},
+            "resources": resources,
+        },
+    )
+    assert inventory_calls == [True]
     assert capsys.readouterr().out.splitlines() == [
+        str(inventory),
         reference,
         *(
             f"{key} {resources[key]}"
@@ -56,6 +77,32 @@ def test_task_prompt_inspects_reference_and_indexed_resources_once(max_turns, ca
         ),
     ]
     assert 'resources["examples"]' in rendered and 'resources["helper_help"]' in rendered
+
+
+def test_prompt_compile_action_calls_injected_helper_once_and_keeps_feedback(capsys):
+    action = CUTE_SYSTEM_PROMPT.split("Run this native REPL action early enough to repair:\n", 1)[
+        1
+    ].split("\n\n", 1)[0]
+    calls = []
+    feedback = {"status": "compiled", "detail": "forward/synchronize smoke"}
+
+    def compile_candidate(source):
+        calls.append(source)
+        print(feedback)
+        return feedback
+
+    source = "class ModelNew: pass"
+    namespace = {
+        "compile_candidate": compile_candidate,
+        "best_source": source,
+        "answer": {"content": "", "ready": False},
+    }
+    exec(action, namespace)
+    assert calls == [source]
+    assert namespace["feedback"] is feedback
+    assert namespace["best_source"] == source
+    assert namespace["answer"]["ready"] is False
+    assert capsys.readouterr().out.splitlines() == [str(feedback)]
 
 
 def test_system_finalizer_submits_the_stored_complete_source():

@@ -60,11 +60,20 @@ The next-eval plan requests:
 ## Model interface and compile feedback
 
 The concise system prompt and first user message are defined in
-`cute_rlm/prompts.py`. The first action reads the authoritative reference and a
-small resource index, then the model reads one relevant example section and
-starts a candidate. There is no new lookup quota, early-check deadline or
-automatic submission. Keep a complete candidate in `best_source`; reserve the
-final turn for the two answer assignments.
+`cute_rlm/prompts.py`. The first action prints `SHOW_VARS()` for the actual
+session's helper inventory and signatures, then reads the authoritative reference
+and a small resource index. The model reads one relevant example section and
+starts a candidate. Its current diagnostic goal is a standalone CuTe `ModelNew`
+that passes compile/forward-smoke; reference behavior, constructor/forward
+signatures and the configured target remain requirements. There is no new lookup
+quota, early-check deadline or automatic submission. Keep the complete candidate
+in `best_source`; reserve the final turn for the two answer assignments.
+
+The only model tool is native `repl(code)`. `compile_candidate`, `search_docs`,
+`read_doc`, `SHOW_VARS` and `rlm_*` helpers are injected callables: call them
+directly inside the REPL, without importing or redefining them. `resources` and
+`resources["helper_help"]` are data dictionaries, not objects with helper methods.
+Delegation is optional.
 
 The shared `resources` dictionary is preloaded in root and recursive child REPLs:
 
@@ -78,9 +87,9 @@ The shared `resources` dictionary is preloaded in root and recursive child REPLs
   and result hashes. This is not a benchmark task solution, a task-specific
   implementation plan or readiness evidence for a new VM/dtype/layout/stream.
 - `api_notes`, `helper_help`: short launch/adaptation/source-inspection notes and
-  the actual helper signatures, bounds and return schemas. The indexed `imports`
-  section shows the exact `cutlass.cute` import paths without changing the verified
-  example source.
+  documented helper bounds and return schemas; `SHOW_VARS()` shows live signatures.
+  The indexed `imports` section shows the exact `cutlass.cute` import paths without
+  changing the verified example source.
 - `delegation_example`: executable root REPL code for a bounded complete-`ModelNew`
   repair by a recursive child, followed by structured result collection and review.
 
@@ -94,11 +103,13 @@ CLI example.
 Documentation search returns match-centered excerpts with `start`/`end` character
 offsets, not the first file header ranked by raw repetition. `read_doc` still
 returns a dictionary: use its `excerpt` and `more` fields; `chars` is 1..1600.
-These CPU changes require a new frozen run and target-VM checks. Historical
-prompts, inputs and results are not rewritten.
+These CPU changes require a new frozen run and target-VM checks. This contract
+clarification changes model-facing guidance and tool discovery, not verifier or
+scoring behavior. Historical prompts, inputs and results are not rewritten.
 
 The task is already in the root REPL as a Python dictionary. Start with
-`print(context["reference_code"])`; do not search the filesystem for the task.
+`print(SHOW_VARS())` and `print(context["reference_code"])`; do not search the
+filesystem for the task.
 Use `search_docs(...)` and `read_doc(...)` for pinned CuTe documentation. The
 reasoning REPL has no GPU. Recursive children receive their supplied prompt as
 context, not the root dictionary; pass the needed task snippets explicitly.
@@ -107,7 +118,8 @@ Keep a complete Python source string defining `ModelNew` in `best_source`.
 Inside the native REPL, call:
 
 ```python
-feedback = compile_candidate(best_source)  # Prints diagnostics and returns a dictionary.
+feedback = compile_candidate(best_source)
+# Feedback is automatically printed once; do not print it again.
 # Revise best_source and call compile_candidate again when useful.
 ```
 
