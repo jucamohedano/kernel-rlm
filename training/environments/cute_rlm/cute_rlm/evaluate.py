@@ -9,6 +9,7 @@ from pathlib import Path
 
 from cute_rlm.config import REQUIRED_GPU_CHECKS, EvalConfig, check_gpu_receipt, serving_arguments
 from cute_rlm.prompts import CUTE_SYSTEM_PROMPT, first_user_message
+from cute_rlm.resources import build_resources, resources_bootstrap
 
 
 def prepare(project: Path, config: EvalConfig, run_id: str, output_root: Path) -> dict:
@@ -53,6 +54,7 @@ def prepare(project: Path, config: EvalConfig, run_id: str, output_root: Path) -
     corpus = json.dumps(docs, sort_keys=True, ensure_ascii=False).encode()
     captured_bytes = {
         ".eval-inputs/docs-corpus.json": corpus,
+        ".eval-inputs/resources.json": json.dumps(build_resources(config), sort_keys=True).encode(),
         ".eval-inputs/resolved-config.json": json.dumps(config.payload(), sort_keys=True).encode(),
         ".eval-inputs/system-prompt.txt": CUTE_SYSTEM_PROMPT.encode(),
         ".eval-inputs/user-prompts.json": json.dumps(
@@ -65,6 +67,7 @@ def prepare(project: Path, config: EvalConfig, run_id: str, output_root: Path) -
             "pyproject.toml",
             "uv.lock",
             "training/environments/cute_rlm/pyproject.toml",
+            "training/environments/cute_rlm/cute_rlm/examples/elementwise_add.py.txt",
         ]
     )
     manifest = prepare_evaluation(
@@ -85,6 +88,8 @@ def prepare(project: Path, config: EvalConfig, run_id: str, output_root: Path) -
             "task_data": "REPL context",
             "system_prompt_input": ".eval-inputs/system-prompt.txt",
             "user_prompts_input": ".eval-inputs/user-prompts.json",
+            "shared_resources_input": ".eval-inputs/resources.json",
+            "shared_resources_variable": "resources",
             "selected_logprobs": True,
             "compaction": False,
             "compile_feedback": {
@@ -93,7 +98,7 @@ def prepare(project: Path, config: EvalConfig, run_id: str, output_root: Path) -
                 "scope": "compile and one forward; no numerical comparison or timing",
             },
             "turn_warning_start": 28,
-            "final_submission": "answer['content'] = source; answer['ready'] = True",
+            "final_submission": "answer['content'] = best_source; answer['ready'] = True",
         },
     )
     directory = output_root / run_id
@@ -143,7 +148,7 @@ async def evaluate_prepared(
             "A protected CuTe compile/launch observer is required before scored evaluation"
         )
     captured = {}
-    for name in ("docs-corpus.json", "system-prompt.txt", "user-prompts.json"):
+    for name in ("docs-corpus.json", "system-prompt.txt", "user-prompts.json", "resources.json"):
         relative = ".eval-inputs/" + name
         content = (directory / "inputs" / relative).read_bytes()
         expected = next(item["sha256"] for item in manifest["inputs"] if item["path"] == relative)
@@ -153,6 +158,9 @@ async def evaluate_prepared(
     corpus_bytes = captured["docs-corpus.json"]
     system_prompt = captured["system-prompt.txt"].decode()
     user_prompts = json.loads(captured["user-prompts.json"])
+    bootstrap = docs_bootstrap(json.loads(corpus_bytes)) + resources_bootstrap(
+        json.loads(captured["resources.json"])
+    )
     tasks = load_tasks(directory / "inputs" / config.task_manifest)
     start_evaluation(manifest, directory.parent)
     import tempfile
@@ -195,7 +203,7 @@ async def evaluate_prepared(
                 ),
                 prompt_counter=VllmPromptCounter(client, config.server_context_tokens),
                 backend_factory=backend_factory,
-                bootstrap_code=docs_bootstrap(json.loads(corpus_bytes)),
+                bootstrap_code=bootstrap,
                 system_prompt=system_prompt,
                 compile_candidate=feedback,
                 turn_notice=cute_turn_notice,
@@ -299,13 +307,13 @@ def cute_turn_notice(turn: int, max_turns: int | None) -> str | None:
     if turn == max_turns:
         return (
             f"FINAL TURN {turn}/{max_turns}. Submit your best complete ModelNew now: "
-            "answer['content'] = source; answer['ready'] = True. "
+            "answer['content'] = best_source; answer['ready'] = True. "
             "Do not spend this final turn on another compile check or exploration."
         )
     return (
         f"Turn {turn}/{max_turns}: {remaining} model turns remain, including this one. "
         f"Finish corrections and submit before the final turn ({max_turns}) if possible. "
-        "Set answer['content'] = source and answer['ready'] = True to submit. "
+        "Set answer['content'] = best_source and answer['ready'] = True to submit. "
         "Do not wait for more feedback once your remaining turns are needed to finalize."
     )
 
