@@ -30,6 +30,12 @@ class ReplBackend(ABC):
     @abstractmethod
     async def stop(self) -> None: ...
 
+    async def snapshot(self) -> dict[str, Any]:
+        raise NotImplementedError("backend does not support data-only checkpoints")
+
+    async def restore(self, snapshot: dict[str, Any]) -> None:
+        raise NotImplementedError("backend does not support data-only checkpoints")
+
     async def bootstrap(self, code: str) -> None:
         if not code:
             return

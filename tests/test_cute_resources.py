@@ -24,6 +24,7 @@ def test_resources_are_config_derived_and_exclude_hidden_verifier_data():
         "limits",
         "example_index",
         "examples",
+        "delegation_example",
         "api_notes",
         "helper_help",
     }
@@ -37,8 +38,18 @@ def test_exact_historical_example_is_data_with_indexed_complete_definitions():
     assert entry["verification"]["compute_capability"] == "8.9"
     for name, span in entry["sections"].items():
         section = source[span["start"] : span["end"]]
-        definition = ast.parse(section).body[0]
-        assert definition.name == name
+        definitions = ast.parse(section).body
+        if name == "imports":
+            assert all(isinstance(node, (ast.Import, ast.ImportFrom)) for node in definitions)
+            assert any(
+                isinstance(node, ast.Import)
+                and any(
+                    alias.name == "cutlass.cute" and alias.asname == "cute" for alias in node.names
+                )
+                for node in definitions
+            )
+        else:
+            assert definitions[0].name == name
     namespace = {}
     exec(resources_bootstrap(resources), namespace)
     assert namespace["resources"] == resources

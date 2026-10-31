@@ -352,6 +352,27 @@ class Worker:
     def _rlm_wait(self, handle: str, timeout_s: float = 30) -> str:
         return self._recursive_post("rlm_wait", {"handle": handle, "timeout_s": timeout_s})
 
+    def snapshot(self) -> dict[str, Any]:
+        from rlm_train.repl.snapshot import encode_namespace
+
+        variables = {
+            name: value
+            for name, value in self.locals.items()
+            if name not in RESERVED_TOOL_NAMES and not name.startswith("context_")
+        }
+        if "resources" in self.globals:
+            variables["resources"] = self.globals["resources"]
+        return encode_namespace(variables)
+
+    def restore(self, snapshot: dict[str, Any]) -> None:
+        from rlm_train.repl.snapshot import decode_namespace
+
+        variables = decode_namespace(snapshot)
+        if any(name in RESERVED_TOOL_NAMES or name.startswith("context_") for name in variables):
+            raise ValueError("checkpoint cannot replace supplied scaffold")
+        self.locals.update(variables)
+        self._restore_scaffold()
+
     def update_history(self, messages: list[Any]) -> None:
         self._history = copy.deepcopy(messages)
         self.locals["history"] = tuple(copy.deepcopy(self._history))
@@ -514,6 +535,15 @@ def main() -> None:
                 _send({"id": rid, "ok": True, "index": idx})
             except BaseException as e:  # noqa: BLE001
                 _send({"id": rid, "ok": False, "error": f"load_context failed: {e}"})
+        elif kind in {"snapshot", "restore"}:
+            try:
+                if kind == "snapshot":
+                    _send({"id": rid, "ok": True, "snapshot": worker.snapshot()})
+                else:
+                    worker.restore(req["snapshot"])
+                    _send({"id": rid, "ok": True})
+            except Exception as e:
+                _send({"id": rid, "ok": False, "error": f"checkpoint failed: {e}"})
         elif kind == "update_history":
             try:
                 worker.update_history(req.get("messages", []))
