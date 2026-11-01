@@ -140,6 +140,44 @@ def test_prepare_freezes_36_independent_paired_requests(prepared):
     )
 
 
+def test_prepare_explicit_model_preserves_pilot_requests(prepared, tmp_path):
+    default_run, default_plan = prepared
+    config = experiment.ExperimentConfig(
+        model_id="nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+        model_revision="a9904d24bcc1d289a1950fa9d2b978c47cf903b9",
+    )
+    run = tmp_path / "lightning"
+    plan = experiment.prepare(run, config)
+    loaded, frozen_config = experiment.load_plan(run)
+    assert loaded == plan and frozen_config == config
+    assert plan["entries"] == default_plan["entries"]
+    assert len(plan["entries"]) == 36
+    for entry in plan["entries"]:
+        payload = json.loads((run / entry["request_path"]).read_text())
+        default_payload = json.loads((default_run / entry["request_path"]).read_text())
+        assert payload["model"] == config.model_id
+        assert default_payload["model"] == experiment.MODEL_ID
+        default_payload["model"] = config.model_id
+        assert payload == default_payload
+    assert experiment.ExperimentConfig().model_revision == experiment.MODEL_REVISION
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"model_id": ""},
+        {"model_id": " "},
+        {"model_revision": ""},
+        {"model_revision": "main"},
+        {"model_revision": "a" * 39},
+        {"model_revision": "g" * 40},
+    ],
+)
+def test_config_rejects_empty_model_or_unpinned_revision(overrides):
+    with pytest.raises(ValueError):
+        experiment.ExperimentConfig(**overrides)
+
+
 def test_prepare_deterministic_order_and_integrity(prepared, tmp_path):
     run, plan = prepared
     second = experiment.prepare(tmp_path / "second", experiment.ExperimentConfig())

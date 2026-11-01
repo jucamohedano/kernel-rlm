@@ -17,6 +17,7 @@ import json
 import math
 import os
 import random
+import re
 import sys
 import traceback
 from dataclasses import asdict, dataclass
@@ -77,8 +78,16 @@ class ExperimentConfig:
     tokenize: bool = False
 
     def __post_init__(self) -> None:
-        if self.model_id != MODEL_ID or self.model_revision != MODEL_REVISION:
-            raise ValueError("Use the pinned Laguna BF16 model and revision")
+        if (
+            not isinstance(self.model_id, str)
+            or not self.model_id
+            or any(character.isspace() for character in self.model_id)
+        ):
+            raise ValueError("model_id must be a nonempty model identifier without whitespace")
+        if not isinstance(self.model_revision, str) or not re.fullmatch(
+            r"[0-9a-fA-F]{40}", self.model_revision
+        ):
+            raise ValueError("model_revision must be a pinned full 40-character hexadecimal SHA")
         if self.requested_precision != "bf16" or self.server_context_tokens != 262144:
             raise ValueError("Freeze the requested BF16 deployment and 262144-token context")
         if type(self.max_tokens) is not int or not 0 < self.max_tokens < self.server_context_tokens:
