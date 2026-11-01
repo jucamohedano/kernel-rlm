@@ -21,7 +21,7 @@ import re
 import sys
 import traceback
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -378,11 +378,25 @@ async def generate(
     base_url: str,
     *,
     api_key_env: str | None = None,
+    entry_ids: list[str] | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict:
-    """Issue one completion per entry. A started run can never be resumed."""
+    """Issue one completion per selected entry, in explicit or frozen plan order.
+
+    A started run can never be resumed, even with a different selection.
+    """
     run = Path(run).resolve()
     plan, config = load_plan(run)
+    entries = plan["entries"]
+    if entry_ids is not None:
+        if not entry_ids or len(set(entry_ids)) != len(entry_ids):
+            raise ValueError("entry_ids must be nonempty and unique")
+        by_id = {entry["id"]: entry for entry in entries}
+        unknown = [entry_id for entry_id in entry_ids if entry_id not in by_id]
+        if unknown:
+            raise ValueError(f"Unknown entry IDs: {unknown}")
+        entries = [by_id[entry_id] for entry_id in entry_ids]
+    selected_ids = [entry["id"] for entry in entries]
     if api_key_env is not None and not os.environ.get(api_key_env):
         raise ValueError(f"Missing API key environment variable: {api_key_env}")
     headers = {"Authorization": f"Bearer {os.environ[api_key_env]}"} if api_key_env else {}
@@ -391,11 +405,13 @@ async def generate(
         "base_url": base_url,
         "api_key_env": api_key_env,
         "config_sha256": plan["artifacts"]["config.json"],
+        "entry_ids": selected_ids,
     }
     if (run / "GENERATION_STARTED.json").exists():
         raise FileExistsError("Generation already started; no retries or resume")
     summary: dict[str, Any] = {
-        "planned": 36,
+        "planned": len(entries),
+        "entry_ids": selected_ids,
         "attempted": 0,
         "stopped_on_transport_error": False,
         "results": [],
@@ -415,7 +431,7 @@ async def generate(
             raise ValueError("Server model ID/context differs from frozen request; see models.json")
         with (run / "GENERATION_STARTED.json").open("x") as started:
             json.dump(marker, started, indent=2)
-        for entry in plan["entries"]:
+        for entry in entries:
             directory = run / "completions" / entry["id"]
             directory.mkdir(parents=True, exist_ok=False)
             payload = json.loads((run / entry["request_path"]).read_text())
@@ -428,6 +444,7 @@ async def generate(
                 "usage": None,
                 "usage_status": "unknown",
                 "status": "started",
+                "completion_timeout_seconds": config.request_timeout,
             }
             summary["attempted"] += 1
             cancellation = None
@@ -445,6 +462,9 @@ async def generate(
                             "chat_template_kwargs": payload["chat_template_kwargs"],
                         },
                     )
+                result["completion_deadline_at"] = (
+                    datetime.now(UTC) + timedelta(seconds=config.request_timeout)
+                ).isoformat()
                 async with asyncio.timeout(config.request_timeout):
                     response = await collect_completion(client, payload, directory)
                 write_json(directory / "response.json", response)
@@ -474,6 +494,10 @@ async def generate(
                     "message": str(error),
                     "traceback": traceback.format_exc(),
                 }
+                if isinstance(error, TimeoutError):
+                    result["error"]["timeout_scope"] = "completion_total"
+                elif isinstance(error, httpx.TimeoutException):
+                    result["error"]["timeout_scope"] = "httpx_transport"
                 transport_failure = isinstance(error, (httpx.TransportError, TimeoutError))
                 result["status"] = (
                     "cancelled"
@@ -484,7 +508,7 @@ async def generate(
                     partial = json.loads((directory / "partial_response.json").read_text())
                     if partial.get("usage") is not None:
                         result.update(usage=partial["usage"], usage_status="reported_partial")
-                summary["stopped_on_transport_error"] = transport_failure
+                summary["stopped_on_transport_error"] = isinstance(error, httpx.TransportError)
             result["finished_at"] = now()
             write_json(directory / "result.json", result)
             summary["results"].append(result)
@@ -562,6 +586,9 @@ def main() -> None:
     generation.add_argument("--run", required=True)
     generation.add_argument("--base-url", required=True)
     generation.add_argument("--api-key-env", help="Environment variable name, never the key itself")
+    generation.add_argument(
+        "--entry-id", action="append", help="Generate only these entry IDs, in the supplied order"
+    )
     validation = commands.add_parser("validate")
     validation.add_argument("--run", required=True)
     validation.add_argument("--sandbox-spec", required=True)
@@ -572,7 +599,9 @@ def main() -> None:
         plan = prepare(args.output, ExperimentConfig(**overrides))
         print(json.dumps({"mode": plan["mode"], "planned_completions": len(plan["entries"])}))
     elif args.command == "generate":
-        summary = asyncio.run(generate(args.run, args.base_url, api_key_env=args.api_key_env))
+        summary = asyncio.run(
+            generate(args.run, args.base_url, api_key_env=args.api_key_env, entry_ids=args.entry_id)
+        )
         print(
             json.dumps(
                 {

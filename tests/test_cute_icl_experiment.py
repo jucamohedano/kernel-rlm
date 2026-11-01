@@ -248,7 +248,180 @@ def test_generate_preserves_native_stream_metadata_and_refuses_resume(prepared):
     assert len(requests) == 36
 
 
-def test_transport_failure_preserves_partial_and_stops_without_retry(prepared):
+def test_generate_explicit_subset_in_order_in_fresh_run(prepared, tmp_path):
+    original_run, plan = prepared
+    original_bytes = {
+        str(path.relative_to(original_run)): path.read_bytes()
+        for path in original_run.rglob("*")
+        if path.is_file()
+    }
+    run = tmp_path / "targeted"
+    config = experiment.ExperimentConfig(max_tokens=16384, request_timeout=800)
+    experiment.prepare(run, config)
+    entry_ids = [entry["id"] for entry in reversed(plan["entries"][1:5])]
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, stream=ByteStream(response_chunks()))
+
+    result = asyncio.run(
+        experiment.generate(
+            run,
+            "https://fixture.invalid/v1",
+            entry_ids=entry_ids,
+            transport=model_transport(handler),
+        )
+    )
+    assert result["planned"] == result["attempted"] == len(requests) == 4
+    assert result["entry_ids"] == entry_ids
+    assert [item["id"] for item in result["results"]] == entry_ids
+    assert all(item["status"] == "completed" for item in result["results"])
+    assert json.loads((run / "GENERATION_STARTED.json").read_text())["entry_ids"] == entry_ids
+    assert json.loads((run / "generation_summary.json").read_text()) == result
+    assert len(experiment.load_plan(run)[0]["entries"]) == 36
+    assert {path.name for path in (run / "completions").iterdir()} == set(entry_ids)
+    by_id = {entry["id"]: entry for entry in plan["entries"]}
+    assert requests == [
+        json.loads((run / by_id[entry_id]["request_path"]).read_text()) for entry_id in entry_ids
+    ]
+    assert all(request["max_tokens"] == 16384 for request in requests)
+    assert all(item["completion_timeout_seconds"] == 800 for item in result["results"])
+    assert original_bytes == {
+        str(path.relative_to(original_run)): path.read_bytes()
+        for path in original_run.rglob("*")
+        if path.is_file()
+    }
+    with pytest.raises(FileExistsError):
+        asyncio.run(
+            experiment.generate(
+                run,
+                "https://fixture.invalid/v1",
+                entry_ids=[plan["entries"][0]["id"]],
+                transport=model_transport(handler),
+            )
+        )
+    assert len(requests) == 4
+
+
+@pytest.mark.parametrize("selection", ["empty", "duplicate", "unknown", "mixed"])
+def test_generate_rejects_bad_selection_before_network_or_marker(prepared, selection):
+    run, plan = prepared
+    known = plan["entries"][0]["id"]
+    entry_ids = {
+        "empty": [],
+        "duplicate": [known, known],
+        "unknown": ["unknown-entry"],
+        "mixed": [known, "unknown-entry"],
+    }[selection]
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        raise AssertionError("Invalid selections must not contact the server")
+
+    with pytest.raises(ValueError, match="nonempty and unique|Unknown entry IDs"):
+        asyncio.run(
+            experiment.generate(
+                run,
+                "https://fixture.invalid/v1",
+                entry_ids=entry_ids,
+                transport=httpx.MockTransport(handler),
+            )
+        )
+    assert calls == []
+    assert not (run / "GENERATION_STARTED.json").exists()
+    assert not (run / "models.json").exists()
+    assert not (run / "completions").exists()
+
+
+def test_total_timeout_preserves_partial_and_moves_to_next_selected_entry(prepared, monkeypatch):
+    run, plan = prepared
+    selected = [plan["entries"][i]["id"] for i in (3, 1)]
+    chunk = response_chunks()[0]
+    calls = []
+    timeout_calls = []
+    original_timeout = asyncio.timeout
+
+    def timeout(seconds):
+        timeout_calls.append(seconds)
+        return original_timeout(0 if len(timeout_calls) == 1 else seconds)
+
+    monkeypatch.setattr(asyncio, "timeout", timeout)
+
+    class HangingStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield chunk
+            await asyncio.Event().wait()
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(200, stream=HangingStream())
+        return httpx.Response(200, stream=ByteStream(response_chunks()))
+
+    result = asyncio.run(
+        experiment.generate(
+            run,
+            "https://fixture.invalid/v1",
+            entry_ids=selected,
+            transport=model_transport(handler),
+        )
+    )
+    assert len(calls) == result["attempted"] == result["planned"] == 2
+    assert timeout_calls == [600, 600]
+    assert [item["id"] for item in result["results"]] == selected
+    assert [item["status"] for item in result["results"]] == ["transport_error", "completed"]
+    assert not result["stopped_on_transport_error"]
+    first = result["results"][0]
+    assert first["error"]["type"] == "TimeoutError"
+    assert first["error"]["timeout_scope"] == "completion_total"
+    assert first["completion_timeout_seconds"] == 600
+    assert first["started_at"] < first["completion_deadline_at"]
+    directory = run / "completions" / selected[0]
+    assert (directory / "stream.bin").read_bytes() == chunk
+    assert "ModelNew" in (directory / "partial_response.json").read_text()
+    assert not (directory / "candidate.py").exists()
+    assert json.loads((run / "generation_summary.json").read_text()) == result
+
+
+def test_generate_cli_passes_repeated_entry_ids(monkeypatch, capsys):
+    calls = []
+
+    async def fake_generate(run, base_url, **kwargs):
+        calls.append((run, base_url, kwargs))
+        return {"attempted": 2, "stopped_on_transport_error": False}
+
+    monkeypatch.setattr(experiment, "generate", fake_generate)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "experiment",
+            "generate",
+            "--run",
+            "fresh-run",
+            "--base-url",
+            "https://fixture.invalid/v1",
+            "--entry-id",
+            "03-api",
+            "--entry-id",
+            "01-api_example",
+        ],
+    )
+    experiment.main()
+    assert calls == [
+        (
+            "fresh-run",
+            "https://fixture.invalid/v1",
+            {"api_key_env": None, "entry_ids": ["03-api", "01-api_example"]},
+        )
+    ]
+    assert json.loads(capsys.readouterr().out)["attempted"] == 2
+
+
+@pytest.mark.parametrize("error_type", [httpx.ReadError, httpx.ReadTimeout])
+def test_transport_failure_preserves_partial_and_stops_without_retry(prepared, error_type):
     run, plan = prepared
     chunk = event(
         {
@@ -266,9 +439,7 @@ def test_transport_failure_preserves_partial_and_stops_without_retry(prepared):
 
     def handler(request):
         calls.append(request)
-        return httpx.Response(
-            200, stream=ByteStream([chunk], httpx.ReadError("stream disconnected"))
-        )
+        return httpx.Response(200, stream=ByteStream([chunk], error_type("stream disconnected")))
 
     result = asyncio.run(
         experiment.generate(run, "https://fixture.invalid/v1", transport=model_transport(handler))
@@ -278,7 +449,9 @@ def test_transport_failure_preserves_partial_and_stops_without_retry(prepared):
     item = result["results"][0]
     assert item["status"] == "transport_error"
     assert item["usage"] is None and item["usage_status"] == "unknown"
-    assert "ReadError" in item["error"]["traceback"]
+    assert error_type.__name__ in item["error"]["traceback"]
+    if error_type is httpx.ReadTimeout:
+        assert item["error"]["timeout_scope"] == "httpx_transport"
     directory = run / "completions" / plan["entries"][0]["id"]
     assert (directory / "stream.bin").read_bytes() == chunk
     partial = json.loads((directory / "partial_response.json").read_text())
