@@ -1,0 +1,5 @@
+Additional pointwise API: cute.math.exp(value) is a unary device math
+operation exported by the pinned cute.math module. It accepts scalar DSL values;
+Python math.exp or torch.exp is not a device operation. Scalar comparisons and
+if/else can express piecewise arithmetic. cute.math.min/max are binary exports,
+but scalar branches are also available. This packet supplies no target kernel.

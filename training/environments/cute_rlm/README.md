@@ -425,3 +425,66 @@ not fabricated or treated as a provenance failure. No numerical comparison,
 timing, Nsight, scoring, automatic retry, or diagnostic resume is performed.
 `report.json` keeps unknown token usage and incomplete/failed roots explicit.
 Verify the external backup before deleting artifacts or terminating the VM.
+
+
+## Tool-free CuTe in-context-learning pilot
+
+The `cute_rlm.icl` package is separate from the recursive compile diagnostic. Its
+question is whether a pinned model can use CuTe information supplied directly in
+a prompt, without retrieval or REPL tools.
+
+The pilot contains twelve stateless FP32 tasks across pointwise operations,
+indexing/layouts, reductions and matrix operations. Each task has three prompt
+conditions: `task_only`, `api`, and `api_example`. One fresh completion per
+condition gives 36 generations. No tools, child agents, runtime context variables
+or compiler feedback are sent during generation. The same task seed and decoding
+settings are used across conditions; their order is interleaved deterministically.
+
+Generation and offline validation are separate explicit commands. Preparation is
+CPU-only; neither preparing files nor implementing this package authorizes model
+calls, GPU validation, training, or another rental. Review and approve the frozen
+configuration and API packets before a live run.
+
+The new pilot defaults are an 8,192-token output limit, 600-second requests,
+`temperature=0.6`, `top_p=0.95`, and seed `20261101`. These settings do not change
+existing recursive experiments. Use the pinned Laguna XS-2.1 revision, Python
+CuTe DSL 4.8.1 and SM89 hardware. API packets and related examples are not a claim
+of GPU-validated sufficiency; their source, revision, license and content hashes
+are captured with the prompts. Source-family leakage and licensing must be
+reviewed before using examples for training.
+
+Offline checks run generated code only through an explicit isolated worker.
+Reference outputs are not mounted in the candidate process. Parsing, forward
+execution, numerical agreement and observed CuTe compilation/invocation are
+reported separately. Numerical checks are part of this future ICL pilot, not a
+retroactive change to the previous compile-only diagnostic. There is no timing,
+Nsight or speedup score. A Torch answer plus a dummy CuTe launch is not a valid
+CuTe solution: source review remains required before treating a sample as a
+positive. No repair, retry or feedback loop is performed.
+
+The CLI separates the three phases:
+
+```bash
+PYTHONPATH=training/src:training/environments/cute_rlm \
+  .venv/bin/python -m cute_rlm.icl.experiment prepare --output /path/to/new-run
+
+# Only after approval of compute, prompts and settings:
+PYTHONPATH=training/src:training/environments/cute_rlm \
+  .venv/bin/python -m cute_rlm.icl.experiment generate \
+  --run /path/to/new-run --base-url http://127.0.0.1:8000/v1/
+
+PYTHONPATH=training/src:training/environments/cute_rlm \
+  .venv/bin/python -m cute_rlm.icl.experiment validate \
+  --run /path/to/new-run --sandbox-spec /path/to/sandbox.json \
+  --host-python /path/to/worker/python
+```
+
+`prepare --config FILE.json` overrides the new pilot defaults. Generation checks
+server model ID/context and captured local source hashes before dispatch. The
+requested revision/BF16 precision are recorded, not inferred from `/models`.
+The sandbox runtime must mount the prepared, hash-matching `cute_rlm` package and
+its dependencies. Raw in-process worker output can be lost on launcher timeout;
+completed worker diagnostics and phase requests/results are retained. Only the
+fixed `cute_rlm.icl.worker` or existing verifier worker
+module is allowed; this is not arbitrary host execution. See
+[ICL_EXPERIMENT.md](ICL_EXPERIMENT.md) for interpretation and admission limits.

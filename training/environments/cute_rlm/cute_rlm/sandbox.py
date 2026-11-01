@@ -302,7 +302,10 @@ def build_command(spec: dict[str, Any], request: dict[str, Any]) -> list[str]:
         } or not isinstance(value, str):
             raise ValueError("unsupported trusted runtime setting")
         command.extend(("--setenv", key, value))
-    command.extend(("--chdir", "/tmp", python_target, "-m", WORKER_MODULE))
+    worker_module = request.get("worker_module", WORKER_MODULE)
+    if worker_module not in {WORKER_MODULE, "cute_rlm.icl.worker"}:
+        raise ValueError("unsupported sandbox worker module")
+    command.extend(("--chdir", "/tmp", python_target, "-m", worker_module))
     if spec.get("privileged_setup"):
         index = command.index("--unshare-all")
         command[index : index + 1] = [

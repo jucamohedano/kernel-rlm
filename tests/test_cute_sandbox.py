@@ -300,3 +300,17 @@ def test_phase_rejects_unsafe_or_unexpected_artifact_entries(phase_worker, tmp_p
     with pytest.raises(RuntimeError, match="worker outputs"):
         launch(write_output)
     assert not Path(request["output_dir"]).exists()
+
+
+@pytest.mark.parametrize("module", ["cute_rlm.verify_worker", "cute_rlm.icl.worker"])
+def test_phase_worker_module_is_an_explicit_allowlist(tmp_path, module):
+    spec = {"bwrap": "/usr/bin/bwrap", "runtime_python": "/venv/bin/python"}
+    request = {
+        "role": "reference",
+        "output_dir": str(tmp_path / "output"),
+        "worker_module": module,
+    }
+    assert build_command(spec, request)[-1] == module
+    request["worker_module"] = "arbitrary.module"
+    with pytest.raises(ValueError, match="worker module"):
+        build_command(spec, request)
