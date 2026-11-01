@@ -556,9 +556,15 @@ def _run(spec: dict[str, Any], request: dict[str, Any]) -> int:
             if not staged_output.is_dir() or staged_output.is_symlink():
                 raise RuntimeError("sandbox worker did not create a regular output directory")
             for path in staged_output.rglob("*"):
-                if path.is_symlink() or not path.is_file():
+                artifact_directory = (
+                    request.get("profile_compile")
+                    and path == staged_output / "compile-artifacts"
+                    and path.is_dir()
+                )
+                if path.is_symlink() or not (path.is_file() or artifact_directory):
                     raise RuntimeError(
-                        "worker outputs must be regular files, without links or directories"
+                        "worker outputs must be regular files or the compile-artifacts directory, "
+                        "without links"
                     )
             os.replace(staged_output, original_output)
         sys.stdout.buffer.write(process.stdout)
