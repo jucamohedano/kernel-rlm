@@ -108,13 +108,16 @@ def run(request):
         raise WorkerInfrastructureError("worker source hash mismatch")
     task = request["icl_task"]
     contract = input_contract(task)
-    output = prepare_output_directory(request["output_dir"])
-    if role == "candidate":
-        provided = json.loads((Path(request["input_dir"]) / "test-input-contract.json").read_text())
-        if provided != contract:
-            raise WorkerInfrastructureError("candidate input contract mismatch")
-    else:
-        (output / "test-input-contract.json").write_text(json.dumps(contract, indent=2) + "\n")
+    with trusted_worker_stage():
+        output = prepare_output_directory(request["output_dir"])
+        if role == "candidate":
+            provided = json.loads(
+                (Path(request["input_dir"]) / "test-input-contract.json").read_text()
+            )
+            if provided != contract:
+                raise WorkerInfrastructureError("candidate input contract mismatch")
+        else:
+            (output / "test-input-contract.json").write_text(json.dumps(contract, indent=2) + "\n")
     trace = None
     provenance = None
     try:
@@ -166,10 +169,11 @@ def run(request):
                 save_tree(output / f"{name}-{i}.npz", arrays)
     finally:
         if trace is not None:
-            try:
-                provenance = trace.snapshot()
-            finally:
-                trace.close()
+            with trusted_worker_stage():
+                try:
+                    provenance = trace.snapshot()
+                finally:
+                    trace.close()
     return {
         "status": "executed",
         "role": role,
@@ -193,7 +197,9 @@ def main():
             request = json.load(sys.stdin)
             result = run(request)
         except Exception as error:
-            if isinstance(error, (OSError, WorkerInfrastructureError)):
+            from cute_rlm.compile_trace import CompileTracePersistenceError
+
+            if isinstance(error, (WorkerInfrastructureError, CompileTracePersistenceError)):
                 status = "infrastructure"
             elif isinstance(error, SyntaxError):
                 status = "compile_error"

@@ -30,6 +30,75 @@ REPL_ENV_ALLOWLIST = frozenset(
     }
 )
 PHASE_ROOT = "/phase"
+NATIVE_WORKER_EXIT_CODES = frozenset({132, 134, 135, 136, 139})
+
+# Runs on the HOST after sudo, never inside the candidate namespace. Bubblewrap
+# closes both control FDs before exec; candidate stdout/stderr are separate pipes.
+PHASE_CONTROL_PROGRAM = """import json
+import os
+import select
+import subprocess
+import sys
+
+payload = json.load(sys.stdin)
+status_read, status_write = os.pipe()
+sync_read, sync_write = os.pipe()
+command = payload["command"]
+command[1:1] = ["--json-status-fd", str(status_write), "--sync-fd", str(sync_write)]
+try:
+    process = subprocess.run(
+        command, input=payload["input"].encode(), capture_output=True,
+        env=payload["env"], pass_fds=(status_write, sync_write), check=False,
+    )
+finally:
+    os.close(status_write)
+    os.close(sync_write)
+os.set_blocking(status_read, False)
+status = bytearray()
+status_closed = False
+while True:
+    try:
+        chunk = os.read(status_read, 4096)
+    except BlockingIOError:
+        break
+    if not chunk:
+        status_closed = True
+        break
+    status.extend(chunk)
+    if len(status) > 65536:
+        raise RuntimeError("bubblewrap status exceeded its control-plane limit")
+ready, _, _ = select.select([sync_read], [], [], 5)
+cleanup = bool(ready) and os.read(sync_read, 1) == b""
+os.close(status_read)
+os.close(sync_read)
+json.dump({
+    "returncode": process.returncode,
+    "stdout": process.stdout.decode(errors="replace"),
+    "stderr": process.stderr.decode(errors="replace"),
+    "status": status.decode(),
+    "status_closed": status_closed,
+    "namespace_cleanup": cleanup,
+}, sys.stdout)
+"""
+CUTE_HEALTH_PROGRAM = """import contextlib
+import io
+import json
+import runpy
+import tempfile
+from pathlib import Path
+import torch
+
+with tempfile.TemporaryDirectory(prefix="cute-health-") as directory:
+    module = Path(directory) / "trusted_smoke.py"
+    module.write_text(source)
+    with contextlib.redirect_stdout(io.StringIO()):
+        namespace = runpy.run_path(str(module))
+        a = torch.ones((1, 128), device="cuda", dtype=torch.float32)
+        b = torch.ones_like(a)
+        namespace["ModelNew"]().cuda().eval()(a, b)
+        torch.cuda.synchronize()
+print(json.dumps({"status": "healthy"}))
+"""
 
 
 @dataclass(frozen=True)
@@ -454,6 +523,111 @@ def _verify_namespace_support(bwrap: str) -> None:
         raise RuntimeError("configured bubblewrap executable is unavailable")
 
 
+def observe_compile_worker(
+    command: list[str], request: dict[str, Any] | None, env: dict[str, str]
+) -> tuple[subprocess.CompletedProcess, dict[str, Any]]:
+    """Capture bubblewrap-owned lifecycle evidence outside the namespace."""
+    control = ["/usr/bin/python3", "-I", "-S", "-c", PHASE_CONTROL_PROGRAM]
+    if command[:2] == ["/usr/bin/sudo", "-n"]:
+        control[:0] = command[:2]
+        command = command[2:]
+    supervised = subprocess.run(
+        control,
+        input=json.dumps(
+            {
+                "command": command,
+                "input": json.dumps(request) if request is not None else "",
+                "env": env,
+            }
+        ).encode(),
+        capture_output=True,
+        env=env,
+        check=False,
+    )
+    if supervised.returncode:
+        raise RuntimeError(
+            "trusted sandbox control failed: " + supervised.stderr.decode(errors="replace")
+        )
+    envelope = json.loads(supervised.stdout)
+    if not envelope["namespace_cleanup"]:
+        raise RuntimeError("isolated worker namespace cleanup could not be confirmed")
+    if not envelope["status_closed"]:
+        raise RuntimeError("bubblewrap lifecycle status did not close")
+    events = [json.loads(line) for line in envelope["status"].splitlines()]
+    starts = [event["child-pid"] for event in events if "child-pid" in event]
+    exits = [event["exit-code"] for event in events if "exit-code" in event]
+    lifecycle = {
+        "events": events,
+        "namespace_cleanup": True,
+        "exec_confirmed": len(starts) == len(exits) == 1
+        and type(starts[0]) is int
+        and starts[0] > 0
+        and type(exits[0]) is int
+        and exits[0] == envelope["returncode"],
+    }
+    return subprocess.CompletedProcess(
+        command,
+        envelope["returncode"],
+        envelope["stdout"].encode(),
+        envelope["stderr"].encode(),
+    ), lifecycle
+
+
+def cute_health_program() -> str:
+    """Use only the host's fixed known-good asset, never a task/candidate source."""
+    source = (Path(__file__).parent / "icl/assets/generic-2d-add.py.txt").read_text()
+    source = source.replace(
+        "args = tuple(from_dlpack(t).mark_layout_dynamic() for t in (a,b,result))",
+        "args = tuple(from_dlpack(t.view(1, -1)).mark_layout_dynamic() for t in (a,b,result))",
+    ).replace(
+        "        if self.compiled is None:\n"
+        "            self.compiled = cute.compile(elementwise_add,*args)",
+        "        self.compiled = cute.compile(elementwise_add,*args)",
+    )
+    return "source = " + repr(source) + "\n" + CUTE_HEALTH_PROGRAM
+
+
+def compile_worker_result(
+    command: list[str], request: dict[str, Any], env: dict[str, str]
+) -> tuple[subprocess.CompletedProcess, dict[str, Any] | None]:
+    process, lifecycle = observe_compile_worker(command, request, env)
+    if process.returncode not in NATIVE_WORKER_EXIT_CODES or not lifecycle["exec_confirmed"]:
+        return process, None
+    # A fresh known-good CuTe compile/launch checks current runtime health, not
+    # worker Python entry or the cause of the failed exit.
+    health_command = [*command[:-2], "-c", cute_health_program()]
+    health, health_lifecycle = observe_compile_worker(health_command, None, env)
+    if (
+        health.returncode != 0
+        or not health_lifecycle["exec_confirmed"]
+        or json.loads(health.stdout) != {"status": "healthy"}
+    ):
+        raise RuntimeError(
+            "post-crash trusted CUDA health check failed: " + health.stderr.decode(errors="replace")
+        )
+    return process, {
+        "status": "runtime_error",
+        "error_type": "IsolatedWorkerCrash",
+        "detail": (
+            f"isolated compile/forward worker exited with native-style status {process.returncode}; "
+            "cause unknown. A fresh trusted CuTe compile/launch/synchronization check passed."
+        ),
+        "worker_returncode": process.returncode,
+        "stdout": process.stdout.decode(errors="replace"),
+        "stderr": process.stderr.decode(errors="replace"),
+        "diagnostic_limit": (
+            "The exit does not establish candidate causality or that candidate forward was entered; "
+            "partial in-process stdout/stderr and compiler artifacts may be lost."
+        ),
+        "worker_lifecycle": lifecycle,
+        "post_crash_cute_health": {
+            **health_lifecycle,
+            "stdout": health.stdout.decode(),
+            "stderr": health.stderr.decode(errors="replace"),
+        },
+    }
+
+
 def _run(spec: dict[str, Any], request: dict[str, Any]) -> int:
     executable = shutil.which(spec["bwrap"]) if not os.path.isabs(spec["bwrap"]) else spec["bwrap"]
     if not executable or not os.path.isfile(executable) or not os.access(executable, os.X_OK):
@@ -554,9 +728,24 @@ def _run(spec: dict[str, Any], request: dict[str, Any]) -> int:
             # Run a fresh, uninstrumented process for correctness and timing.
             shutil.rmtree(staged_output)
             staged_output.mkdir(mode=0o700)
-        process = subprocess.run(
-            command, input=json.dumps(mapped).encode(), capture_output=True, env=env, check=False
-        )
+        if (
+            request["role"] == "candidate"
+            and request.get("compile_feedback") is True
+            and request.get("worker_module") == "cute_rlm.icl.worker"
+        ):
+            process, crash = compile_worker_result(command, mapped, env)
+            if crash is not None:
+                json.dump(crash, sys.stdout)
+                sys.stdout.write("\n")
+                return 0
+        else:
+            process = subprocess.run(
+                command,
+                input=json.dumps(mapped).encode(),
+                capture_output=True,
+                env=env,
+                check=False,
+            )
         if process.returncode == 0:
             if not staged_output.is_dir() or staged_output.is_symlink():
                 raise RuntimeError("sandbox worker did not create a regular output directory")

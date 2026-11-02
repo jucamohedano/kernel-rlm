@@ -46,7 +46,7 @@ async def launch_phase(command, request, config):
     try:
         async with asyncio.timeout(config.timeout_s):
             stdout, stderr = await process.communicate(json.dumps(request).encode())
-    except BaseException:
+    except BaseException as failure:
         if process.returncode is None:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
@@ -56,6 +56,17 @@ async def launch_phase(command, request, config):
                 await asyncio.wait_for(process.wait(), timeout=5)
             except TimeoutError as error:
                 raise RuntimeError("isolated worker cleanup could not be confirmed") from error
+        if (
+            isinstance(failure, TimeoutError)
+            and request.get("role") == "candidate"
+            and request.get("compile_feedback") is True
+            and request.get("worker_module") == "cute_rlm.icl.worker"
+        ):
+            # Reaping the unprivileged outer launcher does not prove that its
+            # privileged host controller and namespace have stopped.
+            raise RuntimeError(
+                "compile worker deadline exceeded; namespace cleanup could not be confirmed"
+            ) from failure
         raise
     feedback = request.get("compile_feedback") or request.get("prepare_only")
     diagnostics = (

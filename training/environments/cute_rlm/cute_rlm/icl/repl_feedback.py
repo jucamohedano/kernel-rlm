@@ -33,6 +33,7 @@ DIAGNOSTIC_FIELDS = (
     "stderr",
     "launcher_stderr",
     "returncode",
+    "worker_returncode",
     "wall_s",
     "diagnostic_limit",
 )

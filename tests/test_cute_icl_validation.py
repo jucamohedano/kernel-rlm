@@ -209,7 +209,11 @@ def test_real_compile_trace_survives_actual_sandbox_output_collection(tmp_path, 
             trace.close()
         return SimpleNamespace(returncode=0, stdout=b'{"status":"executed"}\n', stderr=b"")
 
-    monkeypatch.setattr(sandbox.subprocess, "run", run)
+    def observed_run(command, mapped, env):
+        result = run(command, input=json.dumps(mapped).encode())
+        return result, {"exec_confirmed": True, "namespace_cleanup": True, "events": []}
+
+    monkeypatch.setattr(sandbox, "observe_compile_worker", observed_run)
     assert sandbox._run(spec, request) == 0
     assert json.loads(capfd.readouterr().out)["status"] == "executed"
     observation = validation._compile_observation(Path(request["output_dir"]))

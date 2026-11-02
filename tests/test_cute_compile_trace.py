@@ -125,3 +125,24 @@ def test_compile_failure_does_not_leave_wrapper_installed(tmp_path: Path):
         cute.compile("kernel", fail=True)
     trace.close()
     assert cute.compile is original
+
+
+def test_artifact_persistence_error_is_distinct_from_candidate_oserror(tmp_path, monkeypatch):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from cute_rlm.compile_trace import CompileTracePersistenceError, install_compile_trace
+
+    cute = SimpleNamespace(compile=lambda *a, **k: SimpleNamespace(__ptx__=b"ptx"))
+    trace = install_compile_trace(cute, SimpleNamespace(), tmp_path)
+
+    def fail_write(path, data):
+        raise OSError("trusted storage full")
+
+    monkeypatch.setattr(Path, "write_bytes", fail_write)
+    try:
+        with pytest.raises(CompileTracePersistenceError) as caught:
+            cute.compile("kernel")
+        assert isinstance(caught.value.__cause__, OSError)
+    finally:
+        trace.close()

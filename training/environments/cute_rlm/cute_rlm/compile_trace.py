@@ -44,6 +44,10 @@ def _blob(value: Any) -> bytes | None:
     return None
 
 
+class CompileTracePersistenceError(RuntimeError):
+    """Trusted compiler-observation storage failed, not candidate arithmetic."""
+
+
 class _CompileTrace:
     def __init__(self, cute: Any, torch: Any, output_dir: Path):
         self.cute = cute
@@ -92,7 +96,10 @@ class _CompileTrace:
             path_key, hash_key = f"{name}_path", f"{name}_sha256"
             if blob is not None:
                 path = self.artifact_dir / f"{artifact_id}.{name}"
-                path.write_bytes(blob)
+                try:
+                    path.write_bytes(blob)
+                except OSError as error:
+                    raise CompileTracePersistenceError(str(error)) from error
                 artifact[path_key] = str(path.relative_to(self.output_dir))
                 artifact[hash_key] = hashlib.sha256(blob).hexdigest()
                 if name == "ptx":
