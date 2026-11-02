@@ -359,3 +359,146 @@ def test_cpu_fixture_requires_actual_model_argv_and_pinned_download_inventory(tm
         check_readiness(
             fixture.run, fixture.plan, fixture.config, fixture.receipt_path, fixture.base_url
         )
+
+
+def infrastructure_cpu_fixture(tmp_path):
+    fixture = cpu_readiness_fixture(tmp_path)
+    authorization = write_cpu_json(
+        fixture.run / "USER_AUTHORIZATION.json",
+        {
+            "scope": "CPU fictional authorization",
+            "readiness_profile": "infrastructure-only-v1",
+            "behavioral_preflight": False,
+        },
+    )
+    policy = write_cpu_json(
+        fixture.run / "READINESS_POLICY.json",
+        {
+            "profile": "infrastructure-only-v1",
+            "behavioral_preflight": False,
+            "authorization_sha256": authorization["sha256"],
+        },
+    )
+    fixture.plan["artifacts"].update(
+        {
+            "USER_AUTHORIZATION.json": authorization["sha256"],
+            "READINESS_POLICY.json": policy["sha256"],
+        }
+    )
+    write_cpu_json(fixture.run / "plan.json", fixture.plan)
+    bindings = {
+        key: fixture.receipt[key]
+        for key in ("mode", "run_id", "config_sha256", "sandbox_spec_sha256")
+    }
+    bindings.update(
+        plan_sha256=digest((fixture.run / "plan.json").read_bytes()),
+        readiness_profile="infrastructure-only-v1",
+        readiness_policy_sha256=policy["sha256"],
+        authorization_sha256=authorization["sha256"],
+    )
+    identity = fixture.receipt["server_identity"]
+    weights_path = tmp_path / "CPU-weights-manifest.json"
+    weights = json.loads(weights_path.read_bytes())
+    weights.update(bindings)
+    fixture.receipt["weights_manifest"] = write_cpu_json(weights_path, weights)
+    identity["weights_manifest_sha256"] = fixture.receipt["weights_manifest"]["sha256"]
+    observed_identity = {
+        key: value for key, value in identity.items() if key != "startup_evidence_sha256"
+    }
+    fixture.receipt["startup_evidence"] = write_cpu_json(
+        tmp_path / "CPU-startup.json", {**bindings, "observed_server_identity": observed_identity}
+    )
+    identity["startup_evidence_sha256"] = fixture.receipt["startup_evidence"]["sha256"]
+    from cute_rlm.icl.repl_readiness import INFRASTRUCTURE_CHECKS
+
+    fixture.receipt.update(bindings, checks={})
+    for name in INFRASTRUCTURE_CHECKS:
+        reference = write_cpu_json(
+            tmp_path / f"CPU-infra-{name}.json",
+            {
+                **bindings,
+                "server_identity": identity,
+                "check": name,
+                "passed": True,
+                "CPU_FIXTURE_NOT_GPU": True,
+            },
+        )
+        fixture.receipt["checks"][name] = {"passed": True, "evidence": reference}
+    write_cpu_json(fixture.receipt_path, fixture.receipt)
+    return fixture
+
+
+def test_cpu_infrastructure_profile_has_no_model_behavior_gate(tmp_path):
+    fixture = infrastructure_cpu_fixture(tmp_path)
+    receipt = check_readiness(
+        fixture.run, fixture.plan, fixture.config, fixture.receipt_path, fixture.base_url
+    )
+    assert "native_tool_protocol" not in receipt["checks"]
+    assert receipt["readiness_profile"] == "infrastructure-only-v1"
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "authorization",
+        "policy",
+        "profile",
+        "missing_profile",
+        "extra_behavior_check",
+        "missing_check",
+    ],
+)
+def test_cpu_infrastructure_profile_requires_frozen_policy_authorization_and_checks(
+    tmp_path, failure
+):
+    fixture = infrastructure_cpu_fixture(tmp_path)
+    if failure == "authorization":
+        (fixture.run / "USER_AUTHORIZATION.json").write_text("{}")
+    elif failure == "policy":
+        (fixture.run / "READINESS_POLICY.json").write_text("{}")
+    elif failure == "profile":
+        fixture.receipt["readiness_profile"] = "unknown"
+    elif failure == "missing_profile":
+        fixture.receipt.pop("readiness_profile")
+    elif failure == "extra_behavior_check":
+        fixture.receipt["checks"]["native_tool_protocol"] = {"passed": True}
+    else:
+        fixture.receipt["checks"].pop("chat_stream_transport")
+    write_cpu_json(fixture.receipt_path, fixture.receipt)
+    with pytest.raises(ValueError):
+        check_readiness(
+            fixture.run, fixture.plan, fixture.config, fixture.receipt_path, fixture.base_url
+        )
+
+
+def test_cpu_infrastructure_profile_cannot_be_selected_by_receipt_alone(tmp_path):
+    fixture = cpu_readiness_fixture(tmp_path)
+    fixture.receipt["readiness_profile"] = "infrastructure-only-v1"
+    write_cpu_json(fixture.receipt_path, fixture.receipt)
+    with pytest.raises(ValueError, match="frozen policy"):
+        check_readiness(
+            fixture.run, fixture.plan, fixture.config, fixture.receipt_path, fixture.base_url
+        )
+
+
+def test_cpu_infrastructure_profile_requires_explicit_authorization_content(tmp_path):
+    fixture = infrastructure_cpu_fixture(tmp_path)
+    authorization_path = fixture.run / "USER_AUTHORIZATION.json"
+    authorization = write_cpu_json(authorization_path, {"scope": "old authorization"})
+    policy_path = fixture.run / "READINESS_POLICY.json"
+    policy = json.loads(policy_path.read_bytes())
+    policy["authorization_sha256"] = authorization["sha256"]
+    policy_ref = write_cpu_json(policy_path, policy)
+    fixture.plan["artifacts"].update(
+        {
+            "USER_AUTHORIZATION.json": authorization["sha256"],
+            "READINESS_POLICY.json": policy_ref["sha256"],
+        }
+    )
+    write_cpu_json(fixture.run / "plan.json", fixture.plan)
+    fixture.receipt["plan_sha256"] = digest((fixture.run / "plan.json").read_bytes())
+    write_cpu_json(fixture.receipt_path, fixture.receipt)
+    with pytest.raises(ValueError, match="Authorization does not approve"):
+        check_readiness(
+            fixture.run, fixture.plan, fixture.config, fixture.receipt_path, fixture.base_url
+        )

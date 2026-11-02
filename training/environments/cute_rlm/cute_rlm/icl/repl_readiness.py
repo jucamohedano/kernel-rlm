@@ -210,6 +210,55 @@ def check_identity(identity: dict, config: ExperimentConfig, base_url: str) -> N
         raise ValueError("Quantized startup is not the pinned BF16 deployment")
 
 
+INFRASTRUCTURE_CHECKS = (
+    "server_context",
+    "tokenize",
+    "namespace_isolation",
+    "chat_stream_transport",
+    "cute_compile_forward_model_loaded",
+)
+
+
+def readiness_requirements(run: Path, plan: dict, receipt: dict) -> tuple[tuple[str, ...], dict]:
+    """Select only a frozen, explicitly authorized infrastructure-only amendment."""
+    policy_path = run / "READINESS_POLICY.json"
+    if not policy_path.exists():
+        if receipt.get("readiness_profile") is not None:
+            raise ValueError("Readiness profile needs a frozen policy")
+        return REQUIRED_CHECKS, {}
+    policy_bytes = policy_path.read_bytes()
+    policy = json.loads(policy_bytes)
+    profile = "infrastructure-only-v1"
+    if (
+        policy.get("profile") != profile
+        or policy.get("behavioral_preflight") is not False
+        or receipt.get("readiness_profile") != profile
+    ):
+        raise ValueError("Unsupported or mismatched readiness profile")
+    authorization = run / "USER_AUTHORIZATION.json"
+    policy_hash = digest(policy_bytes)
+    authorization_bytes = authorization.read_bytes()
+    authorized = json.loads(authorization_bytes)
+    if (
+        authorized.get("readiness_profile") != profile
+        or authorized.get("behavioral_preflight") is not False
+    ):
+        raise ValueError("Authorization does not approve infrastructure-only readiness")
+    authorization_hash = digest(authorization_bytes)
+    artifacts = plan.get("artifacts", {})
+    if (
+        artifacts.get("READINESS_POLICY.json") != policy_hash
+        or artifacts.get("USER_AUTHORIZATION.json") != authorization_hash
+        or policy.get("authorization_sha256") != authorization_hash
+    ):
+        raise ValueError("Readiness policy or authorization is not frozen in this plan")
+    return INFRASTRUCTURE_CHECKS, {
+        "readiness_profile": profile,
+        "readiness_policy_sha256": policy_hash,
+        "authorization_sha256": authorization_hash,
+    }
+
+
 def check_readiness(
     run: Path, plan: dict, config: ExperimentConfig, receipt_path: Path, base_url: str
 ) -> dict:
@@ -220,6 +269,8 @@ def check_readiness(
     bindings = run_bindings(run, config)
     if json.loads((run / "plan.json").read_bytes()) != plan or plan.get("run_id") != run.name:
         raise ValueError("Readiness plan differs from this run's frozen plan")
+    required_checks, policy_bindings = readiness_requirements(run, plan, receipt)
+    bindings.update(policy_bindings)
     require_bindings(receipt, bindings, "Readiness receipt")
     require_hash(receipt.get("sandbox_spec_sha256"), "sandbox_spec_sha256")
     bindings["sandbox_spec_sha256"] = receipt["sandbox_spec_sha256"]
@@ -287,9 +338,11 @@ def check_readiness(
         "Startup observation",
     )
     checks = receipt.get("checks")
-    if not isinstance(checks, dict) or not set(REQUIRED_CHECKS) <= checks.keys():
+    if not isinstance(checks, dict) or not set(required_checks) <= checks.keys():
         raise ValueError("Readiness receipt lacks required passed checks")
-    for name in REQUIRED_CHECKS:
+    if policy_bindings and set(checks) != set(required_checks):
+        raise ValueError("Infrastructure readiness has a different required check set")
+    for name in required_checks:
         check = checks[name]
         if not isinstance(check, dict) or check.get("passed") is not True:
             raise ValueError(f"Readiness check did not pass: {name}")
