@@ -244,11 +244,31 @@ class NativeRuntime:
         checkpoint_path: Path | None = None,
         stream_responses: bool = False,
         child_repl_at_limit: bool = False,
+        sampling_args: dict[str, Any] | None = None,
     ):
         self.client, self.model, self.proxy = client, model, proxy
         self.checkpoint_path = Path(checkpoint_path) if checkpoint_path is not None else None
         self.stream_responses = stream_responses
         self.child_repl_at_limit = child_repl_at_limit
+        self.sampling_args = dict(sampling_args or {})
+        if self.sampling_args.keys() - {"temperature", "top_p", "seed"}:
+            raise ValueError("sampling_args supports only temperature, top_p, and seed")
+        for key, upper in (("temperature", 2), ("top_p", 1)):
+            if key in self.sampling_args:
+                value = self.sampling_args[key]
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or value < 0
+                    or value > upper
+                    or (key == "top_p" and value == 0)
+                ):
+                    raise ValueError(f"Invalid sampling argument: {key}")
+        if "seed" in self.sampling_args:
+            seed = self.sampling_args["seed"]
+            if type(seed) is not int or not 0 <= seed < 2**32:
+                raise ValueError("sampling seed must be a nonnegative 32-bit integer")
         self.resume_of: dict[str, Any] | None = None
         self.resume_adjustments: dict[str, Any] = {}
         self.prior_elapsed_s = 0.0
@@ -301,6 +321,7 @@ class NativeRuntime:
             "enable_thinking": self.enable_thinking,
             "stream_responses": self.stream_responses,
             "child_repl_at_limit": self.child_repl_at_limit,
+            "sampling_args": self.sampling_args,
         }
 
     async def resume(
@@ -974,6 +995,7 @@ class NativeRuntime:
                     "logprobs": bool(self.budget_policy and self.budget_policy.logprobs),
                     "chat_template_kwargs": {"enable_thinking": self.enable_thinking},
                 }
+                payload.update(self.sampling_args)
                 if payload["logprobs"]:
                     payload.update(top_logprobs=0, return_tokens_as_token_ids=True)
                 if not plain:

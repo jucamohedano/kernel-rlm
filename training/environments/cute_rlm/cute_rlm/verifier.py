@@ -52,7 +52,10 @@ async def launch_phase(command, request, config):
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            await asyncio.wait_for(process.wait(), timeout=5)
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5)
+            except TimeoutError as error:
+                raise RuntimeError("isolated worker cleanup could not be confirmed") from error
         raise
     feedback = request.get("compile_feedback") or request.get("prepare_only")
     diagnostics = (

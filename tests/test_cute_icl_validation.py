@@ -310,7 +310,9 @@ def test_worker_regenerates_reference_and_candidate_cases_with_strides(tmp_path,
         return Tensor(inputs[0].shape, (1,), inputs[0].values.copy())
 
     monkeypatch.setitem(sys.modules, "torch", torch)
-    monkeypatch.setattr(tasks, "build_inputs", build_inputs)
+    from cute_rlm.icl import inputs as public_inputs
+
+    monkeypatch.setattr(public_inputs, "build_inputs", build_inputs)
     monkeypatch.setattr(tasks, "expected_output", oracle)
     monkeypatch.setattr(worker, "to_arrays", lambda torch, value: value.values)
     monkeypatch.setattr(worker, "load_module", lambda *a: SimpleNamespace(ModelNew=Model))
@@ -370,8 +372,6 @@ def test_worker_rejects_identity_candidate_before_output_save(tmp_path, task, mo
     import sys
     from contextlib import nullcontext
 
-    from cute_rlm.icl import tasks
-
     class Tensor:
         device = "cuda:0"
         shape = (1,)
@@ -412,7 +412,9 @@ def test_worker_rejects_identity_candidate_before_output_save(tmp_path, task, mo
         cuda=SimpleNamespace(manual_seed_all=lambda seed: None, synchronize=lambda: None),
     )
     monkeypatch.setitem(sys.modules, "torch", torch)
-    monkeypatch.setattr(tasks, "build_inputs", lambda *a: [Tensor()])
+    from cute_rlm.icl import inputs as public_inputs
+
+    monkeypatch.setattr(public_inputs, "build_inputs", lambda *a: [Tensor()])
     monkeypatch.setattr(worker, "load_module", lambda *a: SimpleNamespace(ModelNew=Module))
     inputs = tmp_path / "inputs"
     inputs.mkdir()

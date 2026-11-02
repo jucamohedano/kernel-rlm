@@ -14,6 +14,7 @@ class ContextBudgetPolicy:
     output_fraction: float = 0.9
     max_generated_tokens: int = 1_000_000
     logprobs: bool = True
+    per_call_max_tokens: int | None = None
 
     def __post_init__(self):
         if (
@@ -34,6 +35,12 @@ class ContextBudgetPolicy:
             raise ValueError("max_generated_tokens must be a positive integer")
         if not isinstance(self.logprobs, bool):
             raise ValueError("logprobs must be a boolean")
+        if self.per_call_max_tokens is not None and (
+            not isinstance(self.per_call_max_tokens, int)
+            or isinstance(self.per_call_max_tokens, bool)
+            or self.per_call_max_tokens <= 0
+        ):
+            raise ValueError("per_call_max_tokens must be a positive integer or None")
 
 
 class VllmPromptCounter:
@@ -105,6 +112,8 @@ class GeneratedTokenBudget:
             self.policy.max_generated_tokens - self.used - self.outstanding,
             math.floor(self.policy.output_fraction * context_remaining),
         )
+        if self.policy.per_call_max_tokens is not None:
+            cap = min(cap, self.policy.per_call_max_tokens)
         if cap <= 0:
             if self.used < self.policy.max_generated_tokens and self.outstanding:
                 self.changed.clear()

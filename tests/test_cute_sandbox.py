@@ -314,3 +314,33 @@ def test_phase_worker_module_is_an_explicit_allowlist(tmp_path, module):
     request["worker_module"] = "arbitrary.module"
     with pytest.raises(ValueError, match="worker module"):
         build_command(spec, request)
+
+
+def test_worker_uses_explicit_trusted_gpu_visibility_for_pair_partition(tmp_path):
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    spec = {
+        "bwrap": "/usr/bin/bwrap",
+        "runtime_python": "/venv/bin/python",
+        "readonly_bindings": [],
+        "gpu_devices": [binding("/dev/nvidia2", "/dev/nvidia2")],
+        "runtime_settings": {"CUDA_VISIBLE_DEVICES": "GPU-12345678-1234-1234-1234-123456789abc"},
+    }
+    command = build_command(
+        spec,
+        {
+            "role": "candidate",
+            "input_dir": str(inputs),
+            "output_dir": str(tmp_path / "outputs"),
+            "worker_module": "cute_rlm.icl.worker",
+        },
+    )
+    index = command.index("CUDA_VISIBLE_DEVICES")
+    assert command[index - 1 : index + 2] == [
+        "--setenv",
+        "CUDA_VISIBLE_DEVICES",
+        "GPU-12345678-1234-1234-1234-123456789abc",
+    ]
+    assert ["--dev-bind", "/dev/nvidia2", "/dev/nvidia2"] in [
+        command[i : i + 3] for i, value in enumerate(command) if value == "--dev-bind"
+    ]

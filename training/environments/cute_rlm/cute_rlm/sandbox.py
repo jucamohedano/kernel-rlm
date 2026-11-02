@@ -89,6 +89,7 @@ class SandboxSpec:
             "CUDA_HOME",
             "CUDA_PATH",
             "CUTE_DSL_CUDA_VERSION",
+            "CUDA_VISIBLE_DEVICES",
         }:
             raise ValueError("unsupported trusted runtime setting")
         if any(not isinstance(value, str) for value in (self.runtime_settings or {}).values()):
@@ -299,6 +300,7 @@ def build_command(spec: dict[str, Any], request: dict[str, Any]) -> list[str]:
             "CUDA_HOME",
             "CUDA_PATH",
             "CUTE_DSL_CUDA_VERSION",
+            "CUDA_VISIBLE_DEVICES",
         } or not isinstance(value, str):
             raise ValueError("unsupported trusted runtime setting")
         command.extend(("--setenv", key, value))

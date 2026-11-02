@@ -101,6 +101,28 @@ def test_policy_validates_and_applies_fractional_context_cap():
     assert budget.reserve("a", 2) == 8
 
 
+@pytest.mark.parametrize("value", [0, -1, True, False, 1.5, "16384"])
+def test_policy_rejects_invalid_per_call_max_tokens(value):
+    with pytest.raises(ValueError, match="per_call_max_tokens"):
+        ContextBudgetPolicy(per_call_max_tokens=value)
+
+
+def test_per_call_cap_respects_remaining_tree_and_context():
+    context_budget = GeneratedTokenBudget(
+        ContextBudgetPolicy(server_context_tokens=100, per_call_max_tokens=16_384)
+    )
+    assert context_budget.reserve("context-limited", 20) == 72
+
+    tree_budget = GeneratedTokenBudget(
+        ContextBudgetPolicy(max_generated_tokens=20_000, per_call_max_tokens=16_384)
+    )
+    assert tree_budget.reserve("root", 20) == 16_384
+    assert tree_budget.reserve("child", 20) == 3_616
+    assert tree_budget.settle("root", {"completion_tokens": 16_000}) == (16_000, 16_384)
+    assert tree_budget.settle("child", {"completion_tokens": 0}) == (0, 3_616)
+    assert tree_budget.reserve("next", 20) == 4_000
+
+
 class ChatClient:
     def __init__(self, completion_tokens):
         self.completion_tokens = completion_tokens
@@ -180,7 +202,24 @@ def test_undispatched_failure_releases_and_cancelled_dispatch_closes_budget():
 
 
 @pytest.mark.asyncio
-async def test_async_parent_and_child_reserve_disjoint_allowances():
+@pytest.mark.parametrize(
+    ("policy", "expected_caps"),
+    [
+        (
+            ContextBudgetPolicy(
+                server_context_tokens=100, max_generated_tokens=100, logprobs=False
+            ),
+            [28, 72],
+        ),
+        (ContextBudgetPolicy(logprobs=False), [235_911, 235_911]),
+        (
+            ContextBudgetPolicy(per_call_max_tokens=16_384, logprobs=False),
+            [16_384, 16_384],
+        ),
+    ],
+    ids=["shared-budget", "default-context-fraction", "fixed-per-call-cap"],
+)
+async def test_async_parent_and_child_reserve_disjoint_allowances(policy, expected_caps):
     gate = asyncio.Event()
     both = asyncio.Event()
     calls = []
@@ -202,9 +241,7 @@ async def test_async_parent_and_child_reserve_disjoint_allowances():
         Client(),
         "m",
         object(),
-        budget_policy=ContextBudgetPolicy(
-            server_context_tokens=100, max_generated_tokens=100, logprobs=False
-        ),
+        budget_policy=policy,
         prompt_counter=count,
     )
     runtime.deadline = time.monotonic() + 5
@@ -227,8 +264,8 @@ async def test_async_parent_and_child_reserve_disjoint_allowances():
     ]
     try:
         await asyncio.wait_for(both.wait(), 1)
-        assert sorted(call["max_tokens"] for call in calls) == [28, 72]
-        assert runtime.generated_budget.outstanding == 100
+        assert sorted(call["max_tokens"] for call in calls) == expected_caps
+        assert runtime.generated_budget.outstanding == sum(expected_caps)
     finally:
         gate.set()
         await asyncio.gather(*tasks)

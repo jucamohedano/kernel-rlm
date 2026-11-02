@@ -10,6 +10,7 @@ import hashlib
 import inspect
 import json
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 from cute_rlm.verify_worker import (
@@ -23,6 +24,18 @@ from cute_rlm.verify_worker import (
 )
 
 CASE_SEED = 20261101
+
+
+class WorkerInfrastructureError(RuntimeError):
+    """Trusted worker setup, input construction, or persistence failed."""
+
+
+@contextmanager
+def trusted_worker_stage():
+    try:
+        yield
+    except Exception as error:
+        raise WorkerInfrastructureError(str(error)) from error
 
 
 def input_contract(task):
@@ -79,40 +92,43 @@ def cuda_inputs(torch, inputs):
 
 
 def run(request):
-    import numpy as np
-    import torch
+    with trusted_worker_stage():
+        import numpy as np
+        import torch
 
-    from cute_rlm.icl.tasks import build_inputs, expected_output
-    from cute_rlm.outputs import save_tree
+        from cute_rlm.icl.inputs import build_inputs
+        from cute_rlm.outputs import save_tree
 
     role = request["role"]
     if role not in {"reference", "candidate"}:
-        raise ValueError("invalid worker phase")
+        raise WorkerInfrastructureError("invalid worker phase")
     source = request["source"]
     source_hash = hashlib.sha256(source.encode()).hexdigest()
     if source_hash != request["source_sha256"]:
-        raise ValueError("worker source hash mismatch")
+        raise WorkerInfrastructureError("worker source hash mismatch")
     task = request["icl_task"]
     contract = input_contract(task)
     output = prepare_output_directory(request["output_dir"])
     if role == "candidate":
         provided = json.loads((Path(request["input_dir"]) / "test-input-contract.json").read_text())
         if provided != contract:
-            raise ValueError("candidate input contract mismatch")
+            raise WorkerInfrastructureError("candidate input contract mismatch")
     else:
         (output / "test-input-contract.json").write_text(json.dumps(contract, indent=2) + "\n")
     trace = None
     provenance = None
     try:
         if role == "candidate" and request.get("profile_compile"):
-            import cutlass.cute as cute
+            with trusted_worker_stage():
+                import cutlass.cute as cute
 
-            from cute_rlm.compile_trace import install_compile_trace
+                from cute_rlm.compile_trace import install_compile_trace
 
-            trace = install_compile_trace(cute, torch, output)
+                trace = install_compile_trace(cute, torch, output)
         model = None
         if role == "candidate":
-            seed_all(torch, np, CASE_SEED)
+            with trusted_worker_stage():
+                seed_all(torch, np, CASE_SEED)
             module = load_module(source, "icl_candidate")
             with initialization():
                 if not hasattr(module, "ModelNew"):
@@ -125,14 +141,18 @@ def run(request):
                 if model.state_dict():
                     raise NotImplementedError("ICL tasks require stateless ModelNew")
         for i, entry in enumerate(contract["cases"]):
-            seed_all(torch, np, entry["seed"])
-            inputs = build_inputs(task, entry["case"], torch)
-            if not isinstance(inputs, (list, tuple)):
-                raise NotImplementedError("build_inputs must return positional inputs")
-            inputs = cuda_inputs(torch, inputs)
+            with trusted_worker_stage():
+                seed_all(torch, np, entry["seed"])
+                inputs = build_inputs(task, entry["case"], torch)
+                if not isinstance(inputs, (list, tuple)):
+                    raise TypeError("build_inputs must return positional inputs")
+                inputs = cuda_inputs(torch, inputs)
             with torch.no_grad():
                 if role == "reference":
-                    value = expected_output(task, inputs, torch)
+                    with trusted_worker_stage():
+                        from cute_rlm.icl.tasks import expected_output
+
+                        value = expected_output(task, inputs, torch)
                 else:
                     inspect.signature(model.forward).bind(*inputs)
                     value = model(*inputs)
@@ -141,7 +161,9 @@ def run(request):
             reject_cross_tree_aliases(torch, inputs, value, state)
             # Output contiguity is checked by to_arrays, never silently repaired.
             name = "expected" if role == "reference" else "outputs"
-            save_tree(output / f"{name}-{i}.npz", to_arrays(torch, value))
+            arrays = to_arrays(torch, value)
+            with trusted_worker_stage():
+                save_tree(output / f"{name}-{i}.npz", arrays)
     finally:
         if trace is not None:
             try:
@@ -171,7 +193,9 @@ def main():
             request = json.load(sys.stdin)
             result = run(request)
         except Exception as error:
-            if isinstance(error, SyntaxError):
+            if isinstance(error, (OSError, WorkerInfrastructureError)):
+                status = "infrastructure"
+            elif isinstance(error, SyntaxError):
                 status = "compile_error"
             elif isinstance(error, NotImplementedError):
                 status = "unsupported"
