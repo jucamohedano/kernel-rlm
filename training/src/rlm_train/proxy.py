@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 
 from aiohttp import web
@@ -28,6 +30,7 @@ class ClientHandle:
     fake_query: FakeQuery | None = None
     fake_query_batched: FakeQueryBatched | None = None
     state_ref: Any | None = None
+    recursive: Any | None = None
 
 
 async def _maybe_await(result: Any) -> Any:
@@ -80,12 +83,14 @@ def _coerce_messages(prompt: str | list) -> list:
 
 
 class SubLLMProxy:
-    def __init__(self, host: str = "127.0.0.1", port: int = 0):
+    def __init__(self, host: str = "127.0.0.1", port: int = 0, socket_path: Path | None = None):
+        self._socket_path = Path(socket_path).resolve() if socket_path is not None else None
+        self._socket_identity: tuple[int, int] | None = None
         self._host = host
         self._port = port
         self._app: web.Application | None = None
         self._runner: web.AppRunner | None = None
-        self._site: web.TCPSite | None = None
+        self._site: web.BaseSite | None = None
         self._handles: dict[str, ClientHandle] = {}
         self._semaphores: dict[str, asyncio.Semaphore] = {}
         self._lock = asyncio.Lock()
@@ -96,11 +101,41 @@ class SubLLMProxy:
         app = web.Application()
         app.router.add_post("/rollout/{rollout_id}/llm_query", self._handle_single)
         app.router.add_post("/rollout/{rollout_id}/llm_query_batched", self._handle_batched)
+        app.router.add_post("/rollout/{rollout_id}/rlm_query", self._recursive_query)
+        app.router.add_post(
+            "/rollout/{rollout_id}/rlm_query_batched", self._recursive_query_batched
+        )
+        app.router.add_post("/rollout/{rollout_id}/rlm_status", self._recursive_status)
+        app.router.add_post("/rollout/{rollout_id}/rlm_result", self._recursive_result)
+        app.router.add_post("/rollout/{rollout_id}/rlm_wait", self._recursive_wait)
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, self._host, self._port)
-        await site.start()
-        if self._port == 0:
+        if self._socket_path is not None and self._socket_path.exists():
+            await runner.cleanup()
+            raise FileExistsError(f"Proxy socket path already exists: {self._socket_path}")
+        site = (
+            web.UnixSite(runner, str(self._socket_path))
+            if self._socket_path is not None
+            else web.TCPSite(runner, self._host, self._port)
+        )
+        try:
+            await site.start()
+            if self._socket_path is not None:
+                identity = self._socket_path.stat()
+                self._socket_identity = (identity.st_dev, identity.st_ino)
+                os.chmod(self._socket_path, 0o600)
+        except BaseException:
+            await runner.cleanup()
+            if self._socket_path is not None and self._socket_identity is not None:
+                try:
+                    identity = self._socket_path.stat()
+                    if (identity.st_dev, identity.st_ino) == self._socket_identity:
+                        self._socket_path.unlink()
+                except FileNotFoundError:
+                    pass
+                self._socket_identity = None
+            raise
+        if self._socket_path is None and self._port == 0:
             server = getattr(site, "_server", None)
             socks = getattr(server, "sockets", None) if server else None
             if socks:
@@ -114,11 +149,21 @@ class SubLLMProxy:
         if self._runner:
             await self._runner.cleanup()
         self._app = self._runner = self._site = None
+        if self._socket_path is not None and self._socket_identity is not None:
+            try:
+                identity = self._socket_path.stat()
+                if (identity.st_dev, identity.st_ino) == self._socket_identity:
+                    self._socket_path.unlink()
+            except FileNotFoundError:
+                pass
+            self._socket_identity = None
         self._handles.clear()
         self._semaphores.clear()
 
     @property
     def url(self) -> str:
+        if self._socket_path is not None:
+            return "unix://" + str(self._socket_path)
         return f"http://{self._host}:{self._port}"
 
     def register(self, rollout_id: str, handle: ClientHandle) -> None:
@@ -217,6 +262,53 @@ class SubLLMProxy:
 
         results = await asyncio.gather(*(run_one(p) for p in prompts))
         return web.json_response({"responses": results})
+
+    async def _recursive_call(self, request: web.Request, method: str) -> web.Response:
+        rollout_id = request.match_info["rollout_id"]
+        handle = self._handles.get(rollout_id)
+        if handle is None:
+            return web.json_response(
+                {"error": f"unknown rollout_id {rollout_id!r}", "error_type": "LookupError"},
+                status=404,
+            )
+        service = handle.recursive
+        if service is None:
+            return web.json_response(
+                {"error": "recursive child service is not configured", "error_type": "RuntimeError"}
+            )
+        try:
+            body = await request.json()
+            if method == "query":
+                value = await service.query(
+                    body["prompt"], body.get("model"), blocking=body.get("blocking", True)
+                )
+            elif method == "query_batched":
+                value = await service.query_batched(body["prompts"], body.get("model"))
+            elif method == "status":
+                value = await service.status(body["handle"])
+            elif method == "result":
+                value = await service.result(body["handle"])
+            else:
+                value = await service.wait(body["handle"], timeout_s=body.get("timeout_s", 30))
+            key = "responses" if method == "query_batched" else "response"
+            return web.json_response({key: value})
+        except Exception as error:  # noqa: BLE001
+            return web.json_response({"error": str(error), "error_type": type(error).__name__})
+
+    async def _recursive_query(self, request: web.Request) -> web.Response:
+        return await self._recursive_call(request, "query")
+
+    async def _recursive_query_batched(self, request: web.Request) -> web.Response:
+        return await self._recursive_call(request, "query_batched")
+
+    async def _recursive_status(self, request: web.Request) -> web.Response:
+        return await self._recursive_call(request, "status")
+
+    async def _recursive_result(self, request: web.Request) -> web.Response:
+        return await self._recursive_call(request, "result")
+
+    async def _recursive_wait(self, request: web.Request) -> web.Response:
+        return await self._recursive_call(request, "wait")
 
     async def _completion(
         self,

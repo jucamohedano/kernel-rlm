@@ -71,34 +71,39 @@ class SubprocessReplBackend(ReplBackend):
             raise WorkerStartupError(f"Worker init failed: {init.get('error')}")
 
     async def stop(self) -> None:
-        if self._proc is None:
+        proc = self._proc
+        if proc is None:
             return
-        try:
-            if self._proc.returncode is None:
+        async with self._lock:
+            if proc.returncode is None:
                 try:
                     await self._send({"id": "_shutdown", "type": "shutdown"})
                     await asyncio.wait_for(self._read_line(), timeout=2.0)
                 except (TimeoutError, BrokenPipeError, ConnectionResetError, WorkerProtocolError):
                     pass
-        finally:
-            if self._proc.returncode is None:
+            if proc.returncode is None:
                 try:
-                    self._proc.terminate()
+                    proc.terminate()
                 except ProcessLookupError:
                     pass
                 try:
-                    await asyncio.wait_for(self._proc.wait(), timeout=2.0)
+                    await asyncio.wait_for(proc.wait(), timeout=2.0)
                 except TimeoutError:
                     try:
-                        self._proc.kill()
+                        proc.kill()
                     except ProcessLookupError:
                         pass
-                    await self._proc.wait()
+                    try:
+                        await asyncio.wait_for(proc.wait(), timeout=2.0)
+                    except TimeoutError as error:
+                        raise WorkerProtocolError("worker did not exit after SIGKILL") from error
+            if proc.returncode is None:
+                raise WorkerProtocolError("worker did not exit after SIGKILL")
             if self._stderr_task and not self._stderr_task.done():
                 self._stderr_task.cancel()
                 try:
                     await self._stderr_task
-                except (asyncio.CancelledError, Exception):
+                except asyncio.CancelledError:
                     pass
             self._proc = None
             self._stderr_task = None
@@ -111,6 +116,9 @@ class SubprocessReplBackend(ReplBackend):
         if not code:
             return
         await self._request({"type": "bootstrap", "code": code})
+
+    async def update_history(self, messages: list[Any]) -> None:
+        await self._request({"type": "update_history", "messages": messages})
 
     async def execute(self, code: str) -> ExecResult:
         result = await self._request({"type": "exec", "code": code})

@@ -192,16 +192,48 @@ def test_worker_exit_during_forced_cleanup(modules):
     from rlm_train.repl.subprocess import SubprocessReplBackend, WorkerProtocolError
 
     backend = SubprocessReplBackend()
-    backend._proc = SimpleNamespace(
+    proc = SimpleNamespace(
         returncode=None,
         terminate=Mock(),
         kill=Mock(side_effect=ProcessLookupError),
-        wait=AsyncMock(side_effect=[TimeoutError(), None]),
+        wait=AsyncMock(),
     )
+
+    calls = 0
+
+    async def wait_for_exit():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise TimeoutError()
+        proc.returncode = 0
+
+    proc.wait.side_effect = wait_for_exit
+    backend._proc = proc
     backend._send = AsyncMock()
     backend._read_line = AsyncMock(side_effect=WorkerProtocolError("closed"))
     asyncio.run(backend.stop())
     assert backend._proc is None
+    assert proc.returncode == 0
+
+
+def test_worker_exit_unconfirmed_retains_process():
+    from rlm_train.repl.subprocess import SubprocessReplBackend, WorkerProtocolError
+
+    backend = SubprocessReplBackend()
+    proc = SimpleNamespace(
+        returncode=None,
+        terminate=Mock(),
+        kill=Mock(),
+        wait=AsyncMock(side_effect=TimeoutError()),
+    )
+    backend._proc = proc
+    backend._send = AsyncMock()
+    backend._read_line = AsyncMock(side_effect=WorkerProtocolError("closed"))
+    with pytest.raises(WorkerProtocolError, match="did not exit"):
+        asyncio.run(backend.stop())
+    assert backend._proc is proc
+    proc.kill.assert_called_once()
 
 
 @pytest.mark.parametrize("workflow", ["budget", "scaffold", "invalid_syntax"])

@@ -171,7 +171,8 @@ def test_real_worker_proxy_single_and_batched_share_budget(subcalls):
                 "print(rlm_query('grandchild?'))"
             )
             assert "CUDA advice" in result.stdout
-            assert result.stdout.count("budget exhausted") == 2
+            assert result.stdout.count("budget exhausted") == 1
+            assert "recursive child service is not configured" in result.stderr
             assert result.final_answer is None
         finally:
             await backend.stop()
