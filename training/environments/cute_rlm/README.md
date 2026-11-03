@@ -56,6 +56,16 @@ The next-eval plan requests:
 
 ## Model interface and compile feedback
 
+The system prompt and the first user message are defined in `cute_rlm/prompts.py`.
+They use the detailed L1 contract/workflow style, adapted to CuTe rather than CUDA
+C++: source inspection, a task-specific contract checklist, constructor/runtime
+separation, strict state registration, CuTe source assembly, actual feedback and
+explicit final submission. The first user message includes the actual task ID,
+hardware, numerical settings and budgets. It is not a one-line task request.
+Preparation captures the exact rendered system/user messages as hashed inputs;
+execution reads those captured messages rather than rendering current defaults.
+No complete kernel or task solution is provided by the string-assembly example.
+
 The task is already in the root REPL as a Python dictionary. Start with
 `print(context["reference_code"])`; do not search the filesystem for the task.
 Use `search_docs(...)` and `read_doc(...)` for pinned CuTe documentation. The

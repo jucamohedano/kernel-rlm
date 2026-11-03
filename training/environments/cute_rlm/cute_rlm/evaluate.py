@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from cute_rlm.config import REQUIRED_GPU_CHECKS, EvalConfig, check_gpu_receipt, serving_arguments
+from cute_rlm.prompts import CUTE_SYSTEM_PROMPT, first_user_message
 
 
 def prepare(project: Path, config: EvalConfig, run_id: str, output_root: Path) -> dict:
@@ -53,6 +54,10 @@ def prepare(project: Path, config: EvalConfig, run_id: str, output_root: Path) -
     captured_bytes = {
         ".eval-inputs/docs-corpus.json": corpus,
         ".eval-inputs/resolved-config.json": json.dumps(config.payload(), sort_keys=True).encode(),
+        ".eval-inputs/system-prompt.txt": CUTE_SYSTEM_PROMPT.encode(),
+        ".eval-inputs/user-prompts.json": json.dumps(
+            {task["task_id"]: first_user_message(task, config) for task in tasks}, sort_keys=True
+        ).encode(),
     }
     code_paths.extend(
         [
@@ -78,6 +83,8 @@ def prepare(project: Path, config: EvalConfig, run_id: str, output_root: Path) -
         prompt_contract={
             "native_tools": ["repl"],
             "task_data": "REPL context",
+            "system_prompt_input": ".eval-inputs/system-prompt.txt",
+            "user_prompts_input": ".eval-inputs/user-prompts.json",
             "selected_logprobs": True,
             "compaction": False,
             "compile_feedback": {
@@ -135,14 +142,17 @@ async def evaluate_prepared(
         raise ValueError(
             "A protected CuTe compile/launch observer is required before scored evaluation"
         )
-    corpus_bytes = (directory / "inputs/.eval-inputs/docs-corpus.json").read_bytes()
-    docs_pin = next(
-        item["sha256"]
-        for item in manifest["inputs"]
-        if item["path"] == ".eval-inputs/docs-corpus.json"
-    )
-    if hashlib.sha256(corpus_bytes).hexdigest() != docs_pin:
-        raise ValueError("Frozen documentation corpus changed")
+    captured = {}
+    for name in ("docs-corpus.json", "system-prompt.txt", "user-prompts.json"):
+        relative = ".eval-inputs/" + name
+        content = (directory / "inputs" / relative).read_bytes()
+        expected = next(item["sha256"] for item in manifest["inputs"] if item["path"] == relative)
+        if hashlib.sha256(content).hexdigest() != expected:
+            raise ValueError(f"Frozen evaluation input changed: {relative}")
+        captured[name] = content
+    corpus_bytes = captured["docs-corpus.json"]
+    system_prompt = captured["system-prompt.txt"].decode()
+    user_prompts = json.loads(captured["user-prompts.json"])
     tasks = load_tasks(directory / "inputs" / config.task_manifest)
     start_evaluation(manifest, directory.parent)
     import tempfile
@@ -186,14 +196,14 @@ async def evaluate_prepared(
                 prompt_counter=VllmPromptCounter(client, config.server_context_tokens),
                 backend_factory=backend_factory,
                 bootstrap_code=docs_bootstrap(json.loads(corpus_bytes)),
-                system_prompt=CUTE_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
                 compile_candidate=feedback,
                 turn_notice=cute_turn_notice,
                 event_path=directory / "native-events.jsonl",
             )
             try:
                 record = await runtime.run(
-                    "Implement this task with CuTe. Inspect context for the reference specification.",
+                    user_prompts[task["task_id"]],
                     task_context(task),
                 )
                 record["example_id"] = task["task_id"]
@@ -298,38 +308,6 @@ def cute_turn_notice(turn: int, max_turns: int | None) -> str | None:
         "Set answer['content'] = source and answer['ready'] = True to submit. "
         "Do not wait for more feedback once your remaining turns are needed to finalize."
     )
-
-
-CUTE_SYSTEM_PROMPT = (
-    "Use only the native repl(code) tool. Python variables persist. At the root, context "
-    "is a Python dictionary already loaded in your REPL, not a filename. Start with "
-    "print(context['reference_code']) to read the original PyTorch Model and its "
-    "get_inputs/get_init_inputs. Do not search the filesystem for the task. "
-    "Implement the same operation using NVIDIA CuTe DSL (cutlass.cute), preserving "
-    "the constructor, forward, parameter and buffer state contract. "
-    "This REPL has no GPU. Use it to inspect the task and construct Python source. "
-    "Use search_docs(query) and read_doc(doc_id, start=0, chars=1200) for pinned CuTe "
-    "documentation instead of wandering through installed packages. "
-    "Call feedback = compile_candidate(source) to compile and run one example "
-    "forward in a separate GPU sandbox. It prints feedback automatically and also "
-    "returns a dictionary; do not print it a second time. It returns compiler/runtime "
-    "diagnostics, not numerical correctness, hidden reference outputs or speed. "
-    "There is no fixed compile-feedback call quota: correct your source and call "
-    "compile_candidate again as often as useful within the remaining turns and time. "
-    "A compile check does not submit or end the episode. Do not set answer['ready'] "
-    "while still seeking feedback. Final independent verification happens only after "
-    "submission. Submit complete Python defining ModelNew by executing "
-    "answer['content'] = source; answer['ready'] = True. Submit your best implementation "
-    "within the turn budget even if uncertain. A warning begins at turn 28 for the "
-    "32-turn limit; aim to submit before the last turn and use the final turn to "
-    "submit immediately if still unfinished. Do not import the reference module or "
-    "read hidden verifier outputs. llm_query makes plain model calls; rlm_query runs "
-    "independent recursive REPL children. rlm_query(prompt, blocking=False) returns "
-    "a handle; use rlm_status, rlm_result or rlm_wait(handle, timeout_s=30). Children "
-    "receive their supplied prompt as context, not the root task dictionary or its "
-    "variables; pass needed snippets explicitly. history contains your prior messages. "
-    "Do not print entire docs or history."
-)
 
 
 def main():
