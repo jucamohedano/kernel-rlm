@@ -44,8 +44,11 @@ The next-eval plan requests:
   Parallel calls reserve distinct allowances. Unknown usage after dispatch is
   charged conservatively rather than released for reuse. Input tokens are logged
   but are not part of this generated-token budget.
-- Existing 32-turn, 32-child and 256-model-request guards stay explicit and optional
-  in the manifest; they are not model requirements. No hidden limit is removed.
+- The CuTe preset allows 64 turns per REPL session, 32 child admissions and 256
+  model requests per task tree. These guards stay explicit and optional in the
+  manifest; they are ceilings, not requirements. Root depth 0 can create REPL
+  children at depth 1; children cannot create grandchildren. Generic native
+  callers keep their existing depth-cutoff behavior.
 - The old 65,536-character child-prompt screen is disabled for this preset: exact
   token counting applies instead. The local broker has an explicit 8 MiB request
   body limit, rather than silently retaining aiohttp's 1 MiB default. Other callers
@@ -75,7 +78,11 @@ The shared `resources` dictionary is preloaded in root and recursive child REPLs
   and result hashes. This is not a benchmark task solution, a task-specific
   implementation plan or readiness evidence for a new VM/dtype/layout/stream.
 - `api_notes`, `helper_help`: short launch/adaptation/source-inspection notes and
-  the actual helper signatures, bounds and return schemas.
+  the actual helper signatures, bounds and return schemas. The indexed `imports`
+  section shows the exact `cutlass.cute` import paths without changing the verified
+  example source.
+- `delegation_example`: executable root REPL code for a bounded complete-`ModelNew`
+  repair by a recursive child, followed by structured result collection and review.
 
 Preparation captures exact system/user messages and `.eval-inputs/resources.json`
 as hashed inputs; execution loads the captured bytes, not current defaults.
@@ -124,9 +131,10 @@ answer["content"] = best_source
 answer["ready"] = True
 ```
 
-The host warns before model turn **28/32**, counting turns from one. Warnings
-continue through turn 31 so the model can correct and submit before the last turn.
-On turn 32 it is told to submit immediately rather than start another check.
+With the 64-turn preset, the host warns before model turn **60/64**, counting
+turns from one. Warnings continue through turn 63 so the model can correct and
+submit before the last turn. On turn 64 it is told to submit immediately rather
+than start another check.
 The warning is guidance, not an automatic submission or an extra turn. The same
 rule applies to recursive REPL sessions. Generic callers without this CuTe hook
 keep their prior prompts and behavior. The historical two-feedback-call cap is
@@ -134,6 +142,51 @@ not used. No old experiment snapshot or result is changed by this protocol.
 This feedback path is CPU-tested with scripted models/workers. Its new broker-to-GPU
 path still needs a target-VM smoke under a new frozen run before a model evaluation.
 The earlier generic GPU verifier precheck is not evidence that this new path ran.
+
+### Recursive child kernel-development example
+
+Delegation is available, not required. Use it for a bounded repair or an independent
+stage audit while the root continues useful work. Both root and child have their
+own persistent REPL, `compile_candidate`, `search_docs`, `read_doc` and captured
+`resources`. They share the task tree's token, model-call and time budgets. Child
+context is its prompt string: it does **not** inherit the root's variables or task
+dictionary. Pass the authoritative reference, complete candidate, contract and
+exact diagnostics explicitly. A kernel fragment alone cannot construct `ModelNew`
+with the trusted task inputs used by compile feedback.
+
+Read `print(resources["delegation_example"])` after storing `best_source`, `contract`
+and `feedback` in the root. The example assembles a child prompt from those values
+and `context["reference_code"]`, then calls:
+
+```python
+repair_handle = rlm_query(repair_prompt, blocking=False)
+# Keep working independently, then collect in a later root action:
+child_report = json.loads(rlm_wait(repair_handle, timeout_s=30))
+child_source = child_report["source"]
+ast.parse(child_source)
+```
+
+The child must repair the **complete** source and call `compile_candidate` in its
+own REPL. It returns JSON containing `source`, actual feedback dictionaries in
+`checks`, `changes` and `remaining_risks`, using its own answer assignments. A failed
+repair returns its real diagnostics, not a success claim. `compiled` means only a
+forward/synchronize smoke; it does not establish numerical correctness or full-CuTe
+execution. The root reviews the source and checks before choosing whether to set
+`best_source = child_source`, and submits separately. The example does not accept
+or submit a child result automatically.
+
+`rlm_status(handle)` inspects progress; `rlm_result(handle)` collects an already
+finished child. A timed-out wait does not cancel the child, so retain its handle
+and collect later. Root submission stops unfinished children. At depth 1 a child
+still has its REPL and compilation helper, but a grandchild request is rejected.
+`llm_query` is a plain completion, not a substitute for this workflow.
+
+`tests/test_cute_delegation_example.py` executes the example through real root and
+child subprocess REPLs, a real broker and a scripted model/compilation callback.
+It checks child-owned feedback, complete-source return, root integration, rejected
+grandchildren and confirmed worker exit. This CPU protocol test is **not** evidence
+of a GPU compilation, correct kernel or a model choosing to delegate. No task
+solution or hidden expected output is added to the example.
 
 ### Laguna thinking setting
 
@@ -320,3 +373,97 @@ fit at once. Queue/preemption and memory pressure must stay visible during eval.
 Torch is `2.13.0+cu130` (built with CUDA 13.0); the toolkit compiler is CUDA
 13.3.73 and the 610.57.04 compatibility library is used over kernel driver
 580.159.03. Preserve those distinctions in the run record.
+
+## Failure evidence and manual recovery
+
+Every failed task and child record is retained, including partial progress and
+cleanup outcomes. CuTe model requests stream: append-only `stream_chunk` records
+save raw wire bytes before parsing, and `stream_delta` records preserve partial
+reasoning, text, tool arguments and selected logprobs. Incomplete tool calls are
+never executed. Complete responses keep the normal canonical response/usage ledger.
+
+Failures record the active stage, local deadline, connect/read phase when known,
+HTTP status, exception chain and last progress. A model-request deadline is not a
+compiler deadline. A client-side trace cannot prove an unknown server root cause;
+keep `server_root_cause=unknown` when the evidence does not establish one. Preserve
+server logs and metrics alongside the per-request stream journal on the VM.
+
+A data-only `checkpoint-NNNNN.json` saves supported REPL variables, source,
+contract, feedback, messages and spent budgets before cleanup. No pickle and no
+replay of prior tool actions is used. Manual recovery is a **new linked attempt**,
+not a continuation of provider generation state. It retries only the interrupted
+request from the last complete REPL state; it does not execute partial generated
+code or overwrite the failed trajectory. A model timeout/connect/read failure or
+retryable HTTP failure may be eligible; compilation, REPL, protocol and budget
+failures are not silently retried.
+
+Recovery is opt-in after inspecting the failure and confirming worker cleanup.
+The first implementation supports root sessions without descendant sessions and
+only the supported data-only variable/import/AST snapshot types. Checkpoints list
+unsupported state or descendant handles explicitly and refuse recovery rather
+than falsely reconstructing a session. This limitation does not remove any failed
+child trajectory or stream evidence. Old non-streaming runs have no such live
+checkpoints and cannot be retroactively recovered exactly.
+
+For an eligible checkpoint, explicitly choose a new output directory and a new
+wall-time allowance (example values are operator choices, not preset changes):
+
+```bash
+PYTHONPATH=training/src:training/environments/kernel_rlm:training/environments/cute_rlm \
+  python -m cute_rlm.resume ORIGINAL_RUN ORIGINAL_RUN/checkpoint-00000.json \
+  --output NEW_RECOVERY_DIRECTORY --additional-seconds SECONDS \
+  --base-url URL --receipt CURRENT_RECEIPT --sandbox-spec SPEC \
+  --observer-root CAPTURES --charge-uncertain-reservation
+```
+
+The last flag is required if usage is unknown: it conservatively spends the full
+uncertain reservation, **not** an invented actual token count. Prior spent turns,
+model calls and generated allowance remain spent. Model, prompts, captured
+resources and other frozen limits must match. The explicit added wall time and
+`resume_of` lineage are recorded; no automatic replay or hidden budget reset.
+The 600-second per-request and 1,800-second initial episode defaults are unchanged.
+
+## Async inference and VRAM fallback
+
+Root and child model calls use async I/O, with at most two inference requests in
+flight by default. Python work, compilation and child waits do not hold an
+inference slot. Async calls can overlap, but do not promise two full context
+windows or free compiler memory. Validate actual VRAM/KV capacity with the model
+and verifier resident before scored dispatch.
+
+`inference_concurrency_after_preflight` selects one request only for a structured
+**model-inference CUDA OOM** result. It does not reinterpret compiler failures or
+ordinary timeouts as OOM. If preflight OOM occurs, preserve that evidence, recheck
+serial operation, then freeze `max_concurrent_requests=1` and a
+`single_long_request` readiness check. The server's max-num-seqs and native
+semaphore derive from that same config. Otherwise retain async concurrency 2 and
+its concurrent-request readiness gate. No scored task is automatically restarted
+or silently retried following an OOM.
+
+## What counts as a correct full-CuTe implementation?
+
+Keep three questions separate:
+
+1. **Numerically correct:** outputs, input mutations and post-state pass the
+   independent verifier across fresh trials with unchanged dtype/mode/tolerances.
+2. **CuTe observed:** retained compiler artifacts and exact forward/compiled-call
+   NVTX/CUPTI correlations establish the individual CuTe launches.
+3. **Numerical path reviewed:** source and forward launch inventory account for
+   every numerical operation and required state update, including work not
+   attributed to CuTe. PyTorch allocation, DLPack and ordinary data/state copies
+   are allowed plumbing, not blanket violations.
+
+The current `cute_verified` backend gate is an **any-matching-launch observation**,
+not automatic full-CuTe coverage. Until all numerical work is accounted for,
+label coverage `unknown/review required`; do not claim full CuTe from one observed
+kernel, an import or a `compiled` smoke. Do not reject legitimate allocation or
+memset just because it is outside CuTe. No complete all-launch classifier or
+malicious-code-resistant attestation is implemented here.
+
+For example, the saved incorrect convolution/noise submission had 24 directly
+correlated forward kernels across three trials: 3 attributed to its retained
+CuTe noise kernel and 21 other source-supported numerical kernels, including
+convolution and BMM. It was demonstrably mixed-backend, not full CuTe. Kernel-count
+or time fractions are diagnostics, not numerical-operation coverage or a scoring
+threshold. A scoped full-CuTe claim currently needs reviewer sign-off in addition
+to correctness and trace evidence. Timing remains unprofiled and correctness-gated.

@@ -3,21 +3,27 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 import hashlib
 import json
 import math
+import os
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
+
+from rlm_train.checkpoint import SCHEMA_VERSION, read_checkpoint, write_checkpoint
 from rlm_train.proxy import ClientHandle, SubLLMProxy
 from rlm_train.repl.base import ReplBackend
 from rlm_train.repl.subprocess import SubprocessReplBackend
+from rlm_train.streaming import StreamInterruptedError, stream_chat_completion
 from rlm_train.token_budget import (
     BudgetReservationPending,
     ContextBudgetPolicy,
@@ -123,6 +129,10 @@ class _Session:
     origin: dict[str, Any] = field(default_factory=dict)
     current_action: dict[str, Any] = field(default_factory=dict)
     accepting: bool = True
+    turns_spent: int = 0
+    failure: dict[str, Any] | None = None
+    restored: dict[str, Any] | None = None
+    stage: str = "admission"
 
 
 class _PlainClient:
@@ -231,8 +241,17 @@ class NativeRuntime:
         system_prompt: str = SYSTEM_PROMPT,
         compile_candidate: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None,
         turn_notice: Callable[[int, int | None], str | None] | None = None,
+        checkpoint_path: Path | None = None,
+        stream_responses: bool = False,
+        child_repl_at_limit: bool = False,
     ):
         self.client, self.model, self.proxy = client, model, proxy
+        self.checkpoint_path = Path(checkpoint_path) if checkpoint_path is not None else None
+        self.stream_responses = stream_responses
+        self.child_repl_at_limit = child_repl_at_limit
+        self.resume_of: dict[str, Any] | None = None
+        self.resume_adjustments: dict[str, Any] = {}
+        self.prior_elapsed_s = 0.0
         if (
             isinstance(prompt_counter, VllmPromptCounter)
             and budget_policy is not None
@@ -252,6 +271,14 @@ class NativeRuntime:
         self.limits = limits or NativeLimits()
         self.backend_factory, self.enable_thinking = backend_factory, enable_thinking
         self.event_path = Path(event_path) if event_path is not None else None
+        if self.stream_responses and self.event_path is None:
+            raise ValueError("stream_responses requires event_path for durable raw evidence")
+        if (
+            self.checkpoint_path is not None
+            and self.event_path is not None
+            and self.checkpoint_path.resolve() == self.event_path.resolve()
+        ):
+            raise ValueError("checkpoint_path and event_path must be different files")
         self.episode_id = episode_id or uuid.uuid4().hex
         self.records: dict[str, dict[str, Any]] = {}
         self.sessions: dict[str, _Session] = {}
@@ -264,21 +291,228 @@ class NativeRuntime:
         self.deadline = 0.0
         self.close_task: asyncio.Task | None = None
 
+    def checkpoint_config(self) -> dict[str, Any]:
+        return {
+            "model": self.model,
+            "limits": asdict(self.limits),
+            "budget_policy": asdict(self.budget_policy) if self.budget_policy else None,
+            "bootstrap_code": self.bootstrap_code,
+            "system_prompt": self.system_prompt,
+            "enable_thinking": self.enable_thinking,
+            "stream_responses": self.stream_responses,
+            "child_repl_at_limit": self.child_repl_at_limit,
+        }
+
+    async def resume(
+        self,
+        checkpoint: str | Path | dict[str, Any],
+        *,
+        additional_seconds: float,
+        charge_uncertain_reservation: bool = False,
+    ) -> dict[str, Any]:
+        """Retry an interrupted root request from its last complete REPL state.
+
+        The old attempt remains immutable. This is not a continuation of provider
+        generation state. Unknown usage requires an explicit full-reservation charge.
+        """
+        if self.closed or self.root is not None:
+            raise RuntimeError("runtime is single-use or already closed")
+        if (
+            isinstance(additional_seconds, bool)
+            or not math.isfinite(additional_seconds)
+            or additional_seconds <= 0
+        ):
+            raise ValueError("additional_seconds must be finite and positive")
+        data = copy.deepcopy(read_checkpoint(checkpoint))
+        if not data.get("recoverable"):
+            raise ValueError(f"checkpoint is not recoverable: {data.get('recovery_refusal')}")
+        if not data.get("cleanup_confirmed"):
+            raise ValueError("checkpoint worker cleanup is not confirmed")
+        if data["config"] != self.checkpoint_config():
+            raise ValueError(
+                "checkpoint model/system/bootstrap/limits/budget configuration differs"
+            )
+        if self.episode_id == data["episode_id"]:
+            raise ValueError("resume requires a new episode_id")
+        sources = {
+            Path(source).resolve()
+            for source in (data.get("checkpoint_path"), data.get("event_path"))
+            if source is not None
+        }
+        if not isinstance(checkpoint, dict):
+            sources.add(Path(checkpoint).resolve())
+        for destination in (self.checkpoint_path, self.event_path):
+            if destination is not None and destination.resolve() in sources:
+                raise ValueError("resume output must not overwrite or append to a source artifact")
+        snapshot = data["session"]["snapshot"]
+        if snapshot.get("unsupported"):
+            raise ValueError("checkpoint REPL state contains unsupported values")
+        saved_budget = data.get("generated_budget")
+        uncertain = sum(saved_budget["reserved"].values()) if saved_budget else 0
+        if uncertain and not charge_uncertain_reservation:
+            raise ValueError("unknown usage requires charge_uncertain_reservation=True")
+        self.calls, self.children = data["counters"]["calls"], data["counters"]["children"]
+        self.prior_elapsed_s = data["counters"]["elapsed_seconds"]
+        if saved_budget:
+            assert self.generated_budget is not None
+            self.generated_budget.used = saved_budget["used"] + uncertain
+            # The explicit conservative charge spends the full uncertain allowance;
+            # it does not assert that the provider actually generated those tokens.
+            if saved_budget["incomplete"] and not uncertain:
+                raise ValueError("incomplete token accounting without a chargeable reservation")
+        self.resume_of = {
+            "episode_id": data["episode_id"],
+            "session_id": data["session"]["id"],
+            "checkpoint": str(checkpoint) if not isinstance(checkpoint, dict) else None,
+        }
+        self.resume_adjustments = {
+            "additional_seconds": additional_seconds,
+            "conservative_uncertain_charge": uncertain,
+            "uncertain_reservations": saved_budget["reserved"] if saved_budget else {},
+            "charge_is_actual_usage": False,
+        }
+        self.started = time.monotonic()
+        self.deadline = self.started + additional_seconds
+        saved = data["session"]
+        self.root = self.new_session(None, saved["prompt"], saved["context"], self.model)
+        self.root.restored = saved
+        self.root.turns_spent = saved["turns_spent"]
+        self.log(
+            "resume_started",
+            self.root,
+            resume_of=self.resume_of,
+            adjustments=self.resume_adjustments,
+            calls_spent=self.calls,
+            turns_spent=self.root.turns_spent,
+        )
+        return await self.finish_run(additional_seconds)
+
+    async def capture_checkpoint(self, session: _Session, *, failure: bool = False) -> None:
+        if self.checkpoint_path is None or session.parent is not None:
+            return
+        refusal = []
+        snapshot = None
+        if session.backend is None:
+            refusal.append("root REPL has no completed state")
+        else:
+            try:
+                snapshot = await session.backend.snapshot()
+            except Exception as error:
+                refusal.append(f"REPL snapshot unavailable: {type(error).__name__}: {error}")
+        if snapshot is None and not refusal:
+            refusal.append("REPL backend returned no snapshot")
+        if snapshot is not None and snapshot.get("unsupported"):
+            refusal.append("REPL snapshot contains unsupported state")
+        if self.children:
+            refusal.append(
+                "root-only recovery does not restore descendant sessions or child handles"
+            )
+        if not failure:
+            refusal.append("only a terminal recoverable model transport failure may be resumed")
+        elif not session.failure or not session.failure.get("recoverable"):
+            refusal.append("failure is not a recoverable model transport failure or model deadline")
+        if session.record.get("cleanup_error"):
+            refusal.append("worker cleanup was not confirmed")
+        budget = self.generated_budget
+        data = {
+            "schema_version": SCHEMA_VERSION,
+            "episode_id": self.episode_id,
+            "checkpoint_path": str(self.checkpoint_path.resolve()),
+            "event_path": str(self.event_path.resolve()) if self.event_path else None,
+            "saved_at_utc_seconds": time.time(),
+            "reason": "failure" if failure else "completed_action",
+            "recoverable": not refusal,
+            "cleanup_confirmed": False,
+            "recovery_refusal": refusal,
+            "failure": copy.deepcopy(session.failure),
+            "config": self.checkpoint_config(),
+            "resume_of": self.resume_of,
+            "resume_adjustments": self.resume_adjustments,
+            "counters": {
+                "calls": self.calls,
+                "children": self.children,
+                "elapsed_seconds": self.prior_elapsed_s + time.monotonic() - self.started,
+            },
+            "generated_budget": {
+                "used": budget.used,
+                "reserved": dict(budget.reserved),
+                "incomplete": budget.incomplete,
+            }
+            if budget
+            else None,
+            "session": {
+                "id": session.id,
+                "depth": session.depth,
+                "prompt": session.prompt,
+                "context": session.context,
+                "messages": copy.deepcopy(session.messages),
+                "turns_spent": session.turns_spent,
+                "current_action": copy.deepcopy(session.current_action),
+                "snapshot": snapshot,
+            },
+        }
+        write_checkpoint(self.checkpoint_path, data)
+        session.record["checkpoint"] = {
+            "path": str(self.checkpoint_path),
+            "recoverable": data["recoverable"],
+            "recovery_refusal": refusal,
+        }
+        self.log("checkpoint_saved", session, checkpoint=session.record["checkpoint"])
+
+    @staticmethod
+    def describe_failure(error: BaseException, stage: str, *, local_deadline: bool = False):
+        chain = []
+        current: BaseException | None = error
+        seen = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            chain.append({"type": type(current).__name__, "message": str(current)})
+            current = current.__cause__ or current.__context__
+        status = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
+        transport = isinstance(error, (httpx.TransportError, StreamInterruptedError))
+        retryable_status = status is not None and (status in (408, 429) or status >= 500)
+        return {
+            "stage": stage,
+            "local_deadline": local_deadline,
+            "transport_phase": "connect"
+            if isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout))
+            else "read"
+            if isinstance(error, (httpx.ReadError, httpx.ReadTimeout))
+            else None,
+            "http_status": status,
+            "exception_chain": chain,
+            "recoverable": stage == "model_request"
+            and (local_deadline or transport or retryable_status),
+            "server_root_cause": "unknown",
+        }
+
     async def run(self, prompt: str, context: Any) -> dict[str, Any]:
         if self.closed or self.root is not None:
             raise RuntimeError("runtime is single-use or already closed")
         self.started = time.monotonic()
         self.deadline = self.started + self.limits.episode_timeout
         self.root = self.new_session(None, prompt, context, self.model)
+        return await self.finish_run(self.limits.episode_timeout)
+
+    async def finish_run(self, timeout: float) -> dict[str, Any]:
+        assert self.root is not None
         try:
-            await asyncio.wait_for(asyncio.shield(self.root.task), self.limits.episode_timeout)
-        except TimeoutError:
+            await asyncio.wait_for(asyncio.shield(self.root.task), timeout)
+        except TimeoutError as error:
             self.root.record.update(error_class="budget", error="total episode timeout")
+            self.root.failure = self.describe_failure(error, self.root.stage, local_deadline=True)
+            if self.root.record["events"] and "response" not in self.root.record["events"][-1]:
+                self.root.failure["last_progress"] = copy.deepcopy(
+                    self.root.record["events"][-1].get("progress")
+                )
         finally:
             try:
                 await self.close()
             finally:
                 self.root.record["elapsed_s"] = time.monotonic() - self.started
+                self.root.record["cumulative_elapsed_s"] = (
+                    self.prior_elapsed_s + self.root.record["elapsed_s"]
+                )
                 self.root.record["child_sessions"] = [
                     r for sid, r in self.records.items() if sid != self.root.id
                 ]
@@ -325,6 +559,8 @@ class NativeRuntime:
             "final_answer": None,
             "error_class": None,
             "error": None,
+            "resume_of": copy.deepcopy(self.resume_of) if parent is None else None,
+            "resume_adjustments": copy.deepcopy(self.resume_adjustments) if parent is None else {},
         }
         session = _Session(
             sid,
@@ -379,26 +615,43 @@ class NativeRuntime:
     async def drive(self, session: _Session):
         record = session.record
         try:
-            if session.depth >= self.limits.max_depth:
+            if session.depth >= self.limits.max_depth and not self.child_repl_at_limit:
                 session.messages = [{"role": "user", "content": session.prompt}]
                 event = await self.request(session, session.messages, session.model, plain=True)
                 record["final_answer"] = self.plain_answer(event["response"])
                 session.messages.append(copy.deepcopy(event["response"]["choices"][0]["message"]))
             else:
                 await self.tool_loop(session)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as error:
             if record["error"] is None:
                 record.update(error_class="cancelled", error="session cancelled")
+            if session.failure is None or session.failure["stage"] != session.stage:
+                session.failure = self.describe_failure(error, session.stage)
+            if (
+                session.failure.get("local_deadline")
+                and session.stage == "model_request"
+                and record["events"]
+                and "response" not in record["events"][-1]
+            ):
+                record["events"][-1]["failure"] = copy.deepcopy(session.failure)
         except (NativeBudgetError, TimeoutError) as error:
             record.update(error_class="budget", error=str(error) or "model request timed out")
+            if session.failure is None or session.failure["stage"] != session.stage:
+                session.failure = self.describe_failure(error, session.stage)
         except NativeProtocolError as error:
             record.update(error_class="protocol", error=str(error))
+            session.failure = self.describe_failure(error, session.stage)
         except Exception as error:
             record.update(error_class="infrastructure", error=repr(error))
+            if session.failure is None or session.failure["stage"] != session.stage:
+                session.failure = self.describe_failure(error, session.stage)
         finally:
             session.accepting = False
             record["status"] = "stopping"
-            session.cleanup_task = asyncio.create_task(self.cleanup(session))
+            record["turns_spent"] = session.turns_spent
+            if record["error"]:
+                record["failure"] = copy.deepcopy(session.failure)
+            session.cleanup_task = asyncio.create_task(self.checkpoint_and_cleanup(session))
             await asyncio.shield(session.cleanup_task)
             record["messages"] = copy.deepcopy(session.messages)
             record["status"] = "failed" if record["error"] else "completed"
@@ -409,6 +662,16 @@ class NativeRuntime:
                 final_answer=record["final_answer"],
                 error=record["error"],
             )
+
+    async def checkpoint_and_cleanup(self, session: _Session) -> None:
+        try:
+            await self.capture_checkpoint(session, failure=bool(session.record["error"]))
+        except Exception as error:
+            session.record["checkpoint_error"] = repr(error)
+            if not session.record["error"]:
+                session.record.update(error_class="checkpoint", error=repr(error))
+        finally:
+            await self.cleanup(session)
 
     async def cleanup(self, session: _Session):
         session.accepting = False
@@ -435,11 +698,39 @@ class NativeRuntime:
                     error_class="cleanup",
                     error=f"worker cleanup failed: {failures}",
                 )
+            self.checkpoint_cleanup_state(session, confirmed=False)
             self.log("cleanup_failed", session, error=session.record["cleanup_error"])
         else:
             session.record.pop("cleanup_error", None)
+            self.checkpoint_cleanup_state(session, confirmed=True)
             self.proxy.unregister(session.id)
             self.log("cleanup_confirmed", session)
+
+    def checkpoint_cleanup_state(self, session: _Session, *, confirmed: bool) -> None:
+        if (
+            self.checkpoint_path is None
+            or session.parent is not None
+            or not session.record.get("checkpoint")
+        ):
+            return
+        try:
+            saved = read_checkpoint(self.checkpoint_path)
+            saved["cleanup_confirmed"] = confirmed
+            reason = "worker cleanup was not confirmed"
+            saved["recovery_refusal"] = [
+                item for item in saved["recovery_refusal"] if item != reason
+            ]
+            if not confirmed:
+                saved["recovery_refusal"].append(reason)
+            saved["recoverable"] = not saved["recovery_refusal"]
+            write_checkpoint(self.checkpoint_path, saved)
+            session.record["checkpoint"].update(
+                recoverable=saved["recoverable"], recovery_refusal=saved["recovery_refusal"]
+            )
+        except Exception as error:
+            session.record["checkpoint_error"] = repr(error)
+            if not session.record["error"]:
+                session.record.update(error_class="checkpoint", error=repr(error))
 
     async def candidate_feedback(self, owner: str, source: str) -> dict[str, Any]:
         session = self.sessions.get(owner)
@@ -463,6 +754,9 @@ class NativeRuntime:
         }
         entries.append(entry)
         started = time.monotonic()
+        previous_stage = session.stage
+        session.stage = "compile_feedback"
+        session.failure = None
         request = asyncio.create_task(self.compile_candidate(owner, source))
         session.requests.add(request)
         try:
@@ -478,8 +772,12 @@ class NativeRuntime:
                 error=str(error),
                 error_type=type(error).__name__,
             )
+            if session.accepting:
+                session.failure = self.describe_failure(error, "compile_feedback")
             raise
         finally:
+            if session.accepting:
+                session.stage = previous_stage
             session.requests.discard(request)
             entry["duration_s"] = time.monotonic() - started
             # The trajectory retains actual diagnostics; the journal references it
@@ -508,16 +806,23 @@ class NativeRuntime:
                 else None,
             ),
         )
+        session.stage = "repl_start"
         await session.backend.start(self.proxy.url, session.id, depth=session.depth)
         await session.backend.load_context(session.context)
         if self.bootstrap_code:
             await session.backend.bootstrap(self.bootstrap_code)
-        session.messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": session.prompt},
-        ]
-        turn = 0
-        while self.limits.max_turns is None or turn < self.limits.max_turns:
+        if session.restored is not None:
+            await session.backend.restore(session.restored["snapshot"])
+            session.messages = copy.deepcopy(session.restored["messages"])
+            session.current_action = copy.deepcopy(session.restored["current_action"])
+        else:
+            session.messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": session.prompt},
+            ]
+        await self.capture_checkpoint(session)
+        while self.limits.max_turns is None or session.turns_spent < self.limits.max_turns:
+            turn = session.turns_spent
             if self.turn_notice is not None:
                 notice = self.turn_notice(turn + 1, self.limits.max_turns)
                 if notice is not None:
@@ -525,7 +830,10 @@ class NativeRuntime:
                         raise TypeError("turn_notice must return a string or None")
                     session.messages.append({"role": "user", "content": notice})
                     self.log("turn_notice", session, turn=turn + 1, notice=notice)
+            session.turns_spent += 1
+            session.stage = "model_request"
             event = await self.request(session, session.messages, session.model, plain=False)
+            session.stage = "response_validation"
             event["turn"] = turn
             choice = event["response"]["choices"][0]
             message = choice["message"]
@@ -557,7 +865,11 @@ class NativeRuntime:
                 }
                 await session.backend.update_history(session.messages)
                 repl_started = time.monotonic()
+                session.stage = "repl_execute"
+                session.failure = None
                 result = await session.backend.execute(arguments["code"])
+                session.stage = "action_complete"
+                session.failure = None
                 repl_elapsed = time.monotonic() - repl_started
                 action = {
                     "code": arguments["code"],
@@ -578,10 +890,10 @@ class NativeRuntime:
                         )[:12000],
                     }
                 )
+                await self.capture_checkpoint(session)
                 if result.final_answer is not None:
                     session.record["final_answer"] = result.final_answer
                     return
-            turn += 1
         raise NativeBudgetError("turn limit reached without explicit final answer")
 
     @staticmethod
@@ -599,17 +911,37 @@ class NativeRuntime:
 
     async def request(self, session: _Session, messages: list, model: str, *, plain: bool):
         started = time.monotonic()
-        async with asyncio.timeout(min(self.limits.request_timeout, self.deadline - started)):
-            while True:
-                try:
-                    return await self.request_attempt(
-                        session, messages, model, plain=plain, budget_wait_started=started
-                    )
-                except BudgetReservationPending:
-                    # request_attempt has released its inference slot. Never hold
-                    # capacity while waiting for another call's unused reservation.
-                    assert self.generated_budget is not None
-                    await self.generated_budget.changed.wait()
+        events_before = len(session.record["events"])
+        request_state = {"stage": "model_request"}
+        session.failure = None
+        try:
+            async with asyncio.timeout(min(self.limits.request_timeout, self.deadline - started)):
+                while True:
+                    try:
+                        return await self.request_attempt(
+                            session,
+                            messages,
+                            model,
+                            plain=plain,
+                            budget_wait_started=started,
+                            request_state=request_state,
+                        )
+                    except BudgetReservationPending:
+                        # Do not hold an inference slot while another call settles.
+                        assert self.generated_budget is not None
+                        await self.generated_budget.changed.wait()
+        except TimeoutError as error:
+            session.failure = self.describe_failure(
+                error, request_state["stage"], local_deadline=True
+            )
+            if len(session.record["events"]) > events_before:
+                event = session.record["events"][-1]
+                session.failure["last_progress"] = copy.deepcopy(event.get("progress"))
+                event["failure"] = copy.deepcopy(session.failure)
+                self.log(
+                    "request_deadline", session, call_id=event["call_id"], failure=session.failure
+                )
+            raise
 
     async def request_attempt(
         self,
@@ -619,6 +951,7 @@ class NativeRuntime:
         *,
         plain: bool,
         budget_wait_started: float,
+        request_state: dict[str, str],
     ):
         started = time.monotonic()
         budget = self.generated_budget
@@ -645,13 +978,26 @@ class NativeRuntime:
                     payload.update(top_logprobs=0, return_tokens_as_token_ids=True)
                 if not plain:
                     payload.update(tools=[copy.deepcopy(TOOL)], tool_choice="auto")
+                if self.stream_responses:
+                    payload.update(stream=True, stream_options={"include_usage": True})
                 prompt_tokens = None
                 count_started = time.monotonic()
                 if self.budget_policy:
                     assert self.prompt_counter is not None
-                    prompt_tokens = await self.prompt_counter(payload)
+                    request_state["stage"] = "prompt_count"
+                    if not plain:
+                        session.stage = "prompt_count"
+                    try:
+                        prompt_tokens = await self.prompt_counter(payload)
+                    except BaseException as error:
+                        session.failure = self.describe_failure(error, "prompt_count")
+                        self.log("prompt_count_failed", session, failure=session.failure)
+                        raise
                     if type(prompt_tokens) is not int or prompt_tokens < 0:
                         raise NativeProtocolError("prompt counter returned no valid token count")
+                    request_state["stage"] = "model_request"
+                    if not plain:
+                        session.stage = "model_request"
                 count_elapsed = time.monotonic() - count_started
                 # Tokenization yielded: recheck admission before reserving or dispatching.
                 if self.closed or not session.accepting:
@@ -719,14 +1065,12 @@ class NativeRuntime:
                 session.record["events"].append(event)
                 self.calls += 1
                 dispatched = time.monotonic()
-                request = asyncio.create_task(self.client.post("chat/completions", json=payload))
+                request = asyncio.create_task(self.fetch_response(session, event, payload))
                 session.requests.add(request)
                 settled = False
                 try:
-                    response = await request
+                    event["response"] = await request
                     event["timing"]["http_elapsed_s"] = time.monotonic() - dispatched
-                    response.raise_for_status()
-                    event["response"] = response.json()
                     usage = event["response"].get("usage")
                     if reservation is not None:
                         assert budget is not None
@@ -782,10 +1126,51 @@ class NativeRuntime:
                         request_elapsed_s=time.monotonic() - started,
                     )
                     event["error"] = repr(error)
+                    failure = self.describe_failure(error, "model_request")
+                    failure["last_progress"] = copy.deepcopy(event.get("progress"))
+                    event["failure"] = failure
+                    if not isinstance(error, asyncio.CancelledError):
+                        session.failure = copy.deepcopy(failure)
                     self.log("request_failed", session, call=event)
                     raise
                 finally:
                     session.requests.discard(request)
+
+    async def fetch_response(self, session: _Session, event: dict, payload: dict) -> dict:
+        def progress(update: dict) -> None:
+            event.setdefault("progress", {}).update(
+                **update, at_utc_seconds=time.time(), elapsed_s=time.monotonic() - started
+            )
+            if "last_delta" in update:
+                self.log(
+                    "stream_delta", session, call_id=event["call_id"], delta=update["last_delta"]
+                )
+
+        started = time.monotonic()
+        progress({"stage": "dispatch"})
+        if self.stream_responses:
+            ordinal = 0
+
+            def chunk(raw: bytes) -> None:
+                nonlocal ordinal
+                ordinal += 1
+                self.log(
+                    "stream_chunk",
+                    session,
+                    call_id=event["call_id"],
+                    ordinal=ordinal,
+                    bytes_base64=base64.b64encode(raw).decode("ascii"),
+                )
+
+            return await stream_chat_completion(
+                self.client, payload, on_chunk=chunk, on_progress=progress
+            )
+        response = await self.client.post("chat/completions", json=payload)
+        progress({"stage": "headers", "http_status": getattr(response, "status_code", None)})
+        response.raise_for_status()
+        raw = response.json()
+        progress({"stage": "complete"})
+        return raw
 
     def log(self, kind: str, session: _Session, **fields):
         if self.event_path is None:
@@ -802,3 +1187,5 @@ class NativeRuntime:
         }
         with self.event_path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(event, ensure_ascii=False) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())

@@ -1,0 +1,49 @@
+# Root REPL example. best_source, contract and feedback already describe this task.
+# This delegates a complete ModelNew repair, not an isolated uncallable device kernel.
+import ast
+import json
+
+repair_request = {
+    "reference_code": context["reference_code"],
+    "contract": contract,
+    "candidate_source": best_source,
+    "last_feedback": feedback,
+}
+repair_prompt = r"""Repair this complete ModelNew candidate for the supplied reference and contract.
+Focus on the exact reported failure. Keep signatures, registered state, training,
+stochastic behavior, mutations, dtype and stream ordering. Numerical work is CuTe;
+Torch is only state/allocation/host plumbing. Do not replace the task or relax checks.
+Your context is this delegated prompt string, not the root task dictionary.
+In your own REPL begin with:
+    import ast, json
+    request = json.loads(context.split("\nREQUEST_JSON:\n", 1)[1])
+    best_source = request["candidate_source"]
+Inspect the reference/contract/last_feedback in request, repair the full source,
+syntax-check with ast.parse, and call compile_candidate(best_source) yourself.
+Use the shared resources and live search_docs/read_doc for a specific API blocker.
+Keep the returned status/detail/error_type/traceback/stdout/stderr/launcher_stderr
+when present in checks; a status of compiled is only a forward/synchronize smoke,
+not numerical correctness, speed or proof of CuTe launch. Do not invent evidence.
+Do not spawn another child. Return JSON, not Markdown, by setting:
+    answer["content"] = json.dumps({"source": best_source, "checks": checks,
+                                  "changes": changes, "remaining_risks": remaining_risks})
+    answer["ready"] = True
+Here checks is a list of actual feedback dictionaries; changes and remaining_risks
+are lists of strings. If repair fails, return the current complete source and the
+actual failure; do not mark it correct. Do not return only a kernel fragment.
+REQUEST_JSON:
+""" + json.dumps(repair_request, ensure_ascii=False)
+repair_handle = rlm_query(repair_prompt, blocking=False)
+
+# Continue independent root work; no child variables are shared.
+ast.parse(best_source)
+
+# Often run the following collection block in a later root REPL action.
+# A wait timeout leaves the child running: retain the handle and collect later.
+child_report = json.loads(rlm_wait(repair_handle, timeout_s=30))
+child_source = child_report["source"]
+ast.parse(child_source)
+print({key: child_report[key] for key in ("checks", "changes", "remaining_risks")})
+# Review the complete source against the reference and contract before accepting it.
+# If appropriate: best_source = child_source
+# Submit the chosen complete source in a separate explicit root action, not here.

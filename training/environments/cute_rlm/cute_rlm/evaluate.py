@@ -7,7 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from cute_rlm.config import REQUIRED_GPU_CHECKS, EvalConfig, check_gpu_receipt, serving_arguments
+from cute_rlm.config import EvalConfig, check_gpu_receipt, required_gpu_checks, serving_arguments
 from cute_rlm.prompts import CUTE_SYSTEM_PROMPT, first_user_message
 from cute_rlm.resources import build_resources, resources_bootstrap
 
@@ -68,6 +68,7 @@ def prepare(project: Path, config: EvalConfig, run_id: str, output_root: Path) -
             "uv.lock",
             "training/environments/cute_rlm/pyproject.toml",
             "training/environments/cute_rlm/cute_rlm/examples/elementwise_add.py.txt",
+            "training/environments/cute_rlm/cute_rlm/examples/delegation.py.txt",
         ]
     )
     manifest = prepare_evaluation(
@@ -97,7 +98,12 @@ def prepare(project: Path, config: EvalConfig, run_id: str, output_root: Path) -
                 "call_quota": None,
                 "scope": "compile and one forward; no numerical comparison or timing",
             },
-            "turn_warning_start": 28,
+            "turn_warning_start": max(1, config.max_turns - 4)
+            if config.max_turns is not None
+            else None,
+            "streamed_response_evidence": True,
+            "checkpoint_scope": "manual infrastructure recovery; no automatic retries",
+            "child_depth": "root 0, recursive REPL child 1; no grandchildren",
             "final_submission": "answer['content'] = best_source; answer['ready'] = True",
         },
     )
@@ -108,7 +114,9 @@ def prepare(project: Path, config: EvalConfig, run_id: str, output_root: Path) -
         "config_sha256": config.sha256(),
         "manifest_sha256": manifest["manifest_sha256"],
         "docs_corpus_sha256": hashlib.sha256(corpus).hexdigest(),
-        "checks": {key: {"status": "pending", "evidence": None} for key in REQUIRED_GPU_CHECKS},
+        "checks": {
+            key: {"status": "pending", "evidence": None} for key in required_gpu_checks(config)
+        },
         "serving_arguments": serving_arguments("/path/to/pinned/model", config),
         "guards": {
             "model_calls": config.max_model_calls,
@@ -205,6 +213,9 @@ async def evaluate_prepared(
                 backend_factory=backend_factory,
                 bootstrap_code=bootstrap,
                 system_prompt=system_prompt,
+                stream_responses=True,
+                checkpoint_path=directory / f"checkpoint-{index:05d}.json",
+                child_repl_at_limit=True,
                 compile_candidate=feedback,
                 turn_notice=cute_turn_notice,
                 event_path=directory / "native-events.jsonl",
@@ -300,8 +311,8 @@ def isolated_backend_factory(config: EvalConfig, worker_python: str):
 
 
 def cute_turn_notice(turn: int, max_turns: int | None) -> str | None:
-    """Warn before the numbered request, leaving turns 28–31 for finalization."""
-    if max_turns is None or turn < min(28, max_turns):
+    """Warn on the last five numbered requests, including the final opportunity."""
+    if max_turns is None or turn < max(1, max_turns - 4):
         return None
     remaining = max_turns - turn + 1
     if turn == max_turns:

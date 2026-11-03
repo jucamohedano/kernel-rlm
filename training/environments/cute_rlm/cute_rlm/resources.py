@@ -21,12 +21,24 @@ def example_sections(source: str) -> dict[str, dict[str, int]]:
         offsets.append(offsets[-1] + len(line))
     wanted = {"ModelNew", "elementwise_add", "elementwise_add_kernel"}
     sections = {}
-    for node in ast.parse(source).body:
+    nodes = ast.parse(source).body
+    imports = []
+    for node in nodes:
+        if not isinstance(node, (ast.Import, ast.ImportFrom)):
+            break
+        imports.append(node)
+    if imports:
+        sections["imports"] = {
+            "start": offsets[imports[0].lineno - 1],
+            "end": offsets[imports[-1].end_lineno],
+        }
+    for node in nodes:
         if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in wanted:
             start = min([node.lineno, *(d.lineno for d in node.decorator_list)])
             sections[node.name] = {"start": offsets[start - 1], "end": offsets[node.end_lineno]}
     return {
-        name: sections[name] for name in ("ModelNew", "elementwise_add", "elementwise_add_kernel")
+        name: sections[name]
+        for name in ("imports", "ModelNew", "elementwise_add", "elementwise_add_kernel")
     }
 
 
@@ -88,8 +100,10 @@ def build_resources(config: EvalConfig) -> dict:
             }
         ],
         "examples": {"elementwise_add": source},
+        "delegation_example": (Path(__file__).parent / "examples/delegation.py.txt").read_text(),
         "api_notes": [
-            "Read example_index.sections in order: ModelNew host adapter, elementwise_add JIT launch, then elementwise_add_kernel. Offsets are character slices of examples[id]; do not dump the full CLI example.",
+            "Read example_index.sections: imports, ModelNew host adapter, elementwise_add JIT launch, then elementwise_add_kernel. Offsets are character slices of examples[id]; do not dump the full CLI example.",
+            "Use the exact imports shown in the indexed header: import cutlass.cute as cute; from cutlass.cute.runtime import from_dlpack. Do not guess import cute or import cutlass.cute.dsl.",
             "Keep Torch allocation and state access in ordinary Python. Follow the example's adaptation boundary; JIT tensor arguments may already be CuTe tensors, not Torch tensors to adapt again.",
             "DLPack rejects requires-grad parameters. Adapt detached views when needed without replacing registered state or changing training/state semantics. torch.no_grad does not clear requires_grad.",
             "Device functions use kernel(...).launch(grid=..., block=...). Match caller stream ordering; the historical example is not proof of every stream configuration.",
@@ -100,7 +114,7 @@ def build_resources(config: EvalConfig) -> dict:
             "search_docs": "search_docs(query, limit=2) -> list[dict]. Query 1..300 characters, limit 1..5. Hits contain id/title/sha256/excerpt/start/end character offsets; use the matching offset rather than rereading the file header.",
             "read_doc": "read_doc(doc_id, start=0, chars=1200) -> dict with excerpt/more/id/title/sha256. chars 1..1600. Print result['excerpt']; a dictionary cannot be sliced as source text.",
             "compile_candidate": "compile_candidate(source: str) -> dict, automatically printed. Inspect status/detail/error_type/traceback/stdout/stderr/launcher_stderr when present. One isolated forward/synchronize only, no reference outputs, correctness or timing; never submits.",
-            "delegation": "rlm_query(prompt, blocking=False) creates a child with its own REPL; rlm_status(handle), rlm_result(handle), rlm_wait(handle, timeout_s=30) manage it. Child context is its prompt string; pass task source/contract/errors explicitly. Generic resources are shared. llm_query(prompt) is a plain completion without REPL helpers.",
+            "delegation": "rlm_query(prompt, blocking=False) creates a child with its own REPL and compile_candidate/docs/resources; rlm_status(handle), rlm_result(handle), rlm_wait(handle, timeout_s=30) manage it. Child context is its prompt string, not the root task dictionary; no root variables are inherited. Pass reference/complete source/contract/exact errors explicitly. resources['delegation_example'] is root REPL code for a bounded complete-model repair. Depth 1 permits root 0 and child 1, rejects grandchildren. Tree budgets are shared; a wait timeout does not cancel work, but root finalization does. llm_query(prompt) is plain completion without REPL helpers.",
         },
     }
 
