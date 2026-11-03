@@ -77,38 +77,47 @@ class SubprocessReplBackend(ReplBackend):
         if proc is None:
             return
         async with self._lock:
-            if proc.returncode is None:
-                try:
-                    await self._send({"id": "_shutdown", "type": "shutdown"})
-                    await asyncio.wait_for(self._read_line(), timeout=2.0)
-                except (TimeoutError, BrokenPipeError, ConnectionResetError, WorkerProtocolError):
-                    pass
-            if proc.returncode is None:
-                try:
-                    proc.terminate()
-                except ProcessLookupError:
-                    pass
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout=2.0)
-                except TimeoutError:
+            try:
+                if proc.returncode is None:
                     try:
-                        proc.kill()
+                        await self._send({"id": "_shutdown", "type": "shutdown"})
+                        await asyncio.wait_for(self._read_line(), timeout=2.0)
+                    except (
+                        TimeoutError,
+                        BrokenPipeError,
+                        ConnectionResetError,
+                        WorkerProtocolError,
+                    ):
+                        pass
+            finally:
+                if proc.returncode is None:
+                    try:
+                        proc.terminate()
                     except ProcessLookupError:
                         pass
                     try:
                         await asyncio.wait_for(proc.wait(), timeout=2.0)
-                    except TimeoutError as error:
-                        raise WorkerProtocolError("worker did not exit after SIGKILL") from error
-            if proc.returncode is None:
-                raise WorkerProtocolError("worker did not exit after SIGKILL")
-            if self._stderr_task and not self._stderr_task.done():
-                self._stderr_task.cancel()
-                try:
-                    await self._stderr_task
-                except asyncio.CancelledError:
-                    pass
-            self._proc = None
-            self._stderr_task = None
+                    except TimeoutError:
+                        try:
+                            proc.kill()
+                        except ProcessLookupError:
+                            pass
+                        try:
+                            await asyncio.wait_for(proc.wait(), timeout=2.0)
+                        except TimeoutError as error:
+                            raise WorkerProtocolError(
+                                "worker did not exit after SIGKILL"
+                            ) from error
+                if proc.returncode is None:
+                    raise WorkerProtocolError("worker did not exit after SIGKILL")
+                if self._stderr_task and not self._stderr_task.done():
+                    self._stderr_task.cancel()
+                    try:
+                        await self._stderr_task
+                    except asyncio.CancelledError:
+                        pass
+                self._proc = None
+                self._stderr_task = None
 
     async def load_context(self, payload: Any, index: int | None = None) -> int:
         result = await self._request({"type": "load_context", "payload": payload, "index": index})
@@ -174,19 +183,28 @@ class SubprocessReplBackend(ReplBackend):
 
     async def _read_line(self) -> dict[str, Any]:
         assert self._proc is not None and self._proc.stdout is not None
-        line = await self._proc.stdout.readline()
-        if not line:
+        reader = self._proc.stdout
+        line = bytearray()
+        try:
+            while True:
+                try:
+                    line.extend(await reader.readuntil(b"\n"))
+                    break
+                except asyncio.LimitOverrunError as error:
+                    # The stream limit bounds buffered chunks, not JSON record size.
+                    line.extend(await reader.readexactly(error.consumed))
+        except asyncio.IncompleteReadError as error:
             stderr = self._stderr_text()
-            raise WorkerProtocolError(f"worker closed stdout; stderr={stderr!r}")
+            raise WorkerProtocolError(f"worker closed stdout; stderr={stderr!r}") from error
         try:
             return json.loads(line.decode("utf-8"))
-        except json.JSONDecodeError as e:
-            raise WorkerProtocolError(f"bad worker line: {line!r}") from e
+        except (ValueError, OverflowError) as error:
+            raise WorkerProtocolError(f"bad worker line: {line!r}") from error
 
     async def _drain_stderr(self) -> None:
         assert self._proc is not None and self._proc.stderr is not None
         while True:
-            chunk = await self._proc.stderr.readline()
+            chunk = await self._proc.stderr.read(64 * 1024)
             if not chunk:
                 return
             text = chunk.decode("utf-8", errors="replace")
