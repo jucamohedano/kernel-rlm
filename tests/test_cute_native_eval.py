@@ -105,11 +105,19 @@ async def test_cpu_scripted_native_tree_records_caps_logprobs_and_verification(
             message["content"] for message in payload["messages"] if message["role"] == "user"
         )
         if user == "child":
-            code = "assert read_doc('cute')['excerpt']; answer['content']='child-ok'; answer['ready']=True"
+            code = (
+                "assert read_doc('cute')['excerpt']; "
+                "assert compile_candidate('child candidate')['status']=='compiled'; "
+                "answer['content']='child-ok'; answer['ready']=True"
+            )
         else:
             code = (
                 "assert context['reference_code'] == '# reference specification only'; "
-                "assert read_doc('cute')['excerpt']; import os; assert 'DO_NOT_INHERIT_API_KEY' not in os.environ; reply=rlm_query('child'); "
+                "assert read_doc('cute')['excerpt']; import os; assert 'DO_NOT_INHERIT_API_KEY' not in os.environ; "
+                "assert compile_candidate('bad candidate')['status']=='compile_error'; "
+                "assert compile_candidate('revision 1')['status']=='compiled'; "
+                "assert compile_candidate('revision 2')['status']=='compiled'; "
+                "reply=rlm_query('child'); "
                 "assert reply=='child-ok'; answer['content']='class ModelNew: pass'; answer['ready']=True"
             )
         return web.json_response(
@@ -155,6 +163,22 @@ async def test_cpu_scripted_native_tree_records_caps_logprobs_and_verification(
         assert candidate == "class ModelNew: pass"
         return {"status": "launch_unverified", "correct": True, "speedup": None}
 
+    feedback_calls = []
+
+    class ScriptedFeedback:
+        def __init__(self, task, settings, directory, *, worker_command):
+            assert task["task_id"] == "task"
+            assert settings == config.verification
+            assert worker_command == ["scripted-only"]
+
+        async def __call__(self, session_id, source):
+            feedback_calls.append((session_id, source))
+            return {
+                "status": "compile_error" if source == "bad candidate" else "compiled",
+                "detail": "scripted compiler diagnostic; no GPU execution",
+            }
+
+    monkeypatch.setattr("cute_rlm.feedback.CompileFeedback", ScriptedFeedback)
     monkeypatch.setattr("cute_rlm.verifier.verify_submission", fake_verify)
     monkeypatch.setenv("DO_NOT_INHERIT_API_KEY", "secret")
     try:
@@ -170,6 +194,8 @@ async def test_cpu_scripted_native_tree_records_caps_logprobs_and_verification(
             )
     finally:
         await runner.cleanup()
+    assert len(feedback_calls) == 4
+    assert len({owner for owner, _ in feedback_calls}) == 2
     assert len(payloads) == 2
     assert all(payload["max_tokens"] > 8192 for payload in payloads)
     assert all(payload["logprobs"] is True and payload["top_logprobs"] == 0 for payload in payloads)

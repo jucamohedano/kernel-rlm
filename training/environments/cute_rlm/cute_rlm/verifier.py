@@ -54,19 +54,36 @@ async def launch_phase(command, request, config):
                 pass
             await asyncio.wait_for(process.wait(), timeout=5)
         raise
+    feedback = request.get("compile_feedback") or request.get("prepare_only")
+    diagnostics = (
+        {
+            "launcher_stderr": stderr.decode(errors="replace"),
+            "returncode": process.returncode,
+        }
+        if feedback
+        else {}
+    )
     if process.returncode != 0:
         return {
             "status": "infrastructure",
             "detail": stderr.decode(errors="replace")[-4000:],
             "returncode": process.returncode,
             "wall_s": time.monotonic() - started,
+            **diagnostics,
+            **({"worker_stdout": stdout.decode(errors="replace")} if feedback else {}),
         }
     try:
         result = json.loads(stdout)
         if not isinstance(result, dict):
             raise ValueError("result must be an object")
     except (ValueError, TypeError):
-        return {"status": "infrastructure", "detail": "worker returned no valid result object"}
+        return {
+            "status": "infrastructure",
+            "detail": "worker returned no valid result object",
+            **diagnostics,
+            **({"worker_stdout": stdout.decode(errors="replace")} if feedback else {}),
+        }
+    result.update(diagnostics)
     result["wall_s"] = time.monotonic() - started
     return result
 

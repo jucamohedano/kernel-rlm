@@ -475,7 +475,11 @@ def _run(spec: dict[str, Any], request: dict[str, Any]) -> int:
         command = build_command({**spec, "bwrap": executable}, staged_request)
         mapped, _ = map_phase_request(staged_request)
         env = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"}
-        if request["role"] == "candidate" and spec.get("observer_root"):
+        if (
+            request["role"] == "candidate"
+            and not request.get("compile_feedback")
+            and spec.get("observer_root")
+        ):
             import hashlib
             import sqlite3
 
