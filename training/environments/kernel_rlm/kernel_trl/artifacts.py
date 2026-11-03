@@ -38,6 +38,8 @@ def compact_call_record(row: dict) -> dict:
         "policy_ref",
         "policy_revision",
         "usage",
+        "request",
+        "token_limits",
         "elapsed_seconds",
         "started_at",
         "completed_at",
@@ -82,6 +84,8 @@ def episode_trace(directory: Path, run_id: str, trace_id: str | None = None) -> 
         "policy_ref",
         "policy_revision",
         "usage",
+        "request",
+        "token_limits",
         "elapsed_seconds",
         "started_at",
         "completed_at",
@@ -185,7 +189,7 @@ def episode_trace(directory: Path, run_id: str, trace_id: str | None = None) -> 
             "kernel_verify": score.get("verification", {}),
             "kernel_model_calls": calls,
             "kernel_raw_call_records": [compact_call_record(row) for row in rows],
-            "kernel_subcalls": children,
+            "rlm_child_calls": children,
             "kernel_child_progress": [
                 json.loads(line)
                 for line in (directory / "child-progress.jsonl").read_text().splitlines()

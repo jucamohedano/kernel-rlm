@@ -73,3 +73,17 @@ Select **Save** to write changes. There is no automatic save. Saves reject versi
 - [Research index](../docs/research/README.md)
 - [Provenance and metrics plan](https://github.com/jucamohedano/kernel-rlm/issues/8)
 - Preserved historical guide: `/archive/guide`
+
+## Token references
+
+Child model calls use `trace.info.rlm_child_calls`. Old `kernel_subcalls` exports
+remain readable; the reader uses only one ledger and never rewrites saved files.
+Local rejected attempts with no model request are not counted as inference.
+Native session trees are read from task records when no trajectory export exists.
+
+Each root and child call shows output tokens against its recorded output cap, and
+prompt plus output tokens against its recorded context window. A requested cap is
+labelled as requested; it is not proof of the server's effective limit. Missing
+limits stay unknown. Run and trajectory output totals may show the sum of per-call
+caps when all usage and caps are recorded. That sum is not a shared context window
+or a tree-wide spending budget. Raw events retain the source of each limit.

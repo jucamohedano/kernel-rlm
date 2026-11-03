@@ -68,6 +68,50 @@ def missing_export_reason(run: dict[str, Any]) -> str:
     return "No supported trajectory export is available for this run."
 
 
+def native_trace(record: dict[str, Any], run_id: str) -> dict[str, Any]:
+    """Adapt one saved native session tree, without adding its journal copies."""
+    messages = record.get("messages") or []
+    nodes = [{"message": message} for message in messages if isinstance(message, dict)]
+    assistant_nodes = [
+        i for i, node in enumerate(nodes) if node["message"].get("role") == "assistant"
+    ]
+    root_calls, children = [], []
+    for event in record.get("events", []):
+        if event.get("branch") == "plain":
+            children.append(event)
+            continue
+        response = event.get("response") or {}
+        choice = (response.get("choices") or [{}])[0]
+        call = {
+            **event,
+            "usage": response.get("usage"),
+            "finish_reason": choice.get("finish_reason"),
+        }
+        if response and assistant_nodes:
+            call["node"] = assistant_nodes.pop(0)
+        root_calls.append(call)
+    for child in record.get("child_sessions", []):
+        children.extend(child.get("events") or [])
+    session_id = record.get("session_id", record.get("episode_id", "unknown"))
+    task_id = str(record.get("example_id", session_id))
+    return {
+        "id": run_id + ":" + str(session_id),
+        "task": {"data": {"name": task_id, "title": record.get("prompt")}},
+        "nodes": nodes,
+        "calls": root_calls,
+        "stop_condition": "completed"
+        if record.get("final_answer") is not None
+        else record.get("error_class"),
+        "verification": {"correct": record.get("correct")},
+        "info": {
+            "model": record.get("model"),
+            "repl_transcript": messages,
+            "rlm_child_calls": children,
+            "evaluation": record,
+        },
+    }
+
+
 def saved_traces(run: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     """Read unique exported episodes, retaining valid records beside damaged ones."""
     traces = {}
@@ -103,7 +147,17 @@ def saved_traces(run: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
         except (OSError, UnicodeError):
             warnings.append(f"Cannot read episode export {path.name}.")
     if not paths:
-        warnings.append(missing_export_reason(run))
+        native_paths = []
+        if run.get("root") is not None:
+            native_paths = sorted(run["root"].glob("task-*.json"))
+            native_paths.extend(sorted((run["root"] / "episodes").glob("task-*.json")))
+        for path in native_paths:
+            record = read_json(path)
+            if "session_id" in record and isinstance(record.get("child_sessions"), list):
+                trace = native_trace(record, run["id"])
+                traces.setdefault(trace["id"], trace)
+        if not traces:
+            warnings.append(missing_export_reason(run))
     return list(traces.values()), warnings
 
 
@@ -176,6 +230,10 @@ def run_records(root: Path, *, count_trajectories: bool = True) -> list[dict[str
     for run in discover_runs(root):
         warnings = []
         has_export = bool(run.get("rollouts")) or bool(run.get("traces"))
+        native_available = any(run["root"].glob("task-*.json")) or any(
+            (run["root"] / "episodes").glob("task-*.json")
+        )
+        has_export = has_export or native_available
         trajectory_count = None
         if run.get("rollouts") and count_trajectories:
             trace_ids = set()
@@ -201,6 +259,11 @@ def run_records(root: Path, *, count_trajectories: bool = True) -> list[dict[str
             trajectory_count = len(trace_ids)
         elif run.get("traces"):
             trajectory_count = len(run["traces"])
+        elif native_available and count_trajectories:
+            native_traces, native_warnings = saved_traces(run)
+            trajectory_count = len(native_traces)
+            has_export = bool(native_traces)
+            warnings.extend(native_warnings)
         records.append(
             {
                 "id": run["id"],
@@ -267,7 +330,7 @@ def campaign(receipt_path: Path | None) -> tuple[dict[str, Any], list[str]]:
             "hardware": None,
             "source": None,
             "completion_status": None,
-        }, ["Campaign receipt not configured; campaign summary unavailable."]
+        }, ["Experiment receipt not configured; experiment summary unavailable."]
     receipt = read_json(receipt_path)
     if not receipt:
         return {
@@ -276,8 +339,8 @@ def campaign(receipt_path: Path | None) -> tuple[dict[str, Any], list[str]]:
             "deferred": None,
             "checkpoint": None,
             "hardware": None,
-            "source": "Configured campaign receipt",
-        }, ["Configured campaign receipt is missing or invalid."]
+            "source": "Configured experiment receipt",
+        }, ["Configured experiment receipt is missing or invalid."]
     deferred = receipt.get(
         "deferred", receipt.get("deferred_untrained", receipt.get("deferred_task_count"))
     )
@@ -294,7 +357,7 @@ def campaign(receipt_path: Path | None) -> tuple[dict[str, Any], list[str]]:
         "deferred": deferred,
         "checkpoint": checkpoint,
         "hardware": receipt.get("hardware"),
-        "source": "Configured campaign receipt",
+        "source": "Configured experiment receipt",
         "completion_status": receipt.get("training_status"),
     }, []
 
@@ -415,48 +478,138 @@ def elapsed_counts(records: list[dict[str, Any]], total_calls: int | None) -> di
     }
 
 
-def token_usage(trace: dict[str, Any]) -> dict[str, Any]:
+def recorded_child_calls(trace: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Prefer the current ledger; old exports stay readable without rewriting."""
     info = trace.get("info") if isinstance(trace.get("info"), dict) else {}
-    root_calls = info.get("kernel_model_calls")
-    if not isinstance(root_calls, list):
-        root_calls = trace.get("calls")
-    root_known = isinstance(root_calls, list)
-    calls = root_calls if root_known else []
-    roots = [
-        call["usage"]
-        for call in calls
-        if isinstance(call, dict) and isinstance(call.get("usage"), dict)
-    ]
-    child_ledger = info.get("kernel_subcalls")
-    child_known = isinstance(child_ledger, list)
-    child_ledger = child_ledger if child_known else []
-    children = []
-    for child in child_ledger:
-        if not isinstance(child, dict):
-            continue
-        response = child.get("response")
-        usage = response.get("usage") if isinstance(response, dict) else None
-        usage = usage if isinstance(usage, dict) else child.get("usage")
-        if isinstance(usage, dict):
-            children.append(usage)
-    root = usage_counts(roots, len(calls) if root_known else -1)
-    child = usage_counts(children, len(child_ledger) if child_known else -1)
-    all_calls = roots + children
-    total = len(calls) + len(child_ledger) if root_known and child_known else -1
-    root["elapsed_seconds"] = elapsed_counts(calls, len(calls) if root_known else -1)
-    child["elapsed_seconds"] = elapsed_counts(
-        child_ledger, len(child_ledger) if child_known else -1
+    records = (
+        info.get("rlm_child_calls") if "rlm_child_calls" in info else info.get("kernel_subcalls")
     )
-    root_durations = [item for item in calls if isinstance(item, dict)]
-    child_durations = [item for item in child_ledger if isinstance(item, dict)]
-    return {
-        "root": root,
-        "children": child,
-        "all": {
-            **usage_counts(all_calls, total),
-            "elapsed_seconds": elapsed_counts(root_durations + child_durations, total),
-        },
-    }
+    if not isinstance(records, list):
+        return None
+    calls = []
+    seen = set()
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if record.get("error") and not any(
+            record.get(k) is not None for k in ("request", "response", "usage")
+        ):
+            continue
+        response = record.get("response")
+        identity = record.get("call_id") or (
+            response.get("id") if isinstance(response, dict) else None
+        )
+        if identity is not None:
+            if identity in seen:
+                continue
+            seen.add(identity)
+        calls.append(record)
+    return calls
+
+
+def recorded_root_calls(trace: dict[str, Any]) -> list[dict[str, Any]] | None:
+    info = trace.get("info") if isinstance(trace.get("info"), dict) else {}
+    calls = info.get("kernel_model_calls")
+    if not isinstance(calls, list):
+        calls = trace.get("calls")
+    return calls if isinstance(calls, list) else None
+
+
+def call_limits(call: dict[str, Any], run: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Limits need recorded evidence, never model-name or current-default guesses."""
+    limits = call.get("token_limits") if isinstance(call.get("token_limits"), dict) else {}
+    request = call.get("request") if isinstance(call.get("request"), dict) else {}
+    result = {}
+    for name in ("output_tokens", "context_tokens"):
+        item = limits.get(name) if isinstance(limits.get(name), dict) else {}
+        value = item.get("limit")
+        result[name] = {
+            "limit": value if type(value) is int and value > 0 else None,
+            "source": item.get("source") if type(value) is int and value > 0 else None,
+        }
+    if result["output_tokens"]["limit"] is None:
+        for field in ("max_completion_tokens", "max_tokens"):
+            value = request.get(field)
+            if type(value) is int and value > 0:
+                result["output_tokens"] = {"limit": value, "source": "request." + field}
+                break
+    if result["context_tokens"]["limit"] is None:
+        sources = [
+            ("call.model_context_tokens", call.get("model_context_tokens")),
+            ("request.model_context_tokens", request.get("model_context_tokens")),
+        ]
+        if run:
+            reader = run.get("_reader", run)
+            for section in ("provenance", "report"):
+                config = (reader.get(section) or {}).get("config") or {}
+                sources.append(
+                    (section + ".config.model_context_tokens", config.get("model_context_tokens"))
+                )
+        for source, value in sources:
+            if type(value) is int and value > 0:
+                result["context_tokens"] = {"limit": value, "source": source}
+                break
+    return result
+
+
+def root_call_with_request(call: dict[str, Any], trace: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(call.get("request"), dict):
+        return call
+    events = (trace.get("info", {}).get("evaluation") or {}).get("events", [])
+    identity = call.get("call_id")
+    if identity is not None:
+        match = next((event for event in events if event.get("call_id") == identity), None)
+        if match is not None and isinstance(match.get("request"), dict):
+            return {**call, "request": match["request"]}
+    return call
+
+
+def token_usage(trace: dict[str, Any]) -> dict[str, Any]:
+    root_calls = recorded_root_calls(trace)
+    children = recorded_child_calls(trace)
+    groups = {"root": root_calls, "children": children}
+    result = {}
+    for group, records in groups.items():
+        usages = []
+        caps = []
+        durations = []
+        for call in records or []:
+            if not isinstance(call, dict):
+                continue
+            response = call.get("response")
+            usage = response.get("usage") if isinstance(response, dict) else None
+            usage = usage if isinstance(usage, dict) else call.get("usage")
+            if isinstance(usage, dict):
+                usages.append(usage)
+            resolved = root_call_with_request(call, trace) if group == "root" else call
+            limit = call_limits(resolved)["output_tokens"]["limit"]
+            if limit is not None:
+                caps.append({"cap": limit})
+            elapsed = call.get("elapsed_seconds", call.get("elapsed_s"))
+            if isinstance(elapsed, (int, float)):
+                durations.append({"elapsed_seconds": elapsed})
+        count = len(records) if records is not None else -1
+        values = usage_counts(usages, count)
+        values["output_cap_tokens"] = {
+            "sum": sum(item["cap"] for item in caps) if caps else 0 if count == 0 else None,
+            "recorded": len(caps),
+            "total": count if count >= 0 else None,
+        }
+        values["elapsed_seconds"] = elapsed_counts(durations, count)
+        result[group] = values
+    combined = {}
+    for key in (*result["root"].keys(),):
+        entries = [result[group][key] for group in ("root", "children")]
+        known = [entry["sum"] for entry in entries if entry["sum"] is not None]
+        combined[key] = {
+            "sum": sum(known) if known else None,
+            "recorded": sum(entry["recorded"] for entry in entries),
+            "total": sum(entry["total"] for entry in entries)
+            if all(entry["total"] is not None for entry in entries)
+            else None,
+        }
+    result["all"] = combined
+    return result
 
 
 def trajectory_metrics(trace: dict[str, Any]) -> dict[str, Any]:
@@ -667,6 +820,7 @@ def trajectory_detail(
                         {
                             "reasoning": original.get("reasoning_content"),
                             "usage": call.get("usage"),
+                            "token_limits": call_limits(root_call_with_request(call, trace), run),
                             "finish_reason": call.get("finish_reason"),
                             "assistant_response": assistant_response_text(
                                 item.get("content"), event["tool_calls"] or []
@@ -678,6 +832,11 @@ def trajectory_detail(
                 events.append(event)
     else:
         nodes = trace.get("nodes")
+        calls_by_node = {
+            call.get("node"): call
+            for call in (recorded_root_calls(trace) or [])
+            if isinstance(call, dict) and type(call.get("node")) is int
+        }
         for event_index, node in enumerate(nodes if isinstance(nodes, list) else []):
             if isinstance(node, dict) and isinstance(node.get("message"), dict):
                 message = node["message"]
@@ -688,13 +847,22 @@ def trajectory_detail(
                         "content": message.get("content"),
                         "tool_calls": message.get("tool_calls"),
                         "reasoning": message.get("reasoning_content"),
+                        "usage": calls_by_node.get(event_index, {}).get("usage"),
+                        "token_limits": call_limits(
+                            root_call_with_request(calls_by_node.get(event_index, {}), trace), run
+                        ),
                         "source": "nodes",
                     }
                 )
-    for source in ("kernel_child_progress", "kernel_subcalls"):
-        children = info.get(source, [])
-        if children:
-            events.append({"type": "child_activity", "source": source, "records": children})
+    progress = info.get("kernel_child_progress", [])
+    if progress:
+        events.append(
+            {"type": "child_activity", "source": "kernel_child_progress", "records": progress}
+        )
+    children = recorded_child_calls(trace)
+    if children:
+        records = [{**child, "token_limits": call_limits(child, run)} for child in children]
+        events.append({"type": "child_activity", "source": "rlm_child_calls", "records": records})
     metadata = trajectory_metadata(run, trace, index, task_catalog_path=task_catalog_path)
     if attempt is not None:
         metadata["attempt"] = attempt

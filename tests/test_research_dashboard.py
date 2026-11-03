@@ -116,7 +116,7 @@ def test_real_trace_normalization():
     assert detail["outcome"]["speedup"] == 2.5
     assert detail["events"][0]["content"] == "transcript answer"
     assert len([event for event in detail["events"] if event.get("source") == "nodes"]) == 0
-    assert detail["events"][-1]["source"] == "kernel_subcalls"
+    assert detail["events"][-1]["source"] == "rlm_child_calls"
 
 
 def test_http_api_routes_and_writing_safety(tmp_path):

@@ -530,6 +530,10 @@ class NativeRuntime:
                     "spawn_origin": copy.deepcopy(session.origin),
                     "caller_action": copy.deepcopy(session.current_action),
                     "request": payload,
+                    "token_limits": {
+                        "output_tokens": {"limit": cap, "source": "request.max_tokens"},
+                        "context_tokens": {"limit": None, "source": None},
+                    },
                 }
                 session.record["events"].append(event)
                 self.log("request_started", session, call=event)
