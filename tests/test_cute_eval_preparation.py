@@ -54,7 +54,11 @@ def test_gpu_receipt_must_bind_observed_checks_to_frozen_inputs():
         "config_sha256": cfg.sha256(),
         "manifest_sha256": "manifest",
         "observed_context_tokens": 262144,
-        "hardware": {"gpu_model": cfg.gpu_model},
+        "server_identity": {"tensor_parallel_size": cfg.tensor_parallel_size},
+        "hardware": {
+            "gpu_model": cfg.gpu_model,
+            "gpu_compute_capability": cfg.gpu_compute_capability,
+        },
         "software": {"cuda_toolkit_version": cfg.cuda_toolkit_version},
         "checks": {
             key: {"status": "passed", "evidence": "receipt:" + key} for key in REQUIRED_GPU_CHECKS
@@ -154,3 +158,53 @@ def test_prepared_manifest_captures_resolved_config_and_doc_bytes(tmp_path):
     (run / "inputs/cute.md").write_text("changed")
     with pytest.raises(ValueError, match="input changed"):
         start_evaluation(manifest, run.parent)
+
+
+@pytest.mark.parametrize("capability", ["", "0.0", "-8.9", "8", "8.90", "sm_89", 8.9, True])
+def test_gpu_compute_capability_requires_explicit_major_minor_string(capability):
+    from cute_rlm.config import EvalConfig
+
+    with pytest.raises(ValueError, match="gpu_compute_capability"):
+        EvalConfig(**{**config().payload(), "gpu_compute_capability": capability})
+
+
+def test_different_gpu_requires_an_explicit_compute_capability():
+    from cute_rlm.config import EvalConfig, serving_arguments
+    from cute_rlm.prompts import CUTE_SYSTEM_PROMPT, first_user_message
+
+    default = config()
+    assert default.gpu_compute_capability == "12.0" and default.gpu_arch == "sm_120"
+    assert default.tensor_parallel_size == 1
+    with pytest.raises(ValueError, match="explicitly"):
+        EvalConfig(
+            **{**default.payload(), "gpu_model": "NVIDIA L40S", "gpu_compute_capability": None}
+        )
+    cfg = EvalConfig(
+        **{
+            **default.payload(),
+            "gpu_model": "NVIDIA L40S",
+            "gpu_compute_capability": "8.9",
+            "tensor_parallel_size": 2,
+            "max_concurrent_requests": 3,
+        }
+    )
+    assert cfg.gpu_arch == "sm_89"
+    rendered = CUTE_SYSTEM_PROMPT + first_user_message({"task_id": "t"}, cfg)
+    assert "GPU: NVIDIA L40S, compute capability 8.9 (sm_89)" in rendered
+    assert "SM120" not in rendered and "sm_120" not in rendered
+    args = serving_arguments("/model", cfg)
+    assert args[args.index("--tensor-parallel-size") + 1] == "2"
+    assert args[args.index("--max-num-seqs") + 1] == "3"
+    assert args[args.index("--max-model-len") + 1] == "262144"
+    assert cfg.model_revision == default.model_revision
+    assert cfg.verification == default.verification
+    assert cfg.max_turns == default.max_turns == 32
+    assert cfg.max_generated_tokens == default.max_generated_tokens == 1000000
+
+
+@pytest.mark.parametrize("size", [0, -1, 1.5, True])
+def test_tensor_parallel_size_must_be_a_positive_integer(size):
+    from cute_rlm.config import EvalConfig
+
+    with pytest.raises(ValueError, match="tensor_parallel_size"):
+        EvalConfig(**{**config().payload(), "tensor_parallel_size": size})

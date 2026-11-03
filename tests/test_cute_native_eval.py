@@ -90,7 +90,12 @@ async def test_cpu_scripted_native_tree_records_caps_logprobs_and_verification(
         "config_sha256": config.sha256(),
         "manifest_sha256": readiness["manifest_sha256"],
         "observed_context_tokens": 262144,
-        "hardware": {"fixture": True, "gpu_model": config.gpu_model},
+        "server_identity": {"tensor_parallel_size": config.tensor_parallel_size},
+        "hardware": {
+            "fixture": True,
+            "gpu_model": config.gpu_model,
+            "gpu_compute_capability": config.gpu_compute_capability,
+        },
         "software": {"fixture": True, "cuda_toolkit_version": config.cuda_toolkit_version},
         "checks": {
             key: {"status": "passed", "evidence": "CPU_FIXTURE_NOT_GPU"}
