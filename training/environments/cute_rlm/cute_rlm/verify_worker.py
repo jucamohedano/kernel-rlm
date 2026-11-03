@@ -102,11 +102,28 @@ def place_inputs(tree, device):
 
 
 def load_module(source, name):
-    import types
+    import importlib.util
+    import tempfile
 
-    module = types.ModuleType(name)
-    exec(compile(source, name + ".py", "exec"), module.__dict__)
+    # CuTe inspects Python source during JIT. An exec-only module cannot compile.
+    directory = Path(tempfile.mkdtemp(prefix="cute-source-"))
+    path = directory / (name + ".py")
+    path.write_text(source)
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
     return module
+
+
+def prepare_output_directory(output):
+    output = Path(output)
+    if output.exists():
+        if not output.is_dir() or any(output.iterdir()):
+            raise ValueError("worker output mount must be an empty directory")
+    else:
+        output.mkdir(parents=True, exist_ok=False)
+    return output
 
 
 def run(request):
@@ -123,117 +140,136 @@ def run(request):
     source_hash = hashlib.sha256(source.encode()).hexdigest()
     if source_hash != request["source_sha256"]:
         raise ValueError("worker source hash mismatch")
-    output = Path(request["output_dir"])
-    output.mkdir(parents=True, exist_ok=False)
-    seed_all(torch, np, config.seed)
-    module = load_module(source, "task_reference" if role == "reference" else "task_candidate")
-    compile_wall_started = time.monotonic()
-    if role == "reference":
-        if not hasattr(module, "Model") or not hasattr(module, "get_inputs"):
-            raise NotImplementedError("reference requires Model and get_inputs")
-        init_args = module.get_init_inputs() if hasattr(module, "get_init_inputs") else []
-        model_type = module.Model
-        baseline = model_type(*copy.deepcopy(init_args)).cuda()
-        if config.mode == "eval":
-            baseline.eval()
-        initial_state = to_arrays(torch, baseline.state_dict())
-        init_tree = to_arrays(torch, init_args)
-        save_tree(output / "initial_state.npz", initial_state)
-        save_tree(output / "init_args.npz", init_tree)
-        inputs = []
-        for trial in range(config.correctness_runs):
-            seed_all(torch, np, config.seed + trial)
-            raw = module.get_inputs()
-            if not isinstance(raw, (list, tuple)):
-                raise NotImplementedError("get_inputs must return positional list/tuple inputs")
-            tree = place_inputs(to_arrays(torch, raw), config.input_device)
-            save_tree(output / f"inputs-{trial}.npz", tree)
-            inputs.append(tree)
-        training = baseline.training
-        modes = {name: child.training for name, child in baseline.named_modules()}
-    else:
-        if not hasattr(module, "ModelNew"):
-            raise NotImplementedError("candidate must define ModelNew")
-        bundle = Path(request["input_dir"])
-        initial_state = load_tree(bundle / "initial_state.npz")
-        init_tree = load_tree(bundle / "init_args.npz")
-        inputs = [
-            load_tree(bundle / f"inputs-{trial}.npz") for trial in range(config.correctness_runs)
-        ]
-        model_type = module.ModelNew
-        training = request["training"]
-        modes = request["module_training"]
+    output = prepare_output_directory(request["output_dir"])
+    profile_trace = None
+    if role == "candidate" and request.get("profile_compile"):
+        import cutlass.cute as cute
 
-    def fresh(trial):
-        seed_all(torch, np, config.seed + trial)
-        args = from_arrays(torch, init_tree)
-        model = model_type(*args).cuda()
-        if config.mode == "eval":
-            model.eval()
-        elif {name: child.training for name, child in model.named_modules()} != modes:
-            raise NotImplementedError(
-                "candidate module modes differ from preserved reference modes"
-            )
-        state = from_arrays(torch, initial_state)
-        # Exact state keys/shapes are a declared supported contract, not a silent repair.
-        try:
-            model.load_state_dict(state, strict=True)
-        except RuntimeError as error:
-            raise NotImplementedError(
-                "candidate parameter/buffer state contract differs"
-            ) from error
-        args = from_arrays(torch, inputs[trial])
-        # Constructor RNG consumption may differ in an optimized candidate.
-        seed_all(torch, np, config.seed + trial)
-        return model, args
+        from cute_rlm.compile_trace import install_compile_trace
 
-    for trial in range(config.correctness_runs):
-        model, args = fresh(trial)
-        with torch.no_grad():
-            actual = model(*args)
-        torch.cuda.synchronize()
-        reject_cross_tree_aliases(torch, args, actual, model.state_dict())
-        # Cross-tree alias cases were rejected before independent serialization.
-        save_tree(output / f"outputs-{trial}.npz", to_arrays(torch, actual))
-        save_tree(output / f"mutated-inputs-{trial}.npz", to_arrays(torch, args))
-        save_tree(output / f"post-state-{trial}.npz", to_arrays(torch, model.state_dict()))
-
-    model, _ = fresh(0)
-
-    def reset_timing_inputs():
+        profile_trace = install_compile_trace(cute, torch, output)
+    try:
         seed_all(torch, np, config.seed)
-        model.load_state_dict(from_arrays(torch, initial_state), strict=True)
-        return from_arrays(torch, inputs[0])
+        module = load_module(source, "task_reference" if role == "reference" else "task_candidate")
+        compile_wall_started = time.monotonic()
+        if role == "reference":
+            if not hasattr(module, "Model") or not hasattr(module, "get_inputs"):
+                raise NotImplementedError("reference requires Model and get_inputs")
+            init_args = module.get_init_inputs() if hasattr(module, "get_init_inputs") else []
+            model_type = module.Model
+            baseline = model_type(*copy.deepcopy(init_args)).cuda()
+            if config.mode == "eval":
+                baseline.eval()
+            initial_state = to_arrays(torch, baseline.state_dict())
+            init_tree = to_arrays(torch, init_args)
+            save_tree(output / "initial_state.npz", initial_state)
+            save_tree(output / "init_args.npz", init_tree)
+            inputs = []
+            for trial in range(config.correctness_runs):
+                seed_all(torch, np, config.seed + trial)
+                raw = module.get_inputs()
+                if not isinstance(raw, (list, tuple)):
+                    raise NotImplementedError("get_inputs must return positional list/tuple inputs")
+                tree = place_inputs(to_arrays(torch, raw), config.input_device)
+                save_tree(output / f"inputs-{trial}.npz", tree)
+                inputs.append(tree)
+            training = baseline.training
+            modes = {name: child.training for name, child in baseline.named_modules()}
+        else:
+            if not hasattr(module, "ModelNew"):
+                raise NotImplementedError("candidate must define ModelNew")
+            bundle = Path(request["input_dir"])
+            initial_state = load_tree(bundle / "initial_state.npz")
+            init_tree = load_tree(bundle / "init_args.npz")
+            inputs = [
+                load_tree(bundle / f"inputs-{trial}.npz")
+                for trial in range(config.correctness_runs)
+            ]
+            model_type = module.ModelNew
+            training = request["training"]
+            modes = request["module_training"]
 
-    # Compile and initialize this instance before event timing. Reset mutable
-    # tensor state and inputs between every forward, including warmups.
-    with torch.no_grad():
-        model(*reset_timing_inputs())
-    torch.cuda.synchronize()
-    samples = []
-    for iteration in range(config.warmup_runs + config.timed_runs):
-        args = reset_timing_inputs()
-        torch.cuda.synchronize()
-        start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-        with torch.no_grad():
-            start.record()
-            model(*args)
+        def fresh(trial):
+            seed_all(torch, np, config.seed + trial)
+            args = from_arrays(torch, init_tree)
+            model = model_type(*args).cuda()
+            if config.mode == "eval":
+                model.eval()
+            elif {name: child.training for name, child in model.named_modules()} != modes:
+                raise NotImplementedError(
+                    "candidate module modes differ from preserved reference modes"
+                )
+            state = from_arrays(torch, initial_state)
+            # Exact state keys/shapes are a declared supported contract, not a silent repair.
+            try:
+                model.load_state_dict(state, strict=True)
+            except RuntimeError as error:
+                raise NotImplementedError(
+                    "candidate parameter/buffer state contract differs"
+                ) from error
+            args = from_arrays(torch, inputs[trial])
+            # Constructor RNG consumption may differ in an optimized candidate.
+            seed_all(torch, np, config.seed + trial)
+            return model, args
+
+        for trial in range(config.correctness_runs):
+            model, args = fresh(trial)
+            if profile_trace is not None:
+                torch.cuda.nvtx.range_push("cute_forward:" + request["request_id"])
+            try:
+                with torch.no_grad():
+                    actual = model(*args)
+                if profile_trace is not None:
+                    torch.cuda.synchronize()
+            finally:
+                if profile_trace is not None:
+                    torch.cuda.nvtx.range_pop()
             torch.cuda.synchronize()
-            end.record()
+            reject_cross_tree_aliases(torch, args, actual, model.state_dict())
+            # Cross-tree alias cases were rejected before independent serialization.
+            save_tree(output / f"outputs-{trial}.npz", to_arrays(torch, actual))
+            save_tree(output / f"mutated-inputs-{trial}.npz", to_arrays(torch, args))
+            save_tree(output / f"post-state-{trial}.npz", to_arrays(torch, model.state_dict()))
+
+        model, _ = fresh(0)
+
+        def reset_timing_inputs():
+            seed_all(torch, np, config.seed)
+            model.load_state_dict(from_arrays(torch, initial_state), strict=True)
+            return from_arrays(torch, inputs[0])
+
+        # Compile and initialize this instance before event timing. Reset mutable
+        # tensor state and inputs between every forward, including warmups.
+        with torch.no_grad():
+            model(*reset_timing_inputs())
         torch.cuda.synchronize()
-        if iteration >= config.warmup_runs:
-            samples.append(float(start.elapsed_time(end)))
-    return {
-        "status": "executed",
-        "role": role,
-        "source_sha256": source_hash,
-        "training": training,
-        "module_training": modes,
-        "device_time_ms": samples,
-        "median_ms": statistics.median(samples),
-        "worker_compute_wall_s": time.monotonic() - compile_wall_started,
-        "cute_verified": None,
-    }
+        samples = []
+        for iteration in range(config.warmup_runs + config.timed_runs):
+            args = reset_timing_inputs()
+            torch.cuda.synchronize()
+            start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+            with torch.no_grad():
+                start.record()
+                model(*args)
+                end.record()
+            torch.cuda.synchronize()
+            if iteration >= config.warmup_runs:
+                samples.append(float(start.elapsed_time(end)))
+        return {
+            "status": "executed",
+            "role": role,
+            "source_sha256": source_hash,
+            "training": training,
+            "module_training": modes,
+            "device_time_ms": samples,
+            "median_ms": statistics.median(samples),
+            "worker_compute_wall_s": time.monotonic() - compile_wall_started,
+            "cute_verified": None,
+        }
+    finally:
+        if profile_trace is not None:
+            profile_trace.snapshot()
+            profile_trace.close()
 
 
 def main():

@@ -97,3 +97,15 @@ def test_verification_requires_explicit_mode_and_finite_tolerance():
         VerificationConfig(atol=0, rtol=0, seed=0)
     with pytest.raises(ValueError):
         VerificationConfig(**{**settings().payload(), "rtol": float("nan")})
+
+
+def test_worker_output_symlink_is_not_followed_by_host_verifier(tmp_path):
+    from cute_rlm.verifier import checked_output
+
+    oracle = tmp_path / "reference.npz"
+    oracle.write_bytes(b"hidden result")
+    candidate = tmp_path / "candidate.npz"
+    candidate.symlink_to(oracle)
+    with pytest.raises(ValueError, match="symbolic link"):
+        checked_output(candidate)
+    assert checked_output(oracle) == oracle

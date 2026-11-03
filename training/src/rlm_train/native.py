@@ -17,7 +17,12 @@ from typing import Any
 from rlm_train.proxy import ClientHandle, SubLLMProxy
 from rlm_train.repl.base import ReplBackend
 from rlm_train.repl.subprocess import SubprocessReplBackend
-from rlm_train.token_budget import ContextBudgetPolicy, GeneratedTokenBudget, VllmPromptCounter
+from rlm_train.token_budget import (
+    BudgetReservationPending,
+    ContextBudgetPolicy,
+    GeneratedTokenBudget,
+    VllmPromptCounter,
+)
 
 TOOL = {
     "type": "function",
@@ -525,6 +530,28 @@ class NativeRuntime:
 
     async def request(self, session: _Session, messages: list, model: str, *, plain: bool):
         started = time.monotonic()
+        async with asyncio.timeout(min(self.limits.request_timeout, self.deadline - started)):
+            while True:
+                try:
+                    return await self.request_attempt(
+                        session, messages, model, plain=plain, budget_wait_started=started
+                    )
+                except BudgetReservationPending:
+                    # request_attempt has released its inference slot. Never hold
+                    # capacity while waiting for another call's unused reservation.
+                    assert self.generated_budget is not None
+                    await self.generated_budget.changed.wait()
+
+    async def request_attempt(
+        self,
+        session: _Session,
+        messages: list,
+        model: str,
+        *,
+        plain: bool,
+        budget_wait_started: float,
+    ):
+        started = time.monotonic()
         budget = self.generated_budget
         remaining = self.deadline - started
         if remaining <= 0:
@@ -571,6 +598,8 @@ class NativeRuntime:
                     assert prompt_tokens is not None
                     try:
                         reservation = budget.reserve(call_id, prompt_tokens)
+                    except BudgetReservationPending:
+                        raise
                     except RuntimeError as error:
                         raise NativeBudgetError(str(error)) from error
                     payload["max_tokens"] = reservation
@@ -597,7 +626,11 @@ class NativeRuntime:
                         },
                     },
                     "rendered_prompt_tokens": prompt_tokens,
-                    "timing": {"queue_wait_s": queued, "tokenize_elapsed_s": count_elapsed},
+                    "timing": {
+                        "queue_wait_s": queued,
+                        "tokenize_elapsed_s": count_elapsed,
+                        "budget_wait_s": started - budget_wait_started,
+                    },
                 }
                 if budget:
                     assert reservation is not None

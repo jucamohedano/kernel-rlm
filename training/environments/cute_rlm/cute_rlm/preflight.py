@@ -83,7 +83,8 @@ async def probe_two_long_requests(client, config, messages, evidence_dir: Path) 
     )
     return {
         "status": "passed",
-        "concurrent_requests": 2,
+        "simultaneous_submissions": 2,
+        "execution_overlap": "requires scheduler/metrics evidence; response success alone is insufficient",
         "requests": results,
-        "scope": "Observed long inference; numerical correctness and worker isolation are separate checks",
+        "scope": "Observed simultaneous long-request submission; inspect scheduler metrics for execution overlap. Correctness and isolation are separate checks",
     }
