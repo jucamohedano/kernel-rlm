@@ -114,6 +114,8 @@ async def test_cpu_scripted_native_tree_records_caps_logprobs_and_verification(
         if user == "child":
             code = (
                 "assert read_doc('cute')['excerpt']; "
+                f"assert resources['target']['gpu_model'] == {config.gpu_model!r}; "
+                "assert resources['examples']['elementwise_add']; "
                 "assert compile_candidate('child candidate')['status']=='compiled'; "
                 "answer['content']='child-ok'; answer['ready']=True"
             )
@@ -121,6 +123,9 @@ async def test_cpu_scripted_native_tree_records_caps_logprobs_and_verification(
             assert user == first_user_message(task, config)
             code = (
                 "assert context['reference_code'] == '# reference specification only'; "
+                f"assert resources['target']['gpu_model'] == {config.gpu_model!r}; "
+                "assert resources['limits']['turns_per_session'] == 32; "
+                "assert resources['examples']['elementwise_add']; "
                 "assert read_doc('cute')['excerpt']; import os; assert 'DO_NOT_INHERIT_API_KEY' not in os.environ; "
                 "assert compile_candidate('bad candidate')['status']=='compile_error'; "
                 "assert compile_candidate('revision 1')['status']=='compiled'; "
@@ -193,6 +198,7 @@ async def test_cpu_scripted_native_tree_records_caps_logprobs_and_verification(
         pytest.fail("execution must not re-render captured first-user messages")
 
     monkeypatch.setattr("cute_rlm.evaluate.first_user_message", forbidden_render)
+    monkeypatch.setattr("cute_rlm.evaluate.build_resources", forbidden_render)
     monkeypatch.setattr("cute_rlm.feedback.CompileFeedback", ScriptedFeedback)
     monkeypatch.setattr("cute_rlm.verifier.verify_submission", fake_verify)
     monkeypatch.setenv("DO_NOT_INHERIT_API_KEY", "secret")

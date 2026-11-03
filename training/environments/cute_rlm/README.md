@@ -56,15 +56,39 @@ The next-eval plan requests:
 
 ## Model interface and compile feedback
 
-The system prompt and the first user message are defined in `cute_rlm/prompts.py`.
-They use the detailed L1 contract/workflow style, adapted to CuTe rather than CUDA
-C++: source inspection, a task-specific contract checklist, constructor/runtime
-separation, strict state registration, CuTe source assembly, actual feedback and
-explicit final submission. The first user message includes the actual task ID,
-hardware, numerical settings and budgets. It is not a one-line task request.
-Preparation captures the exact rendered system/user messages as hashed inputs;
-execution reads those captured messages rather than rendering current defaults.
-No complete kernel or task solution is provided by the string-assembly example.
+The concise system prompt and first user message are defined in
+`cute_rlm/prompts.py`. The first action reads the authoritative reference and a
+small resource index, then the model reads one relevant example section and
+starts a candidate. There is no new lookup quota, early-check deadline or
+automatic submission. Keep a complete candidate in `best_source`; reserve the
+final turn for the two answer assignments.
+
+The shared `resources` dictionary is preloaded in root and recursive child REPLs:
+
+- `target`, `validation`, `limits`: allowlisted views of the captured config, not
+  hidden verifier inputs/outputs or a second source of settings. Limits are
+  configured ceilings, not live remaining balances.
+- `example_index`, `examples`: character-indexed, exact historical generic CuTe
+  addition source. NVIDIA's BSD-3-Clause notice is retained. That exact source
+  passed the separate L40S/SM89, CuTe 4.8.1 numerical/launch/timing fixture in
+  `20261030T200639Z-xs21-cute-l40s-detailed4`; its provenance records the source
+  and result hashes. This is not a benchmark task solution, a task-specific
+  implementation plan or readiness evidence for a new VM/dtype/layout/stream.
+- `api_notes`, `helper_help`: short launch/adaptation/source-inspection notes and
+  the actual helper signatures, bounds and return schemas.
+
+Preparation captures exact system/user messages and `.eval-inputs/resources.json`
+as hashed inputs; execution loads the captured bytes, not current defaults.
+The same generic resources are bootstrapped into children; their task context
+remains the delegated prompt string. Large examples stay in REPL variables rather
+than the initial prompt. Inspect the indexed sections instead of dumping a whole
+CLI example.
+
+Documentation search returns match-centered excerpts with `start`/`end` character
+offsets, not the first file header ranked by raw repetition. `read_doc` still
+returns a dictionary: use its `excerpt` and `more` fields; `chars` is 1..1600.
+These CPU changes require a new frozen run and target-VM checks. Historical
+prompts, inputs and results are not rewritten.
 
 The task is already in the root REPL as a Python dictionary. Start with
 `print(context["reference_code"])`; do not search the filesystem for the task.
@@ -72,12 +96,12 @@ Use `search_docs(...)` and `read_doc(...)` for pinned CuTe documentation. The
 reasoning REPL has no GPU. Recursive children receive their supplied prompt as
 context, not the root dictionary; pass the needed task snippets explicitly.
 
-Keep a complete Python source string defining `ModelNew` in a variable such as
-`source`. Inside the native REPL, call:
+Keep a complete Python source string defining `ModelNew` in `best_source`.
+Inside the native REPL, call:
 
 ```python
-feedback = compile_candidate(source)  # Prints diagnostics and returns a dictionary.
-# Revise source and call compile_candidate again when useful.
+feedback = compile_candidate(best_source)  # Prints diagnostics and returns a dictionary.
+# Revise best_source and call compile_candidate again when useful.
 ```
 
 This host-backed helper runs the source in the configured isolated GPU worker.
@@ -96,7 +120,7 @@ Checks are not final submissions and do not set `answer["ready"]`. Submit only
 when finished:
 
 ```python
-answer["content"] = source
+answer["content"] = best_source
 answer["ready"] = True
 ```
 
@@ -110,6 +134,17 @@ not used. No old experiment snapshot or result is changed by this protocol.
 This feedback path is CPU-tested with scripted models/workers. Its new broker-to-GPU
 path still needs a target-VM smoke under a new frozen run before a model evaluation.
 The earlier generic GPU verifier precheck is not evidence that this new path ran.
+
+### Laguna thinking setting
+
+The native request uses `chat_template_kwargs={"enable_thinking": true}` and
+preserves returned reasoning in later messages. It does not send
+`reasoning_effort="high"`. The pinned Laguna chat template exposes boolean
+thinking, not a documented low/medium/high effort tier; accepting a generic
+vLLM API field does not create model-specific tier support. Keep thinking on.
+The last run's provider `reasoning_tokens=0` field did not mean thinking was off:
+all 128 raw responses contained reasoning text. No effort setting is changed by
+this concise-prompt condition.
 
 ## GPU handoff
 

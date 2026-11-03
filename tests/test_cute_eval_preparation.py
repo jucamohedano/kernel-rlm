@@ -144,6 +144,8 @@ def test_prepared_manifest_captures_resolved_config_and_doc_bytes(tmp_path):
         ".eval-inputs/resolved-config.json",
         ".eval-inputs/system-prompt.txt",
         ".eval-inputs/user-prompts.json",
+        ".eval-inputs/resources.json",
+        "training/environments/cute_rlm/cute_rlm/examples/elementwise_add.py.txt",
     } <= captured
     from cute_rlm.prompts import CUTE_SYSTEM_PROMPT, first_user_message
 
@@ -170,7 +172,6 @@ def test_gpu_compute_capability_requires_explicit_major_minor_string(capability)
 
 def test_different_gpu_requires_an_explicit_compute_capability():
     from cute_rlm.config import EvalConfig, serving_arguments
-    from cute_rlm.prompts import CUTE_SYSTEM_PROMPT, first_user_message
 
     default = config()
     assert default.gpu_compute_capability == "12.0" and default.gpu_arch == "sm_120"
@@ -189,9 +190,6 @@ def test_different_gpu_requires_an_explicit_compute_capability():
         }
     )
     assert cfg.gpu_arch == "sm_89"
-    rendered = CUTE_SYSTEM_PROMPT + first_user_message({"task_id": "t"}, cfg)
-    assert "GPU: NVIDIA L40S, compute capability 8.9 (sm_89)" in rendered
-    assert "SM120" not in rendered and "sm_120" not in rendered
     args = serving_arguments("/model", cfg)
     assert args[args.index("--tensor-parallel-size") + 1] == "2"
     assert args[args.index("--max-num-seqs") + 1] == "3"
