@@ -117,7 +117,15 @@ def reject_context_rebinding(code: str) -> None:
         if (
             isinstance(node, ast.Name)
             and node.id
-            in {"context", "context_0", "cuda_docs", "search_cuda_docs", "read_cuda_doc"}
+            in {
+                "context",
+                "context_0",
+                "cuda_docs",
+                "search_cuda_docs",
+                "read_cuda_doc",
+                "search_docs",
+                "read_doc",
+            }
             and isinstance(node.ctx, (ast.Store, ast.Del))
         ):
             raise ValueError(
@@ -169,6 +177,9 @@ class Worker:
         self.proxy_url = proxy_url.rstrip("/")
         self.rollout_id = rollout_id
         self.depth = depth
+        self.proxy_timeout = float(os.environ.get("RLM_TRAIN_BROKER_TIMEOUT_S", "600"))
+        if not __import__("math").isfinite(self.proxy_timeout) or self.proxy_timeout <= 0:
+            raise ValueError("broker timeout must be finite and positive")
         if exec_timeout_s is None:
             try:
                 exec_timeout_s = float(os.environ.get("RLM_TRAIN_EXEC_TIMEOUT_S", "600"))
@@ -247,9 +258,9 @@ class Worker:
         route = f"/rollout/{self.rollout_id}/{path.lstrip('/')}"
         body = json.dumps(payload).encode("utf-8")
         if self.proxy_url.startswith("unix://"):
-            connection = http.client.HTTPConnection("localhost", timeout=600)
+            connection = http.client.HTTPConnection("localhost", timeout=self.proxy_timeout)
             channel = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            channel.settimeout(600)
+            channel.settimeout(self.proxy_timeout)
             try:
                 channel.connect(self.proxy_url[len("unix://") :])
                 connection.sock = channel
@@ -275,7 +286,7 @@ class Worker:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=600) as resp:
+            with urllib.request.urlopen(req, timeout=self.proxy_timeout) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             try:

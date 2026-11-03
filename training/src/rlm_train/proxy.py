@@ -83,7 +83,16 @@ def _coerce_messages(prompt: str | list) -> list:
 
 
 class SubLLMProxy:
-    def __init__(self, host: str = "127.0.0.1", port: int = 0, socket_path: Path | None = None):
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 0,
+        socket_path: Path | None = None,
+        max_request_bytes: int = 1024**2,
+    ):
+        if type(max_request_bytes) is not int or max_request_bytes <= 0:
+            raise ValueError("max_request_bytes must be a positive integer")
+        self.max_request_bytes = max_request_bytes
         self._socket_path = Path(socket_path).resolve() if socket_path is not None else None
         self._socket_identity: tuple[int, int] | None = None
         self._host = host
@@ -98,7 +107,7 @@ class SubLLMProxy:
     async def start(self) -> None:
         if self._runner is not None:
             return
-        app = web.Application()
+        app = web.Application(client_max_size=self.max_request_bytes)
         app.router.add_post("/rollout/{rollout_id}/llm_query", self._handle_single)
         app.router.add_post("/rollout/{rollout_id}/llm_query_batched", self._handle_batched)
         app.router.add_post("/rollout/{rollout_id}/rlm_query", self._recursive_query)
