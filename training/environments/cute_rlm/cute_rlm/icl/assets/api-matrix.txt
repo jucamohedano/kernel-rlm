@@ -1,0 +1,7 @@
+Additional scalar-loop API: nested logical coordinates access rank-2
+cute.Tensor arguments directly. Initialize FP32 accumulators explicitly with
+cutlass.Float32(...), and use preprocessed range loops for dynamic bounds.
+Scalar multiply and add are supported on loaded FP32 values. A correctness-only
+implementation can use SIMT CUDA threads; Tensor Cores, MMA layouts and architecture-
+specific matrix instructions are not required. Do not enable TF32 to meet an
+FP32 contract. No matrix multiplication algorithm or target kernel is supplied.

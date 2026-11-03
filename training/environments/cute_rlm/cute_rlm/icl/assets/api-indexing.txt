@@ -1,0 +1,7 @@
+Additional layout API: rank-2 cute.Tensor coordinate loads and stores
+already apply layout strides. Output allocation can use torch.empty((rows, cols),
+device=x.device, dtype=x.dtype), which is contiguous by default. A transpose view
+alone is not a computed contiguous output. Scalar coordinate arithmetic (//, %)
+can map a linear launch coordinate to a logical rank-2 coordinate. Tensor shape
+and both strides belong to specialization; do not cache across incompatible
+layouts. No target index mapping or target arithmetic is supplied here.

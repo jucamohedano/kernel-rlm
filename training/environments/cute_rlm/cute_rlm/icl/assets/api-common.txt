@@ -1,0 +1,59 @@
+Python CuTe DSL API packet, scalar-indexing route (target package 4.8.1, SM89).
+This is a manually authored API summary backed by pinned CUTLASS sources, not a
+GPU-validated sufficiency claim. The source revision is recorded separately;
+source-to-installed-4.8.1 equivalence still needs review before interpreting failures.
+
+Imports: import torch; import cutlass; import cutlass.cute as cute;
+from cutlass.cute.runtime import from_dlpack.
+Decorate a GPU device function with @cute.kernel. Decorate a host launch function
+with @cute.jit. Convert Torch CUDA tensors with from_dlpack(tensor) in ordinary
+Python, outside JIT/device code. The conversion is zero-copy and retains shape
+and strides. These objects become indexable cute.Tensor values inside JIT/device
+code; they are not indexable runtime objects in ordinary Python.
+
+Pinned public signature:
+from_dlpack(tensor_dlpack: object, assumed_align: Optional[int] = None,
+            use_32bit_stride: bool = False, *, enable_tvm_ffi: bool = False,
+            force_tf32: bool = False) -> Tensor
+Do not assume TF32 when FP32 arithmetic is required. Default from_dlpack uses
+static shape/stride specialization. mark_layout_dynamic(leading_dim=None) is
+optional, not required. If used, it infers a unit-stride dimension when possible;
+explicit leading_dim forces stride 1 there and must match the real stride.
+Never force unit stride for a gapped input. Compile for a new shape/layout rather
+than reusing an executor specialized for an incompatible shape/layout.
+
+Host launch and compilation syntax (placeholders, not a full implementation):
+  @cute.jit
+  def launch(a, out):
+      device_function(a, out).launch(grid=[GRID_X, 1, 1], block=[BLOCK_X, 1, 1])
+  # In ordinary Python, after defining device_function and launch:
+  args = (from_dlpack(a), from_dlpack(out))
+  compiled = cute.compile(launch, *args)
+  compiled(*args)
+Keep tensor objects alive during the invocation. Torch may allocate output with
+empty/empty_like on the input device. Default CUDA stream execution is adequate
+for this harness, which synchronizes inputs before and outputs after forward.
+No performance target is imposed; scalar loads/stores and ordinary CUDA threads
+are allowed. No Hopper/Blackwell/TMA/tcgen05 features are needed.
+
+Device operations:
+  tidx, _, _ = cute.arch.thread_idx()
+  bidx, _, _ = cute.arch.block_idx()
+  bdim, _, _ = cute.arch.block_dim()
+These are zero-based thread/block coordinates and block dimensions. Global x
+thread index is bidx * bdim + tidx. Mask every access past the logical shape.
+For cute.Tensor t, t.shape is its shape tuple; t[i] loads a rank-1 scalar,
+t[i,j] loads a rank-2 scalar, and out[i,j] = value stores a scalar. Logical
+coordinates are mapped through the tensor's layout, including strides. Use
+rank-appropriate coordinates, not flattening that assumes contiguous storage.
+Scalar arithmetic supports +, -, *, /, integer // and %, and comparisons.
+cutlass.Float32(0.0) initializes an FP32 scalar; annotate dynamic scalar arguments
+with cutlass.Float32 or cutlass.Int32. Python floats passed to JIT specialize as
+Python values unless represented by a DSL numeric type.
+
+Default @cute.jit/@cute.kernel preprocessing lowers Python if/else and for loops
+with dynamic DSL operands. for k in range(0, bound, 1) emits an IR loop;
+cutlass.range_constexpr is for deliberate compile-time unrolling, not required.
+A scalar carried across a loop must be initialized before that loop; initialize
+its DSL type explicitly when accumulating FP32. No shared memory, warp reduction
+or tensor-core interface is required for a simple correctness-only route.

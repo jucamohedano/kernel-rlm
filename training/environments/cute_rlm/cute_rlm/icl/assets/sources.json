@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "status": "implementation_only_no_generation_or_gpu_validation",
+  "target_cute_dsl": "4.8.1",
+  "packet_sufficiency": "pending human/source-to-installed-version check and GPU validation; failures inconclusive until checked",
+  "license_review": {
+    "status": "recorded_not_legal_approval_for_training",
+    "notes": [
+      "Per-file license, not a blanket CUTLASS root BSD grant.",
+      "API descriptions are manually authored; short public signatures are transcribed from pinned LicenseRef-NvidiaProprietary sources.",
+      "NVIDIA CuTeDSL EULA included verbatim for review; package/docs permissions must be assessed separately from BSD example.",
+      "No training admission or pretraining-exclusion claim."
+    ],
+    "terms_asset": "NVIDIA-CuTeDSL-license.rst"
+  },
+  "upstream_api_sources": [
+    {
+      "path": "python/CuTeDSL/cutlass/cute/runtime.py",
+      "url": "https://github.com/NVIDIA/cutlass/blob/2c85f497547eb441f0fe80bfb0fb2e6f9add1719/python/CuTeDSL/cutlass/cute/runtime.py",
+      "revision": "2c85f497547eb441f0fe80bfb0fb2e6f9add1719",
+      "sha256": "87f13e46ad60ffbc00011861e8ba13ebf9b4bf86fc2a1cb058d9e5a079e167cd",
+      "license": "LicenseRef-NvidiaProprietary / NVIDIA CUTLASS DSL EULA; no blanket BSD grant"
+    },
+    {
+      "path": "python/CuTeDSL/cutlass/cute/tensor.py",
+      "url": "https://github.com/NVIDIA/cutlass/blob/2c85f497547eb441f0fe80bfb0fb2e6f9add1719/python/CuTeDSL/cutlass/cute/tensor.py",
+      "revision": "2c85f497547eb441f0fe80bfb0fb2e6f9add1719",
+      "sha256": "d27aefc7c7485bb3bb470c029e4044ddcb80b59e069fe084cca62b37efec70a9",
+      "license": "LicenseRef-NvidiaProprietary / NVIDIA CUTLASS DSL EULA; no blanket BSD grant"
+    },
+    {
+      "path": "python/CuTeDSL/cutlass/cute/math.py",
+      "url": "https://github.com/NVIDIA/cutlass/blob/2c85f497547eb441f0fe80bfb0fb2e6f9add1719/python/CuTeDSL/cutlass/cute/math.py",
+      "revision": "2c85f497547eb441f0fe80bfb0fb2e6f9add1719",
+      "sha256": "3ce83931a5bf667255881e1ad50e497e9a621714318ed4b89fe0cb0f7937b743",
+      "license": "LicenseRef-NvidiaProprietary / NVIDIA CUTLASS DSL EULA; no blanket BSD grant"
+    },
+    {
+      "path": "media/docs/pythonDSL/cute_dsl_general/dsl_introduction.rst",
+      "url": "https://github.com/NVIDIA/cutlass/blob/2c85f497547eb441f0fe80bfb0fb2e6f9add1719/media/docs/pythonDSL/cute_dsl_general/dsl_introduction.rst",
+      "revision": "2c85f497547eb441f0fe80bfb0fb2e6f9add1719",
+      "sha256": "e2e6c1c27e5ba052c724bcf94162051bfba7e711cf118b9ac5a585f731ef5796",
+      "license": "LicenseRef-NvidiaProprietary / NVIDIA CUTLASS DSL EULA; no blanket BSD grant"
+    },
+    {
+      "path": "media/docs/pythonDSL/cute_dsl_general/dsl_control_flow.rst",
+      "url": "https://github.com/NVIDIA/cutlass/blob/2c85f497547eb441f0fe80bfb0fb2e6f9add1719/media/docs/pythonDSL/cute_dsl_general/dsl_control_flow.rst",
+      "revision": "2c85f497547eb441f0fe80bfb0fb2e6f9add1719",
+      "sha256": "a6500a6c85dfdc3f9ceca327dccc65c0152d05845a49253b0d0529b9bda250dc",
+      "license": "LicenseRef-NvidiaProprietary / NVIDIA CUTLASS DSL EULA; no blanket BSD grant"
+    },
+    {
+      "path": "media/docs/pythonDSL/guides/framework_integration.rst",
+      "url": "https://github.com/NVIDIA/cutlass/blob/2c85f497547eb441f0fe80bfb0fb2e6f9add1719/media/docs/pythonDSL/guides/framework_integration.rst",
+      "revision": "2c85f497547eb441f0fe80bfb0fb2e6f9add1719",
+      "sha256": "3668c57760fc77989e23d4695e19333f6bea646850beddaabf54f334c2ca5d07",
+      "license": "LicenseRef-NvidiaProprietary / NVIDIA CUTLASS DSL EULA; no blanket BSD grant"
+    }
+  ],
+  "assets": [
+    {
+      "id": "NVIDIA-CuTeDSL-license.rst",
+      "path": "NVIDIA-CuTeDSL-license.rst",
+      "sha256": "26665cf85b7dd34883da7d37e9924700f1621d4b4fd0b182c42cf9efedcea3ad",
+      "bytes": 21615,
+      "license": "NVIDIA CUTLASS DSL EULA",
+      "kind": "license"
+    },
+    {
+      "id": "api-common.txt",
+      "path": "api-common.txt",
+      "sha256": "136abb41180de125212dab8db7668afb10f1641272363be74dcc7c9cb289b9bb",
+      "bytes": 3617,
+      "license": "Project-authored summary; referenced API sources NVIDIA CUTLASS DSL EULA",
+      "kind": "api"
+    },
+    {
+      "id": "api-indexing.txt",
+      "path": "api-indexing.txt",
+      "sha256": "ced2556a86629ecc7c6502a0f5edf2134d0b2050d6e8404f8861cba6f8a28b7d",
+      "bytes": 542,
+      "license": "Project-authored summary; referenced API sources NVIDIA CUTLASS DSL EULA",
+      "kind": "api"
+    },
+    {
+      "id": "api-matrix.txt",
+      "path": "api-matrix.txt",
+      "sha256": "82db318e2390b400ee2baf639ea41d3d4d61e09edc129fb8a83d1de998fff22e",
+      "bytes": 544,
+      "license": "Project-authored summary; referenced API sources NVIDIA CUTLASS DSL EULA",
+      "kind": "api"
+    },
+    {
+      "id": "api-pointwise.txt",
+      "path": "api-pointwise.txt",
+      "sha256": "499b38b9e0dd3b878f4b55a0a6ef88895d032cebb676faec55ccdd7796e54fd8",
+      "bytes": 389,
+      "license": "Project-authored summary; referenced API sources NVIDIA CUTLASS DSL EULA",
+      "kind": "api"
+    },
+    {
+      "id": "api-reduction.txt",
+      "path": "api-reduction.txt",
+      "sha256": "3a0658a9dd01b245f364d2bf0684f596af8c959cdbc90549f744198f24e7178c",
+      "bytes": 520,
+      "license": "Project-authored summary; referenced API sources NVIDIA CUTLASS DSL EULA",
+      "kind": "api"
+    },
+    {
+      "id": "generic-2d-add.py.txt",
+      "path": "generic-2d-add.py.txt",
+      "sha256": "f060facbb36f6e099cbce91a266385deb73117aeeb87a65cd91ec7199ea8f767",
+      "bytes": 6880,
+      "license": "BSD-3-Clause; NVIDIA full notice retained",
+      "kind": "example"
+    }
+  ],
+  "example_source": {
+    "id": "generic-2d-add-v1",
+    "path": "training/environments/cute_rlm/cute_rlm/examples/elementwise_add.py.txt",
+    "revision": "6bfe6315a5ff9ee09fd0fed222d7ba997fe7da3c",
+    "url": "https://github.com/jucamohedano/kernel-rlm/blob/6bfe6315a5ff9ee09fd0fed222d7ba997fe7da3c/training/environments/cute_rlm/cute_rlm/examples/elementwise_add.py.txt",
+    "upstream_origin": "NVIDIA CUTLASS examples/python/CuTeDSL/ampere/elementwise_add.py, with historical local ModelNew adapter",
+    "upstream_revision": "not established; local source revision and digest are authoritative",
+    "sha256": "479ab93b9982fa1fb82cec37c6820a5ac64c52610ec8cec80d687d57a0a11fe4",
+    "excerpt": "Copyright/license header, imports, complete elementwise_add_kernel and elementwise_add definitions, and complete historical ModelNew adapter; omitted tutorial/CLI/benchmark code.",
+    "license": "BSD-3-Clause as declared by this file; full notice retained",
+    "relatedness_limitation": "Generic addition is close to row_bias and affine arithmetic, but does not implement a target: no broadcast, affine constants, sigmoid, transpose, strided affine, reduction or matrix contraction.",
+    "validation_scope": "Historical generic add is previously validated; extracted packet and target operations not GPU-validated in this implementation."
+  }
+}

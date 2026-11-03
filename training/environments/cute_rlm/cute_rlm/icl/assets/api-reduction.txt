@@ -1,0 +1,7 @@
+Additional scalar-loop API: FP32 loop-carried values can use
+cutlass.Float32(...) initialization. Dynamic range loops may load repeated
+logical coordinates through cute.Tensor.__getitem__. Scalar if comparisons can
+update a running value. cute.math.sqrt(value) is a unary device math export.
+Rows are nonempty; no empty reduction identity is required. A serial loop within
+one device thread is permitted; no parallel reduction primitive is required.
+These are language operations, not a target reduction implementation.
