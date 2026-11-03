@@ -317,15 +317,16 @@ def cute_turn_notice(turn: int, max_turns: int | None) -> str | None:
     remaining = max_turns - turn + 1
     if turn == max_turns:
         return (
-            f"FINAL TURN {turn}/{max_turns}. Submit your best complete ModelNew now: "
+            f"FINAL TURN {turn}/{max_turns}. Submit now. Root: return your complete ModelNew with "
             "answer['content'] = best_source; answer['ready'] = True. "
-            "Do not spend this final turn on another compile check or exploration."
+            "Child: put the report requested by your delegated prompt in answer['content'] "
+            "and set answer['ready'] = True. Do not start another compile check or lookup."
         )
     return (
         f"Turn {turn}/{max_turns}: {remaining} model turns remain, including this one. "
-        f"Finish corrections and submit before the final turn ({max_turns}) if possible. "
-        "Set answer['content'] = best_source and answer['ready'] = True to submit. "
-        "Do not wait for more feedback once your remaining turns are needed to finalize."
+        f"Finish and submit before the final turn ({max_turns}) if possible. "
+        "Root: set answer['content'] = best_source and answer['ready'] = True. "
+        "Child: return the report requested by your delegated prompt using the same answer dict."
     )
 
 

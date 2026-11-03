@@ -51,7 +51,8 @@ def test_manifest_source_integrity_and_context_excludes_labels(tmp_path):
     output.write_text(payload)
     loaded = load_tasks(output)
     context = task_context(loaded[0], {"sha256": "docs-hash"})
-    assert context["reference_code"] == "reference 0"
+    assert context["cute_dsl_task"] == "reference 0"
+    assert "reference_code" not in context
     assert context["docs"] == {"sha256": "docs-hash"}
     assert not ({"answer", "reward_model", "ground_truth", "scorer"} & context.keys())
     loaded[0]["reference_code"] += " altered"

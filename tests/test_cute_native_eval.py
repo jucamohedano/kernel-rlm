@@ -122,7 +122,7 @@ async def test_cpu_scripted_native_tree_records_caps_logprobs_and_verification(
         else:
             assert user == first_user_message(task, config)
             code = (
-                "assert context['reference_code'] == '# reference specification only'; "
+                "assert context['cute_dsl_task'] == '# reference specification only'; "
                 f"assert resources['target']['gpu_model'] == {config.gpu_model!r}; "
                 "assert resources['limits']['turns_per_session'] == 64; "
                 "assert resources['examples']['elementwise_add']; "

@@ -53,5 +53,7 @@ def test_exact_historical_example_is_data_with_indexed_complete_definitions():
     namespace = {}
     exec(resources_bootstrap(resources), namespace)
     assert namespace["resources"] == resources
+    assert all(isinstance(help_text, str) for help_text in resources["helper_help"].values())
+    assert set(resources["helper_help"]).isdisjoint(namespace)  # Data never installs helpers.
     assert "ModelNew" not in namespace  # Example is never executed by the reasoning REPL.
     assert json.loads(json.dumps(resources)) == resources

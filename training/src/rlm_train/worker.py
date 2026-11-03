@@ -6,6 +6,7 @@ import argparse
 import ast
 import copy
 import http.client
+import inspect
 import io
 import json
 import os
@@ -112,24 +113,30 @@ _SAFE_BUILTINS = {
 def reject_context_rebinding(code: str) -> None:
     if not os.environ.get("RLM_TRAIN_READONLY_CONTEXT"):
         return
-    tree = ast.parse(code)
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Name)
-            and node.id
-            in {
-                "context",
-                "context_0",
-                "cuda_docs",
-                "search_cuda_docs",
-                "read_cuda_doc",
-                "search_docs",
-                "read_doc",
-            }
-            and isinstance(node.ctx, (ast.Store, ast.Del))
-        ):
+    supplied_names = RESERVED_TOOL_NAMES | {
+        "context_0",
+        "resources",
+        "cuda_docs",
+        "search_cuda_docs",
+        "read_cuda_doc",
+        "search_docs",
+        "read_doc",
+    }
+    for node in ast.walk(ast.parse(code)):
+        name = None
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            name = node.id
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            name = node.name
+        elif isinstance(node, ast.alias):
+            name = node.asname or node.name.split(".")[0]
+        elif isinstance(node, ast.ExceptHandler):
+            name = node.name
+        if name in supplied_names:
             raise ValueError(
-                f"{node.id} is read-only. Inspect it, then store results in a new variable."
+                f"{name} is read-only and supplied by the REPL. "
+                "Call supplied helpers directly; do not import or redefine them. "
+                "Store results in a new variable. Use SHOW_VARS() to see available helpers."
             )
 
 
@@ -249,14 +256,37 @@ class Worker:
         self._last_final_answer = str(content)
 
     def _show_vars(self) -> str:
-        available = {
-            k: type(v).__name__
-            for k, v in self.locals.items()
-            if not k.startswith("_") and k != "answer"
+        namespace = {**self.globals, **self.locals}
+        helper_names = (RESERVED_TOOL_NAMES - {"answer", "context", "history"}) | {
+            "search_docs",
+            "read_doc",
+            "search_cuda_docs",
+            "read_cuda_doc",
         }
-        if not available:
-            return "No variables created yet. Use ```repl``` blocks to create variables."
-        return f"Available variables: {available}"
+        helpers = []
+        for name in sorted(helper_names):
+            helper = namespace.get(name)
+            if not callable(helper):
+                continue
+            signature = inspect.signature(helper)
+            signature = signature.replace(
+                parameters=[
+                    parameter.replace(annotation=inspect.Parameter.empty)
+                    for parameter in signature.parameters.values()
+                ],
+                return_annotation=inspect.Signature.empty,
+            )
+            helpers.append(f"{name}{signature}")
+        available = {
+            name: type(value).__name__
+            for name, value in namespace.items()
+            if not name.startswith("_") and name not in helper_names
+        }
+        return (
+            "Injected helpers (call directly inside repl(code); no imports):\n"
+            + "\n".join(helpers)
+            + f"\nAvailable variables: {available}"
+        )
 
     def _proxy_post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         route = f"/rollout/{self.rollout_id}/{path.lstrip('/')}"

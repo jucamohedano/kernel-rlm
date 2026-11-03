@@ -49,7 +49,8 @@ class ScriptedClient:
 
 
 @pytest.mark.asyncio
-async def test_root_and_child_repeat_feedback_without_ready_latch(tmp_path):
+async def test_root_and_child_repeat_feedback_without_ready_latch(tmp_path, monkeypatch):
+    monkeypatch.delenv("RLM_TRAIN_READONLY_CONTEXT", raising=False)
     owners = []
     root_turn = 0
 

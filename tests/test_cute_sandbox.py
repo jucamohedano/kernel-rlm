@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 
 import pytest
 from cute_rlm.sandbox import (
@@ -179,3 +181,122 @@ def test_runtime_source_link_cannot_hide_a_broad_host_mount(tmp_path, target):
     link.symlink_to(target, target_is_directory=True)
     with pytest.raises(ValueError, match="broad host"):
         _bindings([binding(str(link), "/runtime/hidden")], "read-only")
+
+
+@pytest.fixture
+def phase_worker(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from cute_rlm import sandbox
+
+    bwrap = tmp_path / "bwrap"
+    bwrap.write_text("executable")
+    bwrap.chmod(0o755)
+    device = tmp_path / "device"
+    device.touch()
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    spec = {
+        "bwrap": str(bwrap),
+        "runtime_python": "/venv/bin/python",
+        "readonly_bindings": [],
+        "gpu_devices": [binding(str(device), "/dev/nvidia0")],
+    }
+    request = {
+        "role": "candidate",
+        "input_dir": str(inputs),
+        "output_dir": str(tmp_path / "output"),
+        "compile_feedback": True,
+        "profile_compile": True,
+    }
+
+    def launch(write_output):
+        def run(command, **kwargs):
+            assert command[-1] == "cute_rlm.verify_worker"
+            mapped = json.loads(kwargs["input"])
+            assert mapped["compile_feedback"] is True
+            assert mapped["profile_compile"] is request["profile_compile"]
+            output = next(
+                Path(command[index + 1])
+                for index, value in enumerate(command)
+                if value == "--bind" and command[index + 2] == "/phase/output"
+            )
+            write_output(output)
+            return SimpleNamespace(returncode=0, stdout=b'{"status":"compiled"}\n', stderr=b"")
+
+        monkeypatch.setattr(sandbox.subprocess, "run", run)
+        return sandbox._run(spec, request)
+
+    return launch, request
+
+
+@pytest.mark.parametrize("compiled", [False, True])
+def test_phase_retains_compile_trace_directory_and_artifacts(phase_worker, compiled, capfd):
+    from types import SimpleNamespace
+
+    from cute_rlm.compile_trace import install_compile_trace
+
+    ptx, cubin = b".visible .entry test_kernel() {}", b"test cubin"
+
+    def write_output(output):
+        cute = SimpleNamespace(
+            compile=lambda *args, **kwargs: SimpleNamespace(__ptx__=ptx, __cubin__=cubin)
+        )
+        trace = install_compile_trace(cute, SimpleNamespace(), output)
+        try:
+            if compiled:
+                cute.compile("kernel")
+            trace.snapshot()
+        finally:
+            trace.close()
+
+    launch, request = phase_worker
+    assert launch(write_output) == 0
+    assert json.loads(capfd.readouterr().out)["status"] == "compiled"
+    output = Path(request["output_dir"])
+    artifacts = output / "compile-artifacts"
+    assert artifacts.is_dir()
+    provenance = json.loads((output / "compile-provenance.json").read_text())
+    if compiled:
+        artifact = provenance["artifacts"][0]
+        assert (output / artifact["ptx_path"]).read_bytes() == ptx
+        assert (output / artifact["cubin_path"]).read_bytes() == cubin
+    else:
+        assert list(artifacts.iterdir()) == [] and provenance["artifacts"] == []
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "file_link",
+        "directory_link",
+        "artifact_directory_link",
+        "fifo",
+        "other_directory",
+        "unrequested",
+    ],
+)
+def test_phase_rejects_unsafe_or_unexpected_artifact_entries(phase_worker, tmp_path, kind):
+    def write_output(output):
+        artifacts = output / "compile-artifacts"
+        if kind == "artifact_directory_link":
+            artifacts.symlink_to(tmp_path, target_is_directory=True)
+            return
+        artifacts.mkdir()
+        if kind == "file_link":
+            target = tmp_path / "host-file"
+            target.write_text("host data")
+            (artifacts / "artifact.ptx").symlink_to(target)
+        elif kind == "directory_link":
+            (artifacts / "linked").symlink_to(tmp_path, target_is_directory=True)
+        elif kind == "fifo":
+            os.mkfifo(artifacts / "pipe")
+        elif kind == "other_directory":
+            (output / "unexpected").mkdir()
+
+    launch, request = phase_worker
+    if kind == "unrequested":
+        request["profile_compile"] = False
+    with pytest.raises(RuntimeError, match="worker outputs"):
+        launch(write_output)
+    assert not Path(request["output_dir"]).exists()

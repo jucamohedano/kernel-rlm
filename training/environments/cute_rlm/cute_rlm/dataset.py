@@ -107,7 +107,7 @@ def task_context(
         raise ValueError("task source integrity check failed")
     result = {
         "task_id": task["task_id"],
-        "reference_code": code,
+        "cute_dsl_task": code,
         "description": task.get("description", ""),
         "source": dict(source),
     }
