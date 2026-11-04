@@ -4,6 +4,10 @@ The public dataset is [jucamohedano/kernel-rlm-curriculum](https://huggingface.c
 
 The source is [CUDA-Agent-Ops-6K](https://huggingface.co/datasets/BytedTsinghua-SIA/CUDA-Agent-Ops-6K). The uploaded dataset card includes attribution, the source's declared CC-BY-4.0 license, and our selection/order/format-conversion changes. The historical upstream download revision was not recorded; it is not fabricated. Exact preserved materializations are authoritative for reproducing previous runs.
 
+## New curriculum builds
+
+The separate [CuTe curriculum builder](CUTE_CURRICULUM.md) combines reviewed source records without changing this historical release. Its local outputs are static task references, not approved CuTe training inputs.
+
 ## Configurations
 
 - `lvl1_seed42`: 50 single-op tasks in the original selected order.
