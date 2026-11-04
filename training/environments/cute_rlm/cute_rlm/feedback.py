@@ -155,6 +155,7 @@ class CompileFeedback:
                             "task_id": self.task["task_id"],
                             "role": "candidate",
                             "source": source,
+                            "source_sha256": source_hash,
                             "candidate_sha256": source_hash,
                             "config": self.config.payload(),
                             "input_dir": str(self.input_directory),
