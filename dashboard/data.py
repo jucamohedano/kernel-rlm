@@ -161,8 +161,21 @@ def saved_traces(run: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     return list(traces.values()), warnings
 
 
-def discover_runs(root: Path) -> list[dict[str, Any]]:
-    """Discover run folders without loading metric histories or trajectory bodies."""
+def discover_runs(root: Path | tuple[Path, ...]) -> list[dict[str, Any]]:
+    """Discover configured evidence roots without silently mixing run snapshots."""
+    if isinstance(root, tuple):
+        from training.environments.kernel_rlm.dashboard import server as reader
+
+        combined = {}
+        for directory in dict.fromkeys(path.resolve() for path in root):
+            for run in discover_runs(directory):
+                prior = combined.get(run["id"])
+                if prior is not None and prior["root"].resolve() != run["root"].resolve():
+                    raise ValueError(f"Run {run['id']} exists in multiple evidence roots")
+                combined[run["id"]] = run
+        return sorted(
+            combined.values(), key=lambda run: reader.run_timestamp({"id": run["id"]}), reverse=True
+        )
     import os
 
     from training.environments.kernel_rlm.dashboard import server as reader
@@ -223,7 +236,9 @@ def discover_runs(root: Path) -> list[dict[str, Any]]:
     )
 
 
-def run_records(root: Path, *, count_trajectories: bool = True) -> list[dict[str, Any]]:
+def run_records(
+    root: Path | tuple[Path, ...], *, count_trajectories: bool = True
+) -> list[dict[str, Any]]:
     from training.environments.kernel_rlm.dashboard import server as reader
 
     records = []
@@ -314,7 +329,7 @@ def run_records(root: Path, *, count_trajectories: bool = True) -> list[dict[str
     return records
 
 
-def runs(root: Path) -> list[dict[str, Any]]:
+def runs(root: Path | tuple[Path, ...]) -> list[dict[str, Any]]:
     return [
         {key: value for key, value in run.items() if key != "_reader"} for run in run_records(root)
     ]
@@ -362,7 +377,7 @@ def campaign(receipt_path: Path | None) -> tuple[dict[str, Any], list[str]]:
     }, []
 
 
-def home(root: Path, receipt_path: Path | None = None) -> dict[str, Any]:
+def home(root: Path | tuple[Path, ...], receipt_path: Path | None = None) -> dict[str, Any]:
     campaign_data, warnings = campaign(receipt_path)
     receipt = read_json(receipt_path) if receipt_path else {}
     run_status = None
@@ -907,7 +922,9 @@ def safe_trace_reward(trace: dict[str, Any]) -> float | None:
         return None
 
 
-def trajectory_index(root: Path, *, task_catalog_path: Path | None = None) -> dict[str, Any]:
+def trajectory_index(
+    root: Path | tuple[Path, ...], *, task_catalog_path: Path | None = None
+) -> dict[str, Any]:
     """Return lightweight trajectory summaries from supported local exports."""
     trajectories = []
     warnings = []

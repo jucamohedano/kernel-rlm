@@ -12,8 +12,12 @@ from urllib.parse import parse_qs, unquote, urlparse
 from . import data, writing
 
 
-def make_handler(root: Path, receipt_path: Path | None = None, task_catalog: Path | None = None):
-    root = root.resolve()
+def make_handler(
+    root: Path | tuple[Path, ...],
+    receipt_path: Path | None = None,
+    task_catalog: Path | None = None,
+):
+    root = tuple(path.resolve() for path in root) if isinstance(root, tuple) else root.resolve()
     write_token = secrets.token_urlsafe(32)
 
     class Handler(BaseHTTPRequestHandler):
@@ -248,8 +252,9 @@ def main():
     parser.add_argument(
         "--evidence-root",
         type=Path,
+        action="append",
         required=True,
-        help="Existing directory recursively searched for saved run artifacts",
+        help="Existing saved-run directory; repeat to include historical evidence locations",
     )
     parser.add_argument(
         "--campaign-receipt", type=Path, help="Optional explicit campaign completion receipt JSON"
@@ -261,9 +266,9 @@ def main():
     )
     parser.add_argument("--port", type=int, default=7790)
     args = parser.parse_args()
-    root = args.evidence_root.resolve()
-    if not root.is_dir():
-        parser.error("evidence root must be an existing directory")
+    root = tuple(dict.fromkeys(path.resolve() for path in args.evidence_root))
+    if any(not path.is_dir() for path in root):
+        parser.error("each evidence root must be an existing directory")
     receipt = args.campaign_receipt.resolve() if args.campaign_receipt else None
     catalog = args.task_catalog.resolve() if args.task_catalog else None
     if catalog is not None and not catalog.is_file():

@@ -328,3 +328,29 @@ def test_run_detail_api_exposes_recorded_elapsed_scope_and_trajectory_metrics(tm
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+def test_run_http_reads_trajectories_from_second_evidence_root(tmp_path):
+    current, historical = tmp_path / "current", tmp_path / "historical"
+    current.mkdir()
+    run = historical / "20240101T000000Z-saved"
+    run.mkdir(parents=True)
+    (run / "report.json").write_text(json.dumps({"run_id": run.name}))
+    (run / "traces.jsonl").write_text(
+        json.dumps({"traces": [{"id": "saved", "info": {"kernel_termination": "submitted"}}]})
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler((current, historical)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, _, body = request(server, f"/api/runs/{run.name}?trajectory=saved")
+        assert status == 200
+        payload = json.loads(body)
+        assert payload["run"]["evidence_available"] is True
+        assert payload["trajectories"][0]["id"] == "saved"
+        assert payload["trajectories"][0]["outcome"]["submitted"] is True
+        assert payload["warnings"] == []
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
