@@ -119,3 +119,37 @@ def test_missing_exports_distinguish_preparation_and_failed_execution():
     traces, warnings = data.saved_traces({"report": {"status": "failed"}})
     assert not traces
     assert "diagnostics" in warnings[0]
+
+
+def test_multiple_evidence_roots_keep_historical_and_new_runs(tmp_path):
+    historical = tmp_path / "historical"
+    recent = tmp_path / "recent"
+    for root, run_id, trace_id in (
+        (historical, "20240101T000000Z-history", "old-trace"),
+        (recent, "20240102T000000Z-eval", "new-trace"),
+    ):
+        run = root / run_id
+        run.mkdir(parents=True)
+        (run / "report.json").write_text(json.dumps({"run_id": run_id}))
+        (run / "traces.jsonl").write_text(json.dumps({"traces": [{"id": trace_id}]}))
+    records = data.run_records((recent, historical))
+    available = [record for record in records if record.get("evidence_available")]
+    assert {record["id"] for record in available} == {
+        "20240101T000000Z-history",
+        "20240102T000000Z-eval",
+    }
+    index = data.trajectory_index((recent, historical))
+    assert {trace["id"] for trace in index["trajectories"]} == {"old-trace", "new-trace"}
+    assert len(data.discover_runs((recent, recent.resolve()))) == 1
+
+
+def test_multiple_roots_reject_distinct_snapshots_with_same_run_id(tmp_path):
+    import pytest
+
+    roots = (tmp_path / "first", tmp_path / "second")
+    for root in roots:
+        run = root / "20240101T000000Z-duplicate"
+        run.mkdir(parents=True)
+        (run / "report.json").write_text(json.dumps({"run_id": run.name}))
+    with pytest.raises(ValueError, match="multiple evidence roots"):
+        data.discover_runs(roots)
