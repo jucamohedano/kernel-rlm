@@ -1,0 +1,79 @@
+diff --git a/src/prime_rl/trainer/sft/data.py b/src/prime_rl/trainer/sft/data.py
+--- a/src/prime_rl/trainer/sft/data.py
++++ b/src/prime_rl/trainer/sft/data.py
+@@ -2,6 +2,7 @@
+ import time
+ import uuid
+ from collections import defaultdict
++from collections.abc import Iterable, Iterator
+ from pathlib import Path
+ from typing import Any, Callable, Literal, TypedDict, cast
+
+@@ -767,7 +768,66 @@
+         raise ValueError(f"Invalid dataset type: {config.type}")
+
+
+-def setup_dataloader(dataset: StatefulIterableDataset, config: DataConfig, cp: int) -> StatefulDataLoader:
++# Modified from Prime RL to add an isolated synthetic CPU test seam.
++def _grouped_synthetic_batches(bundle) -> Iterator[tuple[Batch, ...]]:
++    # No renderer or packing: every request is its own one-sequence forward.
++    for group in bundle.groups:
++        yield tuple(
++            cat_collate([{
++                "input_ids": list(member.input_ids[:-1]),
++                "target_ids": list(member.input_ids[1:]),
++                "loss_mask": [bool(x) for x in member.loss_mask[1:]],
++                "position_ids": list(range(width)),
++                "seq_lens": [width],
++                "mm_kwargs": None,
++                "mm_token_type_ids": None,
++            }])
++            for member in group.members
++            if (width := len(member.input_ids) - 1) > 0
++        )
++
++
++def grouped_synthetic_sft_loss(
++    groups: Iterable[tuple[Batch, ...]],
++    compute_loss: Callable[[Batch], tuple[Tensor, Tensor]],
++) -> Tensor:
++    """CPU seam test using the trainer's (loss_sum, token_count) contract."""
++    total, count = None, 0
++    for group in groups:
++        for row in group:
++            expected = int(row["loss_mask"].sum())
++            if expected == 0:
++                continue
++            loss, n = compute_loss(row)  # never pass two requests to a single forward
++            if loss.device.type != "cpu" or loss.ndim != 0 or int(n) != expected:
++                raise ValueError("expected CPU summed scalar loss and exact selected token count")
++            total = loss if total is None else total + loss
++            count += expected
++    if count == 0:
++        raise ValueError("no selected tokens in grouped batch")
++    return total / count
++
++
++def setup_dataloader(
++    dataset: StatefulIterableDataset | None,
++    config: DataConfig | None,
++    cp: int,
++    *,
++    grouped_synthetic: tuple[Path, str] | None = None,
++) -> StatefulDataLoader | Iterator[tuple[Batch, ...]]:
++    if grouped_synthetic is not None:
++        import os
++
++        from rlm_train.sft.bundle import load_bundle
++
++        if dataset is not None or config is not None or cp != 1:
++            raise ValueError("grouped synthetic data rejects stock dataset, packing config and context parallelism")
++        rank_env = {"WORLD_SIZE": "1", "RANK": "0", "LOCAL_RANK": "0", "DP_RANK": "0"}
++        if torch.distributed.is_initialized() or any(os.environ.get(k, v) != v for k, v in rank_env.items()):
++            raise ValueError("grouped synthetic data requires one CPU process")
++        return _grouped_synthetic_batches(load_bundle(*grouped_synthetic, allow_synthetic=True))
++    if dataset is None or config is None:
++        raise ValueError("stock loader requires a dataset and configuration")
+     row_len = config.seq_len * config.micro_batch_size
+     # Rows hold at most `row_len` tokens, so padding to a multiple of it pads every row to exactly `row_len`
+     pad_to_multiple_of = row_len if config.pad_to_seq_len else cp

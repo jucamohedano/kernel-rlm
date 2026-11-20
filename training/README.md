@@ -18,5 +18,9 @@ uv run rl @ training/configs/rlm-qwen3-30b-example.toml
 
 The config wires the `oolong` environment into `prime-rl`'s orchestrator/trainer/inference loop. See [`prime-rl`](https://github.com/PrimeIntellect-ai/prime-rl) for distributed launch options and deployment details.
 
+## Synthetic SFT preflight
+
+See [XS-2.1 SFT CPU preflight](sft/README.md) for the optional TRL/Trackio and Prime RL probes. They accept synthetic fixtures only and are not production launchers.
+
 ## Examples
 * [Qwen3-30B-A3B-Instruct-0527] on the original suite of tasks: [https://huggingface.co/mit-oasys/rlm-qwen3-30b-a3b-v0.1](https://huggingface.co/mit-oasys/rlm-qwen3-30b-a3b-v0.1)
