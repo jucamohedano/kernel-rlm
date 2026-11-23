@@ -39,7 +39,12 @@ def native_row() -> dict[str, Any]:
 
 
 def native_environment(
-    *, backend_factory, max_iterations: int, max_sub_calls: int, max_rollout_seconds: float
+    *,
+    backend_factory,
+    max_iterations: int,
+    max_sub_calls: int,
+    max_rollout_seconds: float,
+    sub_sampling_args: dict[str, Any] | None = None,
 ):
     """Wire into Harness-CG, in its own pinned environment.
 
@@ -61,6 +66,7 @@ def native_environment(
         max_iterations=max_iterations,
         max_sub_calls=max_sub_calls,
         max_rollout_seconds=max_rollout_seconds,
+        sub_sampling_args=sub_sampling_args,
         enable_sub_llm=True,
         orchestrator_prompt=False,
         default_answer_at_limit=False,
