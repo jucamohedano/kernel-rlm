@@ -1,12 +1,11 @@
-// Trusted author-controls checker. Link exactly one author implementation.
-// This is not a sandbox or a trustworthy verdict for an untrusted linked object.
+// Capture observations from one linked implementation. Same-process code is
+// not isolated and can falsify observations, diagnostics, or exit status.
 #include "contract.h"
 #include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
-#include <string>
 #include <vector>
 
 namespace {
@@ -38,26 +37,18 @@ void check_cuda(cudaError_t rc, const char* expression, int line) {
 #define CK(call) check_cuda((call), #call, __LINE__)
 
 // Non-null, naturally aligned interior pointer even for a logical length of 0.
-// Both guards, all inputs and every output slot are checked on readback.
 template <class T>
 class Guarded {
     static constexpr size_t PAD = 17;
     const char* name;
     T* storage = nullptr;
-    std::vector<T> expected;
     std::vector<T> initial;
 public:
-    Guarded(const char* label, const std::vector<T>& payload, cudaStream_t stream,
-            bool output = false) : name(label), expected(2 * PAD + payload.size(), T(0x523b)) {
-        std::fill_n(expected.begin(), PAD, T(0x318c));
-        std::copy(payload.begin(), payload.end(), expected.begin() + PAD);
-        initial = expected;
-        // An untouched output must fail even when its expected value is zero.
-        if (output) {
-            for (size_t i = PAD; i < PAD + payload.size(); ++i)
-                initial[i] = expected[i] == T(0x6195) ? T(0x18d6) : T(0x6195);
-        }
-        const size_t bytes = expected.size() * sizeof(T);
+    Guarded(const char* label, const std::vector<T>& payload, cudaStream_t stream)
+        : name(label), initial(2 * PAD + payload.size(), T(0x523b)) {
+        std::fill_n(initial.begin(), PAD, T(0x318c));
+        std::copy(payload.begin(), payload.end(), initial.begin() + PAD);
+        const size_t bytes = initial.size() * sizeof(T);
         CK(cudaMalloc(reinterpret_cast<void**>(&storage), bytes));
         CK(cudaMemcpyAsync(storage, initial.data(), bytes, cudaMemcpyHostToDevice, stream));
     }
@@ -65,25 +56,38 @@ public:
     Guarded& operator=(const Guarded&) = delete;
     ~Guarded() { CK(cudaFree(storage)); }
     T* data() const { return storage + PAD; }
-    void verify(cudaStream_t stream) const {
-        std::vector<T> got(expected.size());
+    // Check inputs in full. For outputs, check both guards and capture the interior.
+    void readback(cudaStream_t stream, std::vector<T>* output = nullptr) const {
+        std::vector<T> got(initial.size());
         CK(cudaMemcpyAsync(got.data(), storage, got.size() * sizeof(T), cudaMemcpyDeviceToHost, stream));
         CK(cudaStreamSynchronize(stream));
         for (size_t i = 0; i < got.size(); ++i) {
-            if (got[i] != expected[i]) {
+            if (output && i >= PAD && i < got.size() - PAD) continue;
+            if (got[i] != initial[i]) {
                 std::cerr << "mismatch " << name << '[' << (int64_t(i) - int64_t(PAD))
-                          << "]: expected " << expected[i] << ", got " << got[i] << '\n';
+                          << "]: expected " << initial[i] << ", got " << got[i] << '\n';
                 std::exit(1);
             }
         }
+        if (output) output->assign(got.begin() + PAD, got.end() - PAD);
     }
 };
+
+struct Observation {
+    std::vector<int32_t> sums, counts;
+};
+void print_line(const std::vector<int32_t>& values) {
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i != 0) std::cout << ' ';
+        std::cout << values[i];
+    }
+    std::cout << '\n';
+}
 }  // namespace
 
-int main(int argc, char** argv) {
-    const bool timing = argc == 2 && std::string(argv[1]) == "--time";
-    if (argc != 1 && !timing) {
-        std::cerr << "usage: device_check [--time] < fixture\n";
+int main(int argc, char**) {
+    if (argc != 1) {
+        std::cerr << "usage: device_check < fixture\n";
         return 2;
     }
     constexpr int OWNER = 262144;
@@ -99,8 +103,6 @@ int main(int argc, char** argv) {
     const auto ids = read_array<int32_t>("gather_index", n);
     const auto mask = read_array<uint32_t>("keep_words", nw);
     const auto vals = read_array<int16_t>("values", nv);
-    const auto sums = read_array<int32_t>("expected sums", rows);
-    const auto counts = read_array<int32_t>("expected counts", rows);
     std::cin >> std::ws;
     require_wire(std::cin.eof(), "trailing data");
     for (int i = 0; i < n; ++i) {
@@ -114,46 +116,31 @@ int main(int argc, char** argv) {
     Guarded<int32_t> offsets("row_offsets", offs, stream), gather("gather_index", ids, stream);
     Guarded<uint32_t> words("keep_words", mask, stream);
     Guarded<int16_t> values("values", vals, stream);
-    Guarded<int32_t> out("row_sums", sums, stream, true), cnt("row_counts", counts, stream, true);
-    auto invoke = [&]() {
+    auto capture = [&](int32_t sentinel) {
+        const std::vector<int32_t> fill(rows, sentinel);
+        Guarded<int32_t> out("row_sums", fill, stream), cnt("row_counts", fill, stream);
         CK(ragged_gather_reduce(rows, offsets.data(), gather.data(), words.data(), base,
                                 values.data(), out.data(), cnt.data(), stream));
+        offsets.readback(stream);
+        gather.readback(stream);
+        words.readback(stream);
+        values.readback(stream);
+        Observation obs;
+        out.readback(stream, &obs.sums);
+        cnt.readback(stream, &obs.counts);
+        return obs;
     };
-    auto verify = [&]() {
-        out.verify(stream);
-        cnt.verify(stream);
-        offsets.verify(stream);
-        gather.verify(stream);
-        words.verify(stream);
-        values.verify(stream);
-    };
-    invoke();
-    verify();
-    if (timing && rows != 0) {
-        // Hot fixture; stream work only. Not a qualified performance threshold.
-        constexpr int WARMUP = 10, REPEATS = 100, BATCHES = 5;
-        cudaEvent_t start, stop;
-        CK(cudaEventCreate(&start));
-        CK(cudaEventCreate(&stop));
-        for (int i = 0; i < WARMUP; ++i) invoke();
-        std::array<float, BATCHES> us;
-        for (float& t : us) {
-            CK(cudaEventRecord(start, stream));
-            for (int j = 0; j < REPEATS; ++j) invoke();
-            CK(cudaEventRecord(stop, stream));
-            CK(cudaEventSynchronize(stop));
-            float ms;
-            CK(cudaEventElapsedTime(&ms, start, stop));
-            t = ms * 1000 / REPEATS;
-        }
-        CK(cudaEventDestroy(start));
-        CK(cudaEventDestroy(stop));
-        verify();
-        std::cout << "unqualified_hot_batch_mean_us";
-        for (float t : us) std::cout << ' ' << t;
-        std::cout << '\n';
-    }
+    // A slot untouched on both runs cannot match the same reference twice.
+    const std::array<Observation, 2> runs{capture(0x6195), capture(0x18d6)};
     CK(cudaStreamDestroy(stream));
-    std::cout << "match\n";
+    std::cout << "ragged-observation-v1\n";
+    for (const auto& run : runs) {
+        print_line(run.sums);
+        print_line(run.counts);
+    }
+    if (!std::cout.flush()) {
+        std::cerr << "failed to write observation\n";
+        return 1;
+    }
     return 0;
 }

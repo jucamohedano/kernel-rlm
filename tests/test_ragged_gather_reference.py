@@ -13,14 +13,10 @@ def test_public_wire_matches_hand_example():
     # Entries 31,32,33 keep values 30,30,-7. Row 1 is empty. Entries 34,36
     # keep 12,-7. Dropped entries 30 and 35 have IDs outside the value view.
     assert public_fixture().to_wire() == (
-        "3 101 3 2\n"
-        "30 34 34 37\n"
-        "-1 103 103 101 102 262144 101\n"
-        "2147483648 23\n"
-        "-7 12 30\n"
-        "53 0 5\n"
-        "3 0 2\n"
+        "3 101 3 2\n30 34 34 37\n-1 103 103 101 102 262144 101\n2147483648 23\n-7 12 30\n"
     )
+    assert public_fixture().expected_sums == (53, 0, 5)
+    assert public_fixture().expected_counts == (3, 0, 2)
 
 
 def test_development_profiles_and_limits():
@@ -59,9 +55,10 @@ def test_development_wire_agrees_with_logical_oracle():
     for case, repeat in zip(development_fixtures(), development_fixtures(), strict=True):
         wire = case.to_wire()
         assert wire == repeat.to_wire()
-        header, offsets, ids, words, values, sums, counts = (
+        header, offsets, ids, words, values = (
             list(map(int, line.split())) for line in wire.splitlines()
         )
+        sums, counts = case.expected_sums, case.expected_counts
         rows, base, nvalues, nwords = header
         assert len(offsets) == rows + 1 and len(ids) == offsets[-1] - offsets[0]
         assert len(words) == nwords == (offsets[-1] + 31) // 32 and len(values) == nvalues

@@ -24,15 +24,13 @@ class WireFixture:
         return len(self.row_offsets) - 1
 
     def to_wire(self) -> str:
-        """One decimal field group per line, including lines for empty arrays."""
+        """Encode device inputs only; the comparator keeps expected outputs."""
         groups = (
             (self.rows, self.value_base, len(self.values), len(self.keep_words)),
             self.row_offsets,
             self.gather_index,
             self.keep_words,
             self.values,
-            self.expected_sums,
-            self.expected_counts,
         )
         return "".join(" ".join(map(str, group)) + "\n" for group in groups)
 
